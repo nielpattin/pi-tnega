@@ -1,9 +1,0 @@
-{
-  "name": "pi-teams-local",
-  "private": true,
-  "pi": {
-    "extensions": [
-      "./extensions/index.ts"
-    ]
-  }
-}

@@ -1,0 +1,18 @@
+{
+  "phases": {
+    "planning": {
+      "model": { "provider": "kinda", "id": "cx/gpt-5.4" },
+      "thinking": "high",
+      "activeTools": ["find_files", "fff_multi_grep", "plannotator_submit_plan"],
+      "statusLabel": "⏸ plan",
+      "systemPrompt": "[PLANNING]\nPlan file: ${planFilePath}"
+    },
+    "executing": {
+      "model": { "provider": "kinda", "id": "cx/gpt-5.4" },
+      "thinking": "medium",
+      "activeTools": ["edit, read", "bash", "write", "find_files", "fff_multi_grep"],
+      "statusLabel": "",
+      "systemPrompt": "[EXECUTING]\nRemaining steps:\n${todoList}"
+    }
+  }
+}

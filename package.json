@@ -10,13 +10,13 @@
     "@mariozechner/pi-ai": "^0.62.0",
     "@mariozechner/pi-coding-agent": "^0.62.0",
     "@mariozechner/pi-tui": "^0.62.0",
-    "@sinclair/typebox": "^0.34.48",
+    "@sinclair/typebox": "^0.34.49",
     "@zenobius/pi-extension-config": "^0.2.0",
     "fzf": "^0.5.2"
   },
   "devDependencies": {
-    "@types/node": "^25.5.0",
-    "typescript": "^6.0.2",
-    "vitest": "^4.1.1"
+    "@types/node": "^25.6.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.4"
   }
 }

@@ -1,44 +1,34 @@
 {
   "collapseChangelog": true,
   "compaction": {
-    "enabled": false
+    "enabled": true
   },
-  "defaultModel": "gpt-5.4",
-  "defaultProvider": "openai-codex",
-  "defaultThinkingLevel": "high",
+  "defaultModel": "cx/gpt-5.4",
+  "defaultProvider": "kinda",
+  "defaultThinkingLevel": "medium",
   "doubleEscapeAction": "none",
   "editorPaddingX": 0,
   "enableSkillCommands": true,
-  "enabledModels": [],
+  "enabledModels": [
+    "kinda/cx/gpt-5.4",
+    "kinda/cx/gpt-5.4-mini",
+    "openai-codex/gpt-5.4",
+    "openai-codex/gpt-5.4-mini"
+  ],
   "extensions": [
-    "-extensions\\theme-cycle\\index.ts",
-    "-extensions\\figma-start.ts",
-    "-extensions\\prompt-stash.ts",
-    "-extensions\\agents-discovery\\index.ts",
-    "-extensions\\context-scope.ts",
-    "-extensions\\files.ts",
-    "+extensions\\tps.ts",
-    "-extensions\\diff-renderer\\index.ts",
+    "+extensions\\files.ts",
     "+extensions\\tool-selector\\index.ts",
     "-extensions\\powerline-footer\\index.ts",
-    "-extensions\\pwsh\\index.ts",
-    "+extensions\\tab-status\\index.ts",
-    "-extensions\\welcome\\index.ts",
-    "-extensions\\smart-sessions\\index.ts",
-    "-extensions\\notification\\index.ts"
+    "+extensions\\notification\\index.ts",
+    "-extensions\\web-reader.ts"
   ],
   "followUpMode": "one-at-a-time",
   "hideThinkingBlock": false,
   "images": {
-    "autoResize": true
+    "autoResize": false
   },
-  "lastChangelogVersion": "0.66.1",
-  "npmCommand": [
-    "npm"
-  ],
+  "lastChangelogVersion": "0.68.0",
   "packages": [
-    "npm:pi-mcporter",
-    "npm:pi-promptsmith",
     {
       "extensions": [
         "-extensions\\index.ts"
@@ -46,10 +36,14 @@
       "source": "C:\\Users\\niel\\.pi\\agent\\extensions\\pi-teams"
     },
     "npm:pi-verbosity-control",
-    "git:https://github.com/badlogic/pi-diff-review",
     "git:github.com/raunovillberg/im-pi-eccable",
-    "npm:pi-websearch-router",
-    "git:https://github.com/calesennett/pi-codex-fast"
+    "git:https://github.com/calesennett/pi-codex-fast",
+    "npm:glimpseui",
+    "git:github.com/devkade/pi-ask-tool",
+    "git:github.com/fluxgear/pi-thinking-steps",
+    "npm:pi-fff",
+    "npm:@plannotator/pi-extension",
+    "npm:pi-mcp-adapter"
   ],
   "pi-codex-fast": {
     "enabled": false
@@ -57,7 +51,8 @@
   "prompts": [
     "+prompts\\dot-commit.md",
     "-prompts/md2pdf.md",
-    "-prompts/dot-commit.md"
+    "-prompts/dot-commit.md",
+    "-prompts\\commit.md"
   ],
   "quietStartup": false,
   "skills": [

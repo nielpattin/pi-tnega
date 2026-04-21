@@ -1,0 +1,17 @@
+{
+  "settings": {
+    "toolPrefix": "short",
+    "idleTimeout": 10,
+    "directTools": false
+  },
+  "mcpServers": {
+    "exa": {
+      "command": "npx",
+      "args": ["-y", "exa-mcp-server"],
+      "env": {
+        "EXA_API_KEY": "${EXA_API_KEY}"
+      },
+      "lifecycle": "lazy"
+    }
+  }
+}

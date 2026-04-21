@@ -4,6 +4,7 @@
         "openai-codex/gpt-5.3-codex": "low",
         "openai-codex/gpt-5.4": "low",
         "openai-codex/gpt-5.4-mini": "low",
-        "kinda/cx/gpt-5.4-mini": "low"
+        "kinda/cx/gpt-5.4-mini": "high",
+        "kinda/cx/gpt-5.4": "low"
     }
 }
