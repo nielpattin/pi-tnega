@@ -1,26 +1,21 @@
 ---
-description: Run worker subagent to commit staged changes in the current repo
+description: Generate a Conventional Commit message for staged changes
 ---
 
-<raw_args>$@</raw_args>
+Generate a commit message for the current staged changes (`git diff --cached`).
 
-Call the `task` tool with exactly one worker task.
+Follow Conventional Commits format:
 
-Build the worker `task` as a detailed commit request that:
-- commits the already staged changes in the current repository
-- inspects the staged diff before choosing the commit message
-- uses normal `git` commands for this repository
-- writes a conventional commit message that matches the staged changes
-- includes the exact `<raw_args>` text as extra commit guidance when it is non-empty after trimming
-- uses exactly `Execute your commit workflow now.` when `<raw_args>` is empty after trimming
-
-Use this shape:
-
-```json
-{
-  "agent": "worker",
-  "summary": "Commit staged changes",
-  "task": "<detailed worker instructions>",
-  "skills": ["writing-git-commits"]
-}
 ```
+type(scope): description
+
+[optional body]
+```
+
+Types: feat, fix, refactor, docs, test, chore, perf, ci, style, build
+
+- Keep the subject line under 72 characters
+- Use imperative mood ("add" not "added")
+- Body explains WHY, not WHAT (the diff shows what)
+
+$@

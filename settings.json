@@ -5,7 +5,7 @@
   },
   "defaultModel": "cx/gpt-5.4",
   "defaultProvider": "kinda",
-  "defaultThinkingLevel": "medium",
+  "defaultThinkingLevel": "high",
   "doubleEscapeAction": "none",
   "editorPaddingX": 0,
   "enableSkillCommands": true,
@@ -25,9 +25,9 @@
   "followUpMode": "one-at-a-time",
   "hideThinkingBlock": false,
   "images": {
-    "autoResize": false
+    "autoResize": true
   },
-  "lastChangelogVersion": "0.68.0",
+  "lastChangelogVersion": "0.68.1",
   "packages": [
     {
       "extensions": [
@@ -38,12 +38,19 @@
     "npm:pi-verbosity-control",
     "git:github.com/raunovillberg/im-pi-eccable",
     "git:https://github.com/calesennett/pi-codex-fast",
-    "npm:glimpseui",
     "git:github.com/devkade/pi-ask-tool",
     "git:github.com/fluxgear/pi-thinking-steps",
-    "npm:pi-fff",
+    {
+      "source": "npm:pi-fff",
+      "extensions": [
+        "-index.ts"
+      ]
+    },
     "npm:@plannotator/pi-extension",
-    "npm:pi-mcp-adapter"
+    "npm:pi-mcp-adapter",
+    "npm:pi-simplify",
+    "npm:pi-manage-todo-list",
+    "npm:pi-design-deck"
   ],
   "pi-codex-fast": {
     "enabled": false
@@ -52,7 +59,7 @@
     "+prompts\\dot-commit.md",
     "-prompts/md2pdf.md",
     "-prompts/dot-commit.md",
-    "-prompts\\commit.md"
+    "+prompts\\commit.md"
   ],
   "quietStartup": false,
   "skills": [
@@ -82,5 +89,10 @@
     "-themes\\nord.json"
   ],
   "transport": "websocket",
-  "treeFilterMode": "no-tools"
+  "treeFilterMode": "no-tools",
+  "designDeck": {},
+  "retry": {
+    "enabled": true,
+    "maxRetries": 8
+  }
 }
