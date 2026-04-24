@@ -13,7 +13,9 @@
     "kinda/cx/gpt-5.4",
     "kinda/cx/gpt-5.4-mini",
     "openai-codex/gpt-5.4",
-    "openai-codex/gpt-5.4-mini"
+    "openai-codex/gpt-5.4-mini",
+    "openai-codex/gpt-5.5",
+    "kinda/cx/gpt-5.5"
   ],
   "extensions": [
     "+extensions\\files.ts",
@@ -27,7 +29,7 @@
   "images": {
     "autoResize": true
   },
-  "lastChangelogVersion": "0.68.1",
+  "lastChangelogVersion": "0.70.0",
   "packages": [
     {
       "extensions": [

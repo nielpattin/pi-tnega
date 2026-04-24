@@ -163,3 +163,4 @@ session-manager
 *.bak
 mcp-cache.json
 pi-fff
+mcp-oauth/

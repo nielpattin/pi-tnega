@@ -11,7 +11,11 @@
       "env": {
         "EXA_API_KEY": "${EXA_API_KEY}"
       },
-      "lifecycle": "lazy"
+      "lifecycle": "keep-alive"
+    },
+    "atlassian-rovo": {
+      "url": "https://mcp.atlassian.com/v1/mcp",
+      "auth": "oauth"
     }
   }
 }
