@@ -1,14 +1,14 @@
 {
   "phases": {
     "planning": {
-      "model": { "provider": "kinda", "id": "cx/gpt-5.4" },
+      "model": { "provider": "openai-codex", "id": "gpt-5.5" },
       "thinking": "high",
       "activeTools": ["find_files", "fff_multi_grep", "plannotator_submit_plan"],
       "statusLabel": "⏸ plan",
       "systemPrompt": "[PLANNING]\nPlan file: ${planFilePath}"
     },
     "executing": {
-      "model": { "provider": "kinda", "id": "cx/gpt-5.4" },
+      "model": { "provider": "openai-codex", "id": "gpt-5.5" },
       "thinking": "medium",
       "activeTools": ["edit, read", "bash", "write", "find_files", "fff_multi_grep"],
       "statusLabel": "",

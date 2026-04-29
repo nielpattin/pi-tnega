@@ -3,9 +3,9 @@
   "compaction": {
     "enabled": true
   },
-  "defaultModel": "cx/gpt-5.4",
-  "defaultProvider": "kinda",
-  "defaultThinkingLevel": "high",
+  "defaultModel": "deepseek-v4-flash",
+  "defaultProvider": "deepseek",
+  "defaultThinkingLevel": "low",
   "doubleEscapeAction": "none",
   "editorPaddingX": 0,
   "enableSkillCommands": true,
@@ -15,21 +15,28 @@
     "openai-codex/gpt-5.4",
     "openai-codex/gpt-5.4-mini",
     "openai-codex/gpt-5.5",
-    "kinda/cx/gpt-5.5"
+    "kinda/cx/gpt-5.5",
+    "deepseek/deepseek-v4-flash",
+    "deepseek/deepseek-v4-pro",
+    "kinda/cf/@cf/moonshotai/kimi-k2.6",
+    "google/gemini-3-flash-preview",
+    "google/gemini-3.1-flash-lite-preview",
+    "google/gemini-3.1-pro-preview"
   ],
   "extensions": [
     "+extensions\\files.ts",
     "+extensions\\tool-selector\\index.ts",
     "-extensions\\powerline-footer\\index.ts",
     "+extensions\\notification\\index.ts",
-    "-extensions\\web-reader.ts"
+    "-extensions\\web-reader.ts",
+    "-extensions\\simplify-test.ts"
   ],
   "followUpMode": "one-at-a-time",
   "hideThinkingBlock": false,
   "images": {
     "autoResize": true
   },
-  "lastChangelogVersion": "0.70.0",
+  "lastChangelogVersion": "0.70.6",
   "packages": [
     {
       "extensions": [
@@ -39,20 +46,52 @@
     },
     "npm:pi-verbosity-control",
     "git:github.com/raunovillberg/im-pi-eccable",
-    "git:https://github.com/calesennett/pi-codex-fast",
-    "git:github.com/devkade/pi-ask-tool",
+    {
+      "source": "git:https://github.com/calesennett/pi-codex-fast",
+      "extensions": [
+        "-extensions\\codex-fast.ts"
+      ]
+    },
+    {
+      "source": "git:github.com/devkade/pi-ask-tool",
+      "extensions": [
+        "-src\\index.ts"
+      ]
+    },
     "git:github.com/fluxgear/pi-thinking-steps",
     {
       "source": "npm:pi-fff",
       "extensions": [
-        "-index.ts"
+        "+index.ts"
       ]
     },
-    "npm:@plannotator/pi-extension",
+    {
+      "source": "npm:@plannotator/pi-extension",
+      "extensions": [
+        "-"
+      ],
+      "skills": [
+        "-skills\\plannotator-compound\\SKILL.md"
+      ]
+    },
     "npm:pi-mcp-adapter",
     "npm:pi-simplify",
     "npm:pi-manage-todo-list",
-    "npm:pi-design-deck"
+    {
+      "source": "npm:pi-design-deck",
+      "extensions": [
+        "-index.ts"
+      ],
+      "skills": [
+        "-skills\\design-deck\\SKILL.md"
+      ],
+      "prompts": [
+        "-prompts\\deck-discover.md",
+        "-prompts\\deck-plan.md",
+        "-prompts\\deck.md"
+      ]
+    },
+    "npm:@howaboua/pi-auto-trees"
   ],
   "pi-codex-fast": {
     "enabled": false

@@ -164,3 +164,4 @@ session-manager
 mcp-cache.json
 pi-fff
 mcp-oauth/
+mcp-npx-cache.json
