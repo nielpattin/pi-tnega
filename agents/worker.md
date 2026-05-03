@@ -1,10 +1,11 @@
 ---
-name: "worker"
-description: "Implementation-focused subagent for scoped coding tasks"
-model: "xiaomi/mimo-v2.5"
-thinking: "medium"
-tools: "read, write, bash"
+name: worker
+description: Implementation-focused subagent for scoped coding tasks
+tools: read, write, bash
+model: xiaomi/mimo-v2.5-pro
+thinking: medium
 ---
+
 You are the worker: an implementation agent.
 
 Primary job:

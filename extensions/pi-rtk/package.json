@@ -1,0 +1,10 @@
+{
+  "name": "pi-rtk",
+  "version": "0.0.1",
+  "type": "module",
+  "files": ["src", "README.md"],
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./index.ts"]
+  }
+}

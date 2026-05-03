@@ -3,9 +3,9 @@
   "compaction": {
     "enabled": true
   },
-  "defaultModel": "mimo-v2.5-pro",
-  "defaultProvider": "xiaomi",
-  "defaultThinkingLevel": "minimal",
+  "defaultModel": "gpt-5.4-mini",
+  "defaultProvider": "github-copilot",
+  "defaultThinkingLevel": "medium",
   "doubleEscapeAction": "none",
   "editorPaddingX": 0,
   "enableSkillCommands": true,
@@ -34,10 +34,12 @@
     "-extensions\\cute-minimal-mode.ts",
     "+extensions\\context-stats.ts",
     "-extensions\\files.ts",
-    "-extensions\\stats.ts"
+    "-extensions\\stats.ts",
+    "-extensions\\git-guard.ts",
+    "-extensions\\rg-guard.ts"
   ],
   "followUpMode": "all",
-  "hideThinkingBlock": false,
+  "hideThinkingBlock": true,
   "images": {
     "autoResize": true
   },
@@ -104,23 +106,6 @@
     },
     "git:github.com/Jon-Vii/pi-imagegen",
     {
-      "source": "npm:pi-subagents",
-      "extensions": [
-        "-src\\extension\\index.ts"
-      ],
-      "skills": [
-        "-skills\\pi-subagents\\SKILL.md"
-      ],
-      "prompts": [
-        "-prompts\\gather-context-and-clarify.md",
-        "-prompts\\parallel-cleanup.md",
-        "-prompts\\parallel-context-build.md",
-        "-prompts\\parallel-handoff-plan.md",
-        "-prompts\\parallel-research.md",
-        "-prompts\\parallel-review.md"
-      ]
-    },
-    {
       "source": "npm:pi-intercom",
       "extensions": [
         "-index.ts"
@@ -129,15 +114,15 @@
         "-skills\\pi-intercom\\SKILL.md"
       ]
     },
-    "npm:@ff-labs/pi-fff"
+    {
+      "source": "npm:@ff-labs/pi-fff",
+      "extensions": [
+        "-src\\index.ts"
+      ]
+    },
+    "npm:pi-subagents"
   ],
-  "pi-codex-fast": {
-    "enabled": false
-  },
   "prompts": [
-    "+prompts\\dot-commit.md",
-    "-prompts/md2pdf.md",
-    "-prompts/dot-commit.md",
     "+prompts\\commit.md"
   ],
   "quietStartup": false,
@@ -168,7 +153,7 @@
     "-themes\\gruvbox.json",
     "-themes\\nord.json"
   ],
-  "transport": "websocket-cached",
+  "transport": "auto",
   "treeFilterMode": "no-tools",
   "designDeck": {},
   "retry": {
