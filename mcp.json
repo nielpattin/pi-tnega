@@ -16,6 +16,10 @@
     "atlassian-rovo": {
       "url": "https://mcp.atlassian.com/v1/mcp",
       "auth": "oauth"
+    },
+    "aspire": {
+      "command": "aspire",
+      "args": ["agent", "mcp"]
     }
   }
 }

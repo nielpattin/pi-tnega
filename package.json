@@ -3,7 +3,18 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint": "oxlint -c .oxlintrc.json",
+    "lint:fix": "oxlint -c .oxlintrc.json --fix",
+    "fmt": "oxfmt -c .oxfmtrc.json",
+    "fmt:check": "oxfmt -c .oxfmtrc.json --check",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,mjs,cjs}": [
+      "pnpm run lint:fix",
+      "pnpm run fmt"
+    ]
   },
   "dependencies": {
     "@mariozechner/pi-agent-core": "^0.70.2",
@@ -16,6 +27,11 @@
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "oxfmt": "^0.47.0",
+    "oxlint": "^1.62.0",
+    "oxlint-tsgolint": "^0.22.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5",
     "yoctocolors": "2.1.2"

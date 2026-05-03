@@ -1,7 +1,7 @@
 ---
 name: "worker"
 description: "Implementation-focused subagent for scoped coding tasks"
-model: "openai-codex/gpt-5.4-mini"
+model: "xiaomi/mimo-v2.5"
 thinking: "medium"
 tools: "read, write, bash"
 ---

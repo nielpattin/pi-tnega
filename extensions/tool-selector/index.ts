@@ -64,7 +64,9 @@ export default function toolsExtension(pi: ExtensionAPI) {
 			}
 		}
 
-		const baseTools = (savedTools ?? pi.getActiveTools()).filter((tool: string) => allToolNames.includes(tool));
+		const baseTools = (savedTools ?? pi.getActiveTools()).filter((tool: string) =>
+			allToolNames.includes(tool),
+		);
 		enabledTools = new Set(withDefaultBuiltins(baseTools, allToolNames));
 		applyTools();
 	}
@@ -137,16 +139,6 @@ export default function toolsExtension(pi: ExtensionAPI) {
 
 	// Restore state on session start
 	pi.on("session_start", async (_event, ctx) => {
-		restoreFromBranch(ctx);
-	});
-
-	// Restore state when navigating the session tree
-	pi.on("session_tree", async (_event, ctx) => {
-		restoreFromBranch(ctx);
-	});
-
-	// Restore state after forking
-	pi.on("session_fork", async (_event, ctx) => {
 		restoreFromBranch(ctx);
 	});
 }

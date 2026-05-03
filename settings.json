@@ -3,40 +3,45 @@
   "compaction": {
     "enabled": true
   },
-  "defaultModel": "deepseek-v4-flash",
-  "defaultProvider": "deepseek",
-  "defaultThinkingLevel": "low",
+  "defaultModel": "mimo-v2.5-pro",
+  "defaultProvider": "xiaomi",
+  "defaultThinkingLevel": "minimal",
   "doubleEscapeAction": "none",
   "editorPaddingX": 0,
   "enableSkillCommands": true,
   "enabledModels": [
-    "kinda/cx/gpt-5.4",
-    "kinda/cx/gpt-5.4-mini",
     "openai-codex/gpt-5.4",
     "openai-codex/gpt-5.4-mini",
     "openai-codex/gpt-5.5",
-    "kinda/cx/gpt-5.5",
     "deepseek/deepseek-v4-flash",
     "deepseek/deepseek-v4-pro",
-    "kinda/cf/@cf/moonshotai/kimi-k2.6",
+    "xiaomi/mimo-v2.5-pro",
+    "xiaomi/mimo-v2.5",
+    "github-copilot/gpt-5.4-mini",
+    "github-copilot/claude-haiku-4.5",
+    "github-copilot/gemini-3-flash-preview",
+    "github-copilot/gemini-3.1-pro-preview",
     "google/gemini-3-flash-preview",
     "google/gemini-3.1-flash-lite-preview",
     "google/gemini-3.1-pro-preview"
   ],
   "extensions": [
-    "+extensions\\files.ts",
     "+extensions\\tool-selector\\index.ts",
     "-extensions\\powerline-footer\\index.ts",
-    "+extensions\\notification\\index.ts",
     "-extensions\\web-reader.ts",
-    "-extensions\\simplify-test.ts"
+    "-extensions\\simplify-test.ts",
+    "-extensions\\notification\\index.ts",
+    "-extensions\\cute-minimal-mode.ts",
+    "+extensions\\context-stats.ts",
+    "-extensions\\files.ts",
+    "-extensions\\stats.ts"
   ],
-  "followUpMode": "one-at-a-time",
+  "followUpMode": "all",
   "hideThinkingBlock": false,
   "images": {
     "autoResize": true
   },
-  "lastChangelogVersion": "0.70.6",
+  "lastChangelogVersion": "0.72.1",
   "packages": [
     {
       "extensions": [
@@ -44,7 +49,12 @@
       ],
       "source": "C:\\Users\\niel\\.pi\\agent\\extensions\\pi-teams"
     },
-    "npm:pi-verbosity-control",
+    {
+      "source": "npm:pi-verbosity-control",
+      "extensions": [
+        "+index.ts"
+      ]
+    },
     "git:github.com/raunovillberg/im-pi-eccable",
     {
       "source": "git:https://github.com/calesennett/pi-codex-fast",
@@ -58,25 +68,20 @@
         "-src\\index.ts"
       ]
     },
-    "git:github.com/fluxgear/pi-thinking-steps",
     {
-      "source": "npm:pi-fff",
+      "source": "git:github.com/fluxgear/pi-thinking-steps",
       "extensions": [
-        "+index.ts"
-      ]
-    },
-    {
-      "source": "npm:@plannotator/pi-extension",
-      "extensions": [
-        "-"
-      ],
-      "skills": [
-        "-skills\\plannotator-compound\\SKILL.md"
+        "-index.ts"
       ]
     },
     "npm:pi-mcp-adapter",
     "npm:pi-simplify",
-    "npm:pi-manage-todo-list",
+    {
+      "source": "npm:pi-manage-todo-list",
+      "extensions": [
+        "-src\\index.ts"
+      ]
+    },
     {
       "source": "npm:pi-design-deck",
       "extensions": [
@@ -91,7 +96,40 @@
         "-prompts\\deck.md"
       ]
     },
-    "npm:@howaboua/pi-auto-trees"
+    {
+      "source": "npm:@howaboua/pi-auto-trees",
+      "extensions": [
+        "-index.ts"
+      ]
+    },
+    "git:github.com/Jon-Vii/pi-imagegen",
+    {
+      "source": "npm:pi-subagents",
+      "extensions": [
+        "-src\\extension\\index.ts"
+      ],
+      "skills": [
+        "-skills\\pi-subagents\\SKILL.md"
+      ],
+      "prompts": [
+        "-prompts\\gather-context-and-clarify.md",
+        "-prompts\\parallel-cleanup.md",
+        "-prompts\\parallel-context-build.md",
+        "-prompts\\parallel-handoff-plan.md",
+        "-prompts\\parallel-research.md",
+        "-prompts\\parallel-review.md"
+      ]
+    },
+    {
+      "source": "npm:pi-intercom",
+      "extensions": [
+        "-index.ts"
+      ],
+      "skills": [
+        "-skills\\pi-intercom\\SKILL.md"
+      ]
+    },
+    "npm:@ff-labs/pi-fff"
   ],
   "pi-codex-fast": {
     "enabled": false
@@ -110,9 +148,10 @@
     "-skills\\agent-browser\\SKILL.md",
     "+skills\\drawio-diagrams-enhanced\\SKILL.md"
   ],
-  "steeringMode": "one-at-a-time",
+  "steeringMode": "all",
   "terminal": {
-    "clearOnShrink": false
+    "clearOnShrink": false,
+    "showTerminalProgress": true
   },
   "theme": "catppuccin-mocha",
   "themes": [
@@ -129,11 +168,14 @@
     "-themes\\gruvbox.json",
     "-themes\\nord.json"
   ],
-  "transport": "websocket",
+  "transport": "websocket-cached",
   "treeFilterMode": "no-tools",
   "designDeck": {},
   "retry": {
     "enabled": true,
     "maxRetries": 8
-  }
+  },
+  "npmCommand": [
+    "bun"
+  ]
 }
