@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function (pi: ExtensionAPI) {
 	// pi.registerProvider("openai-codex", {
@@ -72,13 +72,6 @@ export default function (pi: ExtensionAPI) {
 				compat: {
 					requiresReasoningContentOnAssistantMessages: true,
 					thinkingFormat: "deepseek",
-					reasoningEffortMap: {
-						minimal: "high",
-						low: "high",
-						medium: "high",
-						high: "high",
-						xhigh: "max",
-					},
 				},
 			},
 			{
@@ -97,13 +90,6 @@ export default function (pi: ExtensionAPI) {
 				compat: {
 					requiresReasoningContentOnAssistantMessages: true,
 					thinkingFormat: "deepseek",
-					reasoningEffortMap: {
-						minimal: "high",
-						low: "high",
-						medium: "high",
-						high: "high",
-						xhigh: "max",
-					},
 				},
 			},
 			{
@@ -273,53 +259,83 @@ export default function (pi: ExtensionAPI) {
 		],
 	});
 
-	pi.registerProvider("cmd", {
-		baseUrl: "http://localhost:3100/v1",
-		apiKey: "COMMANDCODE_API_KEY",
-		api: "openai-completions",
+	pi.registerProvider("freemodel", {
+		baseUrl: "https://api.freemodel.dev/v1",
+		api: "openai-responses",
+		apiKey: "FREEMODEL_API_KEY",
 		models: [
 			{
-				id: "deepseek/deepseek-v4-flash",
-				name: "DeepSeek V4 Flash",
+				id: "gpt-5.5",
+				name: "GPT-5.5 (FreeModel)",
 				reasoning: true,
-				input: ["text"],
-				cost: {
-					input: 0.14,
-					output: 0.28,
-					cacheRead: 0.0028,
-					cacheWrite: 0,
+				thinkingLevelMap: {
+					xhigh: "xhigh",
+					minimal: "low",
 				},
-				contextWindow: 1000000,
-				maxTokens: 384000,
-			},
-			{
-				id: "deepseek/deepseek-v4-pro",
-				name: "DeepSeek V4 Pro",
-				reasoning: true,
-				input: ["text"],
-				cost: {
-					input: 0.435,
-					output: 0.87,
-					cacheRead: 0.003625,
-					cacheWrite: 0,
-				},
-				contextWindow: 1000000,
-				maxTokens: 384000,
-			},
-			{
-				id: "moonshotai/Kimi-K2.6",
-				name: "Kimi K2.6",
-				reasoning: true,
 				input: ["text", "image"],
+				contextWindow: 272000,
+				maxTokens: 128000,
 				cost: {
-					input: 0.95,
-					output: 4,
-					cacheRead: 0.16,
+					input: 5,
+					output: 30,
+					cacheRead: 0.5,
 					cacheWrite: 0,
 				},
-				contextWindow: 262144,
-				maxTokens: 262144,
+				compat: {
+					supportsReasoningEffort: true,
+					supportsStore: false,
+				},
 			},
 		],
 	});
+
+	// pi.registerProvider("cmd", {
+	// 	baseUrl: "http://localhost:3100/v1",
+	// 	apiKey: "COMMANDCODE_API_KEY",
+	// 	api: "openai-completions",
+	// 	models: [
+	// 		{
+	// 			id: "deepseek/deepseek-v4-flash",
+	// 			name: "DeepSeek V4 Flash",
+	// 			reasoning: true,
+	// 			input: ["text"],
+	// 			cost: {
+	// 				input: 0.14,
+	// 				output: 0.28,
+	// 				cacheRead: 0.0028,
+	// 				cacheWrite: 0,
+	// 			},
+	// 			contextWindow: 1000000,
+	// 			maxTokens: 384000,
+	// 		},
+	// 		{
+	// 			id: "deepseek/deepseek-v4-pro",
+	// 			name: "DeepSeek V4 Pro",
+	// 			reasoning: true,
+	// 			input: ["text"],
+	// 			cost: {
+	// 				input: 0.435,
+	// 				output: 0.87,
+	// 				cacheRead: 0.003625,
+	// 				cacheWrite: 0,
+	// 			},
+	// 			contextWindow: 1000000,
+	// 			maxTokens: 384000,
+	// 		},
+	// 		{
+	// 			id: "moonshotai/Kimi-K2.6",
+	// 			name: "Kimi K2.6",
+	// 			reasoning: true,
+	// 			input: ["text", "image"],
+	// 			cost: {
+	// 				input: 0.95,
+	// 				output: 4,
+	// 				cacheRead: 0.16,
+	// 				cacheWrite: 0,
+	// 			},
+	// 			contextWindow: 262144,
+	// 			maxTokens: 262144,
+	// 		},
+	// 	],
+	// });
 }

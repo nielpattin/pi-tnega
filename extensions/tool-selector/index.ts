@@ -9,9 +9,9 @@
  * 2. Use /tools to open the tool selector
  */
 
-import type { ExtensionAPI, ExtensionContext, ToolInfo } from "@mariozechner/pi-coding-agent";
-import { getSettingsListTheme } from "@mariozechner/pi-coding-agent";
-import { Container, type SettingItem, SettingsList } from "@mariozechner/pi-tui";
+import type { ExtensionAPI, ExtensionContext, ToolInfo } from "@earendil-works/pi-coding-agent";
+import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
+import { Container, type SettingItem, SettingsList } from "@earendil-works/pi-tui";
 
 // State persisted to session
 interface ToolsState {
@@ -64,9 +64,7 @@ export default function toolsExtension(pi: ExtensionAPI) {
 			}
 		}
 
-		const baseTools = (savedTools ?? pi.getActiveTools()).filter((tool: string) =>
-			allToolNames.includes(tool),
-		);
+		const baseTools = (savedTools ?? pi.getActiveTools()).filter((tool: string) => allToolNames.includes(tool));
 		enabledTools = new Set(withDefaultBuiltins(baseTools, allToolNames));
 		applyTools();
 	}

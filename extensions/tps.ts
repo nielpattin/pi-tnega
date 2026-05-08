@@ -8,13 +8,8 @@
  * Originally from: https://github.com/badlogic/pi-mono/blob/main/.pi/extensions/tps.ts
  */
 
-import type { AssistantMessage } from "@mariozechner/pi-ai";
-import type {
-	ExtensionAPI,
-	AgentEndEvent,
-	ExtensionContext,
-	CustomEntry,
-} from "@mariozechner/pi-coding-agent";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { ExtensionAPI, AgentEndEvent, ExtensionContext, CustomEntry } from "@earendil-works/pi-coding-agent";
 
 // Event types not exported from main package - define locally
 interface TurnStartEvent {

@@ -9,10 +9,7 @@ import type {
 	StatusLineSegment,
 	StatusLineSegmentId,
 } from "./types.ts";
-import {
-	normalizeCompactExtensionStatus,
-	normalizeExtensionStatusValue,
-} from "./powerline-config.ts";
+import { normalizeCompactExtensionStatus, normalizeExtensionStatusValue } from "./powerline-config.ts";
 import { fg, rainbow, applyColor } from "./theme.ts";
 import { getIcons, SEP_DOT, getThinkingText } from "./icons.ts";
 
@@ -63,7 +60,9 @@ const modelSegment: StatusLineSegment = {
 		}
 
 		const providerName = ctx.model?.provider?.trim();
-		const label = providerName ? `${providerName}/${modelName}` : modelName;
+		// Show `provider/model` only when multiple providers exist (e.g. MCP connected)
+		let label = ctx.availableProviderCount > 1 && providerName ? `${providerName}/${modelName}` : modelName;
+
 		let content = withIcon(icons.model, label);
 
 		if (opts.showThinkingLevel !== false && ctx.model?.reasoning) {
@@ -76,7 +75,7 @@ const modelSegment: StatusLineSegment = {
 			}
 		}
 
-		return { content: color(ctx, "model", content), visible: true };
+		return { content: ctx.theme.fg("dim", content), visible: true };
 	},
 };
 
@@ -132,7 +131,7 @@ const pathSegment: StatusLineSegment = {
 			}
 		}
 
-		const content = withIcon(icons.folder, pwd);
+		const content = pwd;
 		return { content: color(ctx, "path", content), visible: true };
 	},
 };
@@ -143,13 +142,11 @@ const gitSegment: StatusLineSegment = {
 		const icons = getIcons();
 		const opts = ctx.options.git ?? {};
 		const { branch, staged, unstaged, untracked } = ctx.git;
-		const gitStatus =
-			staged > 0 || unstaged > 0 || untracked > 0 ? { staged, unstaged, untracked } : null;
+		const gitStatus = staged > 0 || unstaged > 0 || untracked > 0 ? { staged, unstaged, untracked } : null;
 
 		if (!branch && !gitStatus) return { content: "", visible: false };
 
-		const isDirty =
-			gitStatus && (gitStatus.staged > 0 || gitStatus.unstaged > 0 || gitStatus.untracked > 0);
+		const isDirty = gitStatus && (gitStatus.staged > 0 || gitStatus.unstaged > 0 || gitStatus.untracked > 0);
 		const showBranch = opts.showBranch !== false;
 		const branchColor: SemanticColor = isDirty ? "gitDirty" : "gitClean";
 
@@ -157,7 +154,7 @@ const gitSegment: StatusLineSegment = {
 		let content = "";
 		if (showBranch && branch) {
 			// Color just the branch name (icon + branch text)
-			content = color(ctx, branchColor, withIcon(icons.branch, branch));
+			content = color(ctx, branchColor, branch);
 		}
 
 		// Add status indicators (each with their own color, not wrapped)
@@ -200,10 +197,10 @@ const thinkingSegment: StatusLineSegment = {
 			low: "low",
 			medium: "med",
 			high: "high",
-			xhigh: "xhigh",
+			xhigh: "xhi",
 		};
 		const label = levelText[level] || level;
-		const content = `think:${label}`;
+		const content = label;
 
 		if (level === "high" || level === "xhigh") {
 			return { content: rainbow(content), visible: true };
@@ -223,6 +220,14 @@ const thinkingSegment: StatusLineSegment = {
 	},
 };
 
+const verbositySegment: StatusLineSegment = {
+	id: "verbosity",
+	render(ctx) {
+		if (!ctx.verbosityLevel) return { content: "", visible: false };
+		return { content: ctx.theme.fg("dim", `🗣 ${ctx.verbosityLevel}`), visible: true };
+	},
+};
+
 const subagentsSegment: StatusLineSegment = {
 	id: "subagents",
 	render() {
@@ -239,8 +244,7 @@ const tokenInSegment: StatusLineSegment = {
 		const { input } = ctx.usageStats;
 		if (!input) return { content: "", visible: false };
 
-		const content = `IN ${formatTokens(input)}`;
-		return { content: color(ctx, "tokens", content), visible: true };
+		return { content: ctx.theme.fg("dim", `↑${formatTokens(input)}`), visible: true };
 	},
 };
 
@@ -250,8 +254,7 @@ const tokenOutSegment: StatusLineSegment = {
 		const { output } = ctx.usageStats;
 		if (!output) return { content: "", visible: false };
 
-		const content = `OUT ${formatTokens(output)}`;
-		return { content: color(ctx, "tokens", content), visible: true };
+		return { content: ctx.theme.fg("dim", `↓${formatTokens(output)}`), visible: true };
 	},
 };
 
@@ -295,18 +298,9 @@ const contextPctSegment: StatusLineSegment = {
 
 		const autoIcon = ctx.autoCompactEnabled && icons.auto ? ` ${icons.auto}` : "";
 		const text = `${formatTokens(used)} ${pct.toFixed(1)}%/${formatTokens(window)}${autoIcon}`;
+		const dimText = icons.context ? `${icons.context} ${text}` : text;
 
-		// Icon outside color, text inside - use semantic colors for thresholds
-		let content: string;
-		if (pct > 90) {
-			content = withIcon(icons.context, color(ctx, "contextError", text));
-		} else if (pct > 70) {
-			content = withIcon(icons.context, color(ctx, "contextWarn", text));
-		} else {
-			content = withIcon(icons.context, color(ctx, "context", text));
-		}
-
-		return { content, visible: true };
+		return { content: ctx.theme.fg("dim", dimText), visible: true };
 	},
 };
 
@@ -388,8 +382,7 @@ const cacheReadSegment: StatusLineSegment = {
 		const { cacheRead } = ctx.usageStats;
 		if (!cacheRead) return { content: "", visible: false };
 
-		const content = `C:${formatTokens(cacheRead)}`;
-		return { content: color(ctx, "tokens", content), visible: true };
+		return { content: ctx.theme.fg("dim", `C:${formatTokens(cacheRead)}`), visible: true };
 	},
 };
 
@@ -428,7 +421,7 @@ const extensionStatusesSegment: StatusLineSegment = {
 		if (parts.length === 0) return { content: "", visible: false };
 
 		// Statuses already have their own styling applied by the extensions
-		const content = parts.join(` ${SEP_DOT} `);
+		const content = parts.join(" ");
 		return { content, visible: true };
 	},
 };
@@ -456,6 +449,7 @@ export const SEGMENTS: Record<BuiltinStatusLineSegmentId, StatusLineSegment> = {
 	hostname: hostnameSegment,
 	cache_read: cacheReadSegment,
 	cache_write: cacheWriteSegment,
+	verbosity: verbositySegment,
 	extension_statuses: extensionStatusesSegment,
 };
 

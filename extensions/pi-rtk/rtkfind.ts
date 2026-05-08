@@ -1,6 +1,6 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { Text } from "@mariozechner/pi-tui";
+import { Text } from "@earendil-works/pi-tui";
 
 export function registerRtkFind(pi: ExtensionAPI, isEnabled: () => boolean) {
 	pi.registerTool({
@@ -23,9 +23,7 @@ export function registerRtkFind(pi: ExtensionAPI, isEnabled: () => boolean) {
 		async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
 			if (!isEnabled()) {
 				return {
-					content: [
-						{ type: "text" as const, text: "rtk_find is disabled. Enable with /pi-rtk tools on" },
-					],
+					content: [{ type: "text" as const, text: "rtk_find is disabled. Enable with /pi-rtk tools on" }],
 					details: undefined,
 				};
 			}

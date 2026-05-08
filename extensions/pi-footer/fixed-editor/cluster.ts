@@ -1,4 +1,4 @@
-import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 export const CURSOR_MARKER = "\x1b_pi:c\x07";
 
@@ -107,12 +107,5 @@ export function renderFixedEditorCluster(input: FixedEditorClusterInput): FixedE
 
 	const transcript = takeTail(transcriptLines, remaining);
 
-	return extractCursor([
-		...status,
-		...top,
-		...editorLines,
-		...secondary,
-		...transcript,
-		...lastPrompt,
-	]);
+	return extractCursor([...status, ...top, ...editorLines, ...secondary, ...transcript, ...lastPrompt]);
 }

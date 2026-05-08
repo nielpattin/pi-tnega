@@ -12,11 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-	appendProjectHistory,
-	matchHistoryEntries,
-	readGlobalShellHistory,
-} from "../bash-mode/history.ts";
+import { appendProjectHistory, matchHistoryEntries, readGlobalShellHistory } from "../bash-mode/history.ts";
 import { BashTranscriptStore } from "../bash-mode/transcript.ts";
 import {
 	BashAutocompleteProvider,
@@ -37,17 +33,16 @@ function getMethod(target: object, name: string): Function {
 }
 
 function ensureEditorModuleLinks(): { cleanup: () => void } {
-	const nodeModulesDir = join(process.cwd(), "node_modules", "@mariozechner");
+	const nodeModulesDir = join(process.cwd(), "node_modules", "@earendil-works");
 	mkdirSync(nodeModulesDir, { recursive: true });
 	const links = [
 		{
 			link: join(nodeModulesDir, "pi-coding-agent"),
-			target: "/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent",
+			target: "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent",
 		},
 		{
 			link: join(nodeModulesDir, "pi-tui"),
-			target:
-				"/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/node_modules/@mariozechner/pi-tui",
+			target: "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui",
 		},
 	];
 
@@ -77,21 +72,14 @@ test("project history is stored newest-first and global zsh history parses histf
 	appendProjectHistory(cwd, "git stash", cwd);
 	appendProjectHistory(cwd, "git status", cwd);
 
-	writeFileSync(
-		histfile,
-		[": 1711111111:0;git fetch", ": 1711111112:0;git pull", "plain-command", ""].join("\n"),
-	);
+	writeFileSync(histfile, [": 1711111111:0;git fetch", ": 1711111112:0;git pull", "plain-command", ""].join("\n"));
 
 	const global = readGlobalShellHistory("/bin/zsh");
 	assert.deepEqual(global, ["plain-command", "git pull", "git fetch"]);
 });
 
 test("matchHistoryEntries returns newest entries when the prefix is empty", () => {
-	const matches = matchHistoryEntries(
-		["git stash", "git status", "git stash", "git fetch"],
-		"",
-		10,
-	);
+	const matches = matchHistoryEntries(["git stash", "git status", "git stash", "git fetch"], "", 10);
 
 	assert.deepEqual(matches, ["git stash", "git status", "git fetch"]);
 });
@@ -177,12 +165,7 @@ test("ghost suggestion prefers project history over global history", async () =>
 	appendProjectHistory(cwd, "git stash", cwd);
 
 	const engine = new BashCompletionEngine();
-	const suggestion = await engine.getGhostSuggestion(
-		"git st",
-		cwd,
-		"/bin/zsh",
-		new AbortController().signal,
-	);
+	const suggestion = await engine.getGhostSuggestion("git st", cwd, "/bin/zsh", new AbortController().signal);
 
 	assert.equal(suggestion?.value, "git stash");
 	assert.equal(suggestion?.source, "project-history");
@@ -197,12 +180,7 @@ test("ghost suggestion shows newest project history on an empty prompt", async (
 	appendProjectHistory(cwd, "git stash", cwd);
 
 	const engine = new BashCompletionEngine();
-	const suggestion = await engine.getGhostSuggestion(
-		"",
-		cwd,
-		"/bin/zsh",
-		new AbortController().signal,
-	);
+	const suggestion = await engine.getGhostSuggestion("", cwd, "/bin/zsh", new AbortController().signal);
 
 	assert.equal(suggestion?.value, "git stash");
 	assert.equal(suggestion?.source, "project-history");
@@ -215,12 +193,7 @@ test("ghost suggestion stays empty on an empty prompt when only global history e
 	writeFileSync(histfile, [": 1711111111:0;git fetch", ": 1711111112:0;git pull"].join("\n"));
 
 	const engine = new BashCompletionEngine();
-	const suggestion = await engine.getGhostSuggestion(
-		"",
-		cwd,
-		"/bin/zsh",
-		new AbortController().signal,
-	);
+	const suggestion = await engine.getGhostSuggestion("", cwd, "/bin/zsh", new AbortController().signal);
 
 	assert.equal(suggestion, null);
 });
@@ -232,12 +205,7 @@ test("ghost suggestion stays empty when the prompt is empty and no history exist
 	writeFileSync(histfile, "");
 
 	const engine = new BashCompletionEngine();
-	const suggestion = await engine.getGhostSuggestion(
-		"",
-		cwd,
-		"/bin/zsh",
-		new AbortController().signal,
-	);
+	const suggestion = await engine.getGhostSuggestion("", cwd, "/bin/zsh", new AbortController().signal);
 
 	assert.equal(suggestion, null);
 });
@@ -248,18 +216,8 @@ test("ghost suggestion can extend the current token from deterministic path comp
 	mkdirSync(join(cwd, "My Folder"), { recursive: true });
 
 	const engine = new BashCompletionEngine();
-	const suggestion = await engine.getGhostSuggestion(
-		"cd d",
-		cwd,
-		"/bin/sh",
-		new AbortController().signal,
-	);
-	const escapedSuggestion = await engine.getGhostSuggestion(
-		"cd M",
-		cwd,
-		"/bin/sh",
-		new AbortController().signal,
-	);
+	const suggestion = await engine.getGhostSuggestion("cd d", cwd, "/bin/sh", new AbortController().signal);
+	const escapedSuggestion = await engine.getGhostSuggestion("cd M", cwd, "/bin/sh", new AbortController().signal);
 
 	assert.equal(suggestion?.value, "cd dev/");
 	assert.equal(suggestion?.source, "path");
@@ -276,12 +234,7 @@ test("ghost suggestion does not invoke shell-native completion hooks", async () 
 		throw new Error("native completion should stay disabled");
 	});
 
-	const suggestion = await engine.getGhostSuggestion(
-		"cd d",
-		cwd,
-		"/bin/zsh",
-		new AbortController().signal,
-	);
+	const suggestion = await engine.getGhostSuggestion("cd d", cwd, "/bin/zsh", new AbortController().signal);
 
 	assert.equal(suggestion?.value, "cd dev/");
 	assert.equal(suggestion?.source, "path");
@@ -295,12 +248,7 @@ test("command-position ghost prefers the newest successful project-history comma
 	appendProjectHistory(cwd, "git status", cwd);
 
 	const engine = new BashCompletionEngine();
-	const suggestion = await engine.getGhostSuggestion(
-		"g",
-		cwd,
-		"/bin/zsh",
-		new AbortController().signal,
-	);
+	const suggestion = await engine.getGhostSuggestion("g", cwd, "/bin/zsh", new AbortController().signal);
 
 	assert.equal(suggestion?.value, "git status");
 	assert.equal(suggestion?.source, "project-history");
@@ -313,18 +261,8 @@ test("command-position ghost uses guarded global git history when project histor
 	writeFileSync(histfile, ": 1711111111:0;git stash\n");
 
 	const engine = new BashCompletionEngine();
-	const shortStemSuggestion = await engine.getGhostSuggestion(
-		"g",
-		cwd,
-		"/bin/zsh",
-		new AbortController().signal,
-	);
-	const guardedSuggestion = await engine.getGhostSuggestion(
-		"gi",
-		cwd,
-		"/bin/zsh",
-		new AbortController().signal,
-	);
+	const shortStemSuggestion = await engine.getGhostSuggestion("g", cwd, "/bin/zsh", new AbortController().signal);
+	const guardedSuggestion = await engine.getGhostSuggestion("gi", cwd, "/bin/zsh", new AbortController().signal);
 
 	assert.equal(shortStemSuggestion?.value, "git status");
 	assert.equal(shortStemSuggestion?.source, "git");
@@ -339,12 +277,7 @@ test("command-position ghost falls back to git status when git is likely but his
 	writeFileSync(histfile, "");
 
 	const engine = new BashCompletionEngine();
-	const suggestion = await engine.getGhostSuggestion(
-		"g",
-		cwd,
-		"/bin/zsh",
-		new AbortController().signal,
-	);
+	const suggestion = await engine.getGhostSuggestion("g", cwd, "/bin/zsh", new AbortController().signal);
 
 	assert.equal(suggestion?.value, "git status");
 	assert.equal(suggestion?.source, "git");
@@ -357,12 +290,7 @@ test("command-position ghost falls back to cd dot-dot for the cd stem", async ()
 	writeFileSync(histfile, "");
 
 	const engine = new BashCompletionEngine();
-	const suggestion = await engine.getGhostSuggestion(
-		"c",
-		cwd,
-		"/bin/zsh",
-		new AbortController().signal,
-	);
+	const suggestion = await engine.getGhostSuggestion("c", cwd, "/bin/zsh", new AbortController().signal);
 
 	assert.equal(suggestion?.value, "cd ..");
 	assert.equal(suggestion?.source, "path");
@@ -375,12 +303,7 @@ test("command-position ghost stays empty when there is no supported history-back
 	writeFileSync(histfile, "");
 
 	const engine = new BashCompletionEngine();
-	const suggestion = await engine.getGhostSuggestion(
-		"x",
-		cwd,
-		"/bin/zsh",
-		new AbortController().signal,
-	);
+	const suggestion = await engine.getGhostSuggestion("x", cwd, "/bin/zsh", new AbortController().signal);
 
 	assert.equal(suggestion, null);
 });
@@ -392,12 +315,7 @@ test("ghost suggestion ignores invalid raw global history and keeps a determinis
 	writeFileSync(histfile, ": 1711111111:0;git statis\n");
 
 	const engine = new BashCompletionEngine();
-	const suggestion = await engine.getGhostSuggestion(
-		"git st",
-		cwd,
-		"/bin/zsh",
-		new AbortController().signal,
-	);
+	const suggestion = await engine.getGhostSuggestion("git st", cwd, "/bin/zsh", new AbortController().signal);
 
 	assert.match(suggestion?.value ?? "", /^git sta(?:sh|tus)$/);
 	assert.equal(suggestion?.source, "git");
@@ -410,12 +328,7 @@ test("global history boosts already-valid deterministic git candidates", async (
 	writeFileSync(histfile, ": 1711111111:0;git stash\n");
 
 	const engine = new BashCompletionEngine();
-	const suggestion = await engine.getGhostSuggestion(
-		"git st",
-		cwd,
-		"/bin/zsh",
-		new AbortController().signal,
-	);
+	const suggestion = await engine.getGhostSuggestion("git st", cwd, "/bin/zsh", new AbortController().signal);
 
 	assert.equal(suggestion?.value, "git stash");
 	assert.equal(suggestion?.source, "git");
@@ -429,12 +342,7 @@ test("deterministic path completion keeps directory suffixes for escaped paths",
 	mkdirSync(join(cwd, "My Folder"), { recursive: true });
 
 	const engine = new BashCompletionEngine();
-	const suggestion = await engine.getGhostSuggestion(
-		"cd M",
-		cwd,
-		"/bin/zsh",
-		new AbortController().signal,
-	);
+	const suggestion = await engine.getGhostSuggestion("cd M", cwd, "/bin/zsh", new AbortController().signal);
 
 	assert.equal(suggestion?.value, "cd My\\ Folder/");
 	assert.equal(suggestion?.source, "path");
@@ -445,12 +353,7 @@ test("deterministic path completion handles bash argument position", async () =>
 	mkdirSync(join(cwd, "devdir"), { recursive: true });
 
 	const engine = new BashCompletionEngine();
-	const suggestion = await engine.getGhostSuggestion(
-		"cd d",
-		cwd,
-		"/bin/bash",
-		new AbortController().signal,
-	);
+	const suggestion = await engine.getGhostSuggestion("cd d", cwd, "/bin/bash", new AbortController().signal);
 
 	assert.equal(suggestion?.value, "cd devdir/");
 	assert.equal(suggestion?.source, "path");
@@ -581,7 +484,7 @@ test("bash editor does not submit pasted multiline input while bracketed paste i
 	try {
 		const { BashModeEditor } = await import("../bash-mode/editor.ts");
 		const { CustomEditor } =
-			await import("/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/dist/modes/interactive/components/custom-editor.js");
+			await import("/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/custom-editor.js");
 
 		let delegated = 0;
 		let submitted = 0;
@@ -633,7 +536,7 @@ test("bash editor refreshes shell ghost state after a bracketed paste completes"
 	try {
 		const { BashModeEditor } = await import("../bash-mode/editor.ts");
 		const { CustomEditor } =
-			await import("/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/dist/modes/interactive/components/custom-editor.js");
+			await import("/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/custom-editor.js");
 
 		let delegated = 0;
 		let scheduled = 0;
@@ -745,10 +648,7 @@ test("one-off bash autocomplete provider stays inactive before the bang command 
 	const provider = new OneOffBashAutocompleteProvider();
 
 	assert.equal(provider.shouldTriggerFileCompletion(["!git status"], 0, 0), false);
-	assert.equal(
-		await provider.getSuggestions(["!git status"], 0, 0, { signal: new AbortController().signal }),
-		null,
-	);
+	assert.equal(await provider.getSuggestions(["!git status"], 0, 0, { signal: new AbortController().signal }), null);
 });
 
 test("bash editor refreshGhostSuggestion reuses the ghost scheduling path", async () => {
@@ -972,26 +872,21 @@ test("bash editor runs copied Pi app action handlers for alt-enter", async () =>
 	try {
 		const { BashModeEditor } = await import("../bash-mode/editor.ts");
 		const { KeybindingsManager } =
-			await import("/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/dist/core/keybindings.js");
+			await import("/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/core/keybindings.js");
 		const { setKittyProtocolActive } =
-			await import("/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/node_modules/@mariozechner/pi-tui/dist/keys.js");
+			await import("/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/keys.js");
 		const keybindings = KeybindingsManager.create();
-		const editor = new BashModeEditor(
-			{ requestRender() {}, terminal: { columns: 80, rows: 24 } },
-			{},
+		const editor = new BashModeEditor({ requestRender() {}, terminal: { columns: 80, rows: 24 } }, {}, keybindings, {
 			keybindings,
-			{
-				keybindings,
-				isBashModeActive: () => false,
-				isShellRunning: () => false,
-				onExitBashMode() {},
-				onSubmitCommand() {},
-				onInterrupt() {},
-				onNotify() {},
-				getHistoryEntries: () => [],
-				resolveGhostSuggestion: async () => null,
-			},
-		);
+			isBashModeActive: () => false,
+			isShellRunning: () => false,
+			onExitBashMode() {},
+			onSubmitCommand() {},
+			onInterrupt() {},
+			onNotify() {},
+			getHistoryEntries: () => [],
+			resolveGhostSuggestion: async () => null,
+		});
 
 		let handled = 0;
 		editor.actionHandlers.set("app.message.followUp", () => {
@@ -1020,7 +915,7 @@ test("bash editor command arrows jump to editor boundaries", async () => {
 	try {
 		const { BashModeEditor } = await import("../bash-mode/editor.ts");
 		const { KeybindingsManager } =
-			await import("/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/dist/core/keybindings.js");
+			await import("/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/core/keybindings.js");
 		const keybindings = KeybindingsManager.create();
 		let renderRequests = 0;
 		const editor = new BashModeEditor(
@@ -1230,7 +1125,7 @@ test("one-off bang submit does not accept ghost text before submitting", async (
 	try {
 		const { BashModeEditor } = await import("../bash-mode/editor.ts");
 		const { CustomEditor } =
-			await import("/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/dist/modes/interactive/components/custom-editor.js");
+			await import("/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/custom-editor.js");
 
 		let delegated = 0;
 		const superHandleInput = CustomEditor.prototype.handleInput;

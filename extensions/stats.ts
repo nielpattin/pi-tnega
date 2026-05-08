@@ -1,8 +1,8 @@
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
-import type { Component } from "@mariozechner/pi-tui";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { Component } from "@earendil-works/pi-tui";
 
 interface UsageEntry {
 	type?: unknown;
@@ -97,8 +97,10 @@ export function aggregateUsageEntries(entries: UsageEntry[]): DailyUsageRow[] {
 		const date = localDateKey(entry.timestamp);
 		if (!date) continue;
 
-		const provider = typeof entry.message.provider === "string" && entry.message.provider.length > 0 ? entry.message.provider : "?";
-		const model = typeof entry.message.model === "string" && entry.message.model.length > 0 ? entry.message.model : "?";
+		const provider =
+			typeof entry.message.provider === "string" && entry.message.provider.length > 0 ? entry.message.provider : "?";
+		const model =
+			typeof entry.message.model === "string" && entry.message.model.length > 0 ? entry.message.model : "?";
 		const key = `${date}\u0000${provider}\u0000${model}`;
 
 		let row = byDate.get(key);
@@ -127,8 +129,8 @@ export function aggregateUsageEntries(entries: UsageEntry[]): DailyUsageRow[] {
 		row.cost += numberValue(usage.cost?.total);
 	}
 
-	return Array.from(byDate.values()).sort((a, b) =>
-		b.date.localeCompare(a.date) || a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model),
+	return Array.from(byDate.values()).sort(
+		(a, b) => b.date.localeCompare(a.date) || a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model),
 	);
 }
 
@@ -277,12 +279,15 @@ class MultiSelectModal implements Component {
 		const visible = this.options.slice(this.scroll, this.scroll + visibleCount);
 		const title = this.theme.fg("accent", this.theme.bold(this.title));
 		const help = "Space toggle · a all · n none · Enter confirm · Esc cancel";
-		const body = visible.length > 0 ? visible.map((option, index) => {
-			const absoluteIndex = this.scroll + index;
-			const pointer = absoluteIndex === this.cursor ? "›" : " ";
-			const checked = this.selected.has(option) ? "✓" : " ";
-			return `${pointer} [${checked}] ${option}`;
-		}) : ["No options found."];
+		const body =
+			visible.length > 0
+				? visible.map((option, index) => {
+						const absoluteIndex = this.scroll + index;
+						const pointer = absoluteIndex === this.cursor ? "›" : " ";
+						const checked = this.selected.has(option) ? "✓" : " ";
+						return `${pointer} [${checked}] ${option}`;
+					})
+				: ["No options found."];
 		const lines = [
 			fit(title, boxWidth - 4, "center"),
 			fit(help, boxWidth - 4, "center"),
@@ -456,19 +461,16 @@ export default function statsExtension(pi: ExtensionAPI) {
 
 			const modelFilter = selectedModels.length === providerUsage.models.length ? undefined : selectedModels;
 			const result = filterUsage(dataset, { providers: providerFilter, models: modelFilter });
-			await ctx.ui.custom<void>(
-				(_tui, theme, _kb, done) => new StatsModal(result, done, theme),
-				{
-					overlay: true,
-					overlayOptions: {
-						width: "90%",
-						minWidth: 100,
-						maxHeight: "92%",
-						anchor: "center",
-						margin: 2,
-					},
+			await ctx.ui.custom<void>((_tui, theme, _kb, done) => new StatsModal(result, done, theme), {
+				overlay: true,
+				overlayOptions: {
+					width: "90%",
+					minWidth: 100,
+					maxHeight: "92%",
+					anchor: "center",
+					margin: 2,
 				},
-			);
+			});
 		},
 	});
 }

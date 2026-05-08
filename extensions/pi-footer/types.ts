@@ -1,4 +1,4 @@
-import type { Theme, ThemeColor } from "@mariozechner/pi-coding-agent";
+import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 
 // Theme color - either a pi theme color name or a custom hex color
 export type ColorValue = ThemeColor | `#${string}`;
@@ -46,6 +46,7 @@ export type BuiltinStatusLineSegmentId =
 	| "cache_read"
 	| "cache_write"
 	| "thinking"
+	| "verbosity"
 	| "extension_statuses";
 
 // Segment identifiers (built-in + dynamically registered custom items)
@@ -65,14 +66,7 @@ export type StatusLineSeparatorStyle =
 	| "star";
 
 // Preset names
-export type StatusLinePreset =
-	| "default"
-	| "minimal"
-	| "compact"
-	| "full"
-	| "nerd"
-	| "ascii"
-	| "custom";
+export type StatusLinePreset = "default" | "minimal" | "compact" | "full" | "nerd" | "ascii" | "custom";
 
 // Per-segment options
 export interface StatusLineSegmentOptions {
@@ -145,10 +139,9 @@ export interface UsageStats {
 // Context passed to segment render functions
 export interface SegmentContext {
 	// From pi-mono
-	model:
-		| { id: string; name?: string; provider?: string; reasoning?: boolean; contextWindow?: number }
-		| undefined;
+	model: { id: string; name?: string; provider?: string; reasoning?: boolean; contextWindow?: number } | undefined;
 	thinkingLevel: string;
+	verbosityLevel?: string | null;
 	sessionId: string | undefined;
 
 	// Computed
@@ -167,6 +160,9 @@ export interface SegmentContext {
 
 	// Git
 	git: GitStatus;
+
+	// Available provider count (for showing MCP/powerline provider indicator)
+	availableProviderCount: number;
 
 	// Extension statuses
 	extensionStatuses: ReadonlyMap<string, string>;

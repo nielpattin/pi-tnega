@@ -7,7 +7,7 @@
  * 3. Default colors
  */
 
-import type { ThemeColor } from "@mariozechner/pi-coding-agent";
+import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,16 +39,7 @@ const DEFAULT_COLORS: Required<ColorScheme> = {
 };
 
 // Rainbow colors for high thinking levels
-const RAINBOW_COLORS = [
-	"#b281d6",
-	"#d787af",
-	"#febc38",
-	"#e4c00f",
-	"#89d281",
-	"#00afaf",
-	"#178fb9",
-	"#b281d6",
-];
+const RAINBOW_COLORS = ["#b281d6", "#d787af", "#febc38", "#e4c00f", "#89d281", "#00afaf", "#178fb9", "#b281d6"];
 
 // Cache for user theme overrides
 let userThemeCache: ColorScheme | null = null;
@@ -180,10 +171,7 @@ export function applyColor(theme: ThemeLike, color: ColorValue, text: string): s
 			if (warnedInvalidThemeColors.size > 200) {
 				warnedInvalidThemeColors.clear();
 			}
-			console.debug(
-				`[powerline-theme] Invalid theme color "${key}"; falling back to "text".`,
-				error,
-			);
+			console.debug(`[powerline-theme] Invalid theme color "${key}"; falling back to "text".`, error);
 		}
 		return theme.fg("text", text);
 	}
@@ -192,12 +180,7 @@ export function applyColor(theme: ThemeLike, color: ColorValue, text: string): s
 /**
  * Apply a semantic color to text
  */
-export function fg(
-	theme: ThemeLike,
-	semantic: SemanticColor,
-	text: string,
-	presetColors?: ColorScheme,
-): string {
+export function fg(theme: ThemeLike, semantic: SemanticColor, text: string, presetColors?: ColorScheme): string {
 	const color = resolveColor(semantic, presetColors);
 	return applyColor(theme, color, text);
 }

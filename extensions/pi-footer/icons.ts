@@ -75,7 +75,7 @@ export const ASCII_ICONS: IconSet = {
 	pi: "π",
 	model: "",
 	folder: "dir",
-	branch: "⎇",
+	branch: "",
 	git: "⎇",
 	tokens: "⊛",
 	context: "◫",

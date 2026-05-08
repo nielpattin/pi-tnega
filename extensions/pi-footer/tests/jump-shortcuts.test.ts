@@ -1,12 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { KEYBINDINGS } from "/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/dist/core/keybindings.js";
-import {
-	isSupportedSuperShortcut,
-	matchesConfiguredShortcut,
-	shortcutConflictKey,
-} from "../shortcuts.ts";
+import { KEYBINDINGS } from "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/core/keybindings.js";
+import { isSupportedSuperShortcut, matchesConfiguredShortcut, shortcutConflictKey } from "../shortcuts.ts";
 
 const source = readFileSync(new URL("../index.ts", import.meta.url), "utf-8");
 
@@ -29,9 +25,7 @@ function normalizeShortcut(shortcut: string): string {
 	const parts = shortcut.trim().toLowerCase().split("+");
 	if (parts.length <= 1) return parts[0] ?? "";
 
-	const modifierRank = new Map(
-		["ctrl", "alt", "super", "shift"].map((modifier, index) => [modifier, index]),
-	);
+	const modifierRank = new Map(["ctrl", "alt", "super", "shift"].map((modifier, index) => [modifier, index]));
 	return [
 		...parts.slice(0, -1).sort((a, b) => (modifierRank.get(a) ?? 99) - (modifierRank.get(b) ?? 99)),
 		parts[parts.length - 1],
@@ -75,10 +69,7 @@ test("chat jump shortcuts are configurable and route through fixed editor scroll
 	assert.match(source, /fixedEditorCompositor\.jumpToPreviousRootTarget\(targets\)/);
 	assert.match(source, /fixedEditorCompositor\.jumpToNextRootTarget\(targets\)/);
 	assert.match(source, /fixedEditorCompositor\.jumpToRootBottom\(\)/);
-	assert.match(
-		source,
-		/function getChatJumpShortcutAction\(data: string\): ChatJumpShortcutAction \| null/,
-	);
+	assert.match(source, /function getChatJumpShortcutAction\(data: string\): ChatJumpShortcutAction \| null/);
 	assert.match(source, /let resolvedShortcuts = resolveShortcutConfig\(startupSettings\)/);
 	assert.match(source, /resolvedShortcuts = resolveShortcutConfig\(settings\)/);
 	assert.match(
@@ -90,10 +81,7 @@ test("chat jump shortcuts are configurable and route through fixed editor scroll
 		/editorBoundaryShortcuts: \{\n\s+start: resolvedShortcuts\.editorStart,\n\s+end: resolvedShortcuts\.editorEnd,/,
 	);
 	assert.match(source, /modifier === "cmd" \|\| modifier === "command" \? "super" : modifier/);
-	assert.match(
-		source,
-		/shortcutUsesSuper\(normalizedShortcut\) && !isSupportedSuperShortcut\(normalizedShortcut\)/,
-	);
+	assert.match(source, /shortcutUsesSuper\(normalizedShortcut\) && !isSupportedSuperShortcut\(normalizedShortcut\)/);
 	assert.match(source, /jumpToChatMessage\(ctx, action\.action\.role, action\.action\.direction\)/);
 });
 
@@ -139,10 +127,7 @@ test("thinking level changes invalidate powerline status rendering", () => {
 test("context usage changes repaint from live streaming message usage", () => {
 	assert.match(source, /const CONTEXT_STATUS_RENDER_MS = 250/);
 	assert.match(source, /function getUsageTokenTotal\(usage: SessionAssistantUsage\): number/);
-	assert.match(
-		source,
-		/const totalTokens = "totalTokens" in usage && typeof usage\.totalTokens === "number"/,
-	);
+	assert.match(source, /const totalTokens = "totalTokens" in usage && typeof usage\.totalTokens === "number"/);
 	assert.match(
 		source,
 		/return totalTokens \|\| usage\.input \+ usage\.output \+ usage\.cacheRead \+ usage\.cacheWrite/,
@@ -173,10 +158,7 @@ test("context usage changes repaint from live streaming message usage", () => {
 		source,
 		/pi\.on\("session_tree", async \(_event, ctx\) => \{\n\s+currentCtx = ctx;\n\s+currentThinkingLevel = null;\n\s+liveAssistantUsage = null;\n\s+requestImmediateStatusRender\(\{ deferDuringTyping: false \}\);\n\s+\}\);/,
 	);
-	assert.match(
-		source,
-		/if \(getUsageTokenTotal\(m\.usage\) > 0\) \{\n\s+lastAssistant = m;\n\s+\}/,
-	);
+	assert.match(source, /if \(getUsageTokenTotal\(m\.usage\) > 0\) \{\n\s+lastAssistant = m;\n\s+\}/);
 	assert.match(
 		source,
 		/const coreContextUsage = isStreaming && liveAssistantUsage \? null : readCoreContextUsage\(ctx\)/,
@@ -202,19 +184,10 @@ test("extension status changes invalidate powerline status rendering", () => {
 		source,
 		/forceNextLayoutRecompute = true;\n\s+statusRenderScheduler\.cancel\(\);\n\s+statusRenderScheduler\.schedule\(0\);/,
 	);
-	assert.match(
-		source,
-		/const installFooterStatusRepaintHook = \(footerData: ReadonlyFooterDataProvider\) => \{/,
-	);
+	assert.match(source, /const installFooterStatusRepaintHook = \(footerData: ReadonlyFooterDataProvider\) => \{/);
 	assert.match(source, /setExtensionStatus\?: \(key: string, text: string \| undefined\) => void/);
-	assert.match(
-		source,
-		/const setExtensionStatusAndRepaint = function setExtensionStatusAndRepaint/,
-	);
-	assert.match(
-		source,
-		/originalSetExtensionStatus\.call\(this, key, text\);\n\s+requestImmediateStatusRender\(\);/,
-	);
+	assert.match(source, /const setExtensionStatusAndRepaint = function setExtensionStatusAndRepaint/);
+	assert.match(source, /originalSetExtensionStatus\.call\(this, key, text\);\n\s+requestImmediateStatusRender\(\);/);
 	assert.match(source, /installFooterStatusRepaintHook\(footerData\);/);
 	assert.match(
 		source,
@@ -224,18 +197,12 @@ test("extension status changes invalidate powerline status rendering", () => {
 		source,
 		/if \(clearExtensionStatusesAndRepaint && writableFooterData\.clearExtensionStatuses === clearExtensionStatusesAndRepaint\)/,
 	);
-	assert.match(
-		source,
-		/restoreFooterStatusRepaintHook\?\.\(\);\n\s+restoreFooterStatusRepaintHook = null;/,
-	);
+	assert.match(source, /restoreFooterStatusRepaintHook\?\.\(\);\n\s+restoreFooterStatusRepaintHook = null;/);
 });
 
 test("fixed editor captures Pi status messages with the editor cluster", () => {
 	assert.match(source, /let fixedStatusContainer: any = null/);
-	assert.match(
-		source,
-		/const statusContainerCandidate = tuiChildren\[editorContainerMatch\.index - 2\] \?\? null/,
-	);
+	assert.match(source, /const statusContainerCandidate = tuiChildren\[editorContainerMatch\.index - 2\] \?\? null/);
 	assert.match(
 		source,
 		/fixedStatusContainer = statusContainerCandidate && typeof statusContainerCandidate\.render === "function"/,
@@ -248,10 +215,7 @@ test("fixed editor captures Pi status messages with the editor cluster", () => {
 		source,
 		/statusLines: \[\.\.\.aboveWidgetLines, \.\.\.renderPowerlineStatusLines\(width\), \.\.\.statusContainerLines\]/,
 	);
-	assert.match(
-		source,
-		/if \(fixedStatusContainer\?\.render\) compositor\.hideRenderable\(fixedStatusContainer\)/,
-	);
+	assert.match(source, /if \(fixedStatusContainer\?\.render\) compositor\.hideRenderable\(fixedStatusContainer\)/);
 	assert.match(source, /fixedStatusContainer = null/);
 });
 
@@ -294,10 +258,7 @@ test("powerline fallback routing rejects reserved Pi shortcut defaults", () => {
 	assert.match(source, /for \(const definition of Object\.values\(TUI_KEYBINDINGS\)\)/);
 	assert.doesNotMatch(source, /RESERVED_TUI_KEYBINDING_IDS/);
 	assert.match(source, /const EXTRA_RESERVED_SHORTCUTS = \["alt\+s"\] as const/);
-	assert.match(
-		source,
-		/const SHORTCUT_MODIFIER_ORDER = \["ctrl", "alt", "super", "shift"\] as const/,
-	);
+	assert.match(source, /const SHORTCUT_MODIFIER_ORDER = \["ctrl", "alt", "super", "shift"\] as const/);
 	assert.match(source, /const SHORTCUT_MODIFIERS = new Set\(SHORTCUT_MODIFIER_ORDER\)/);
 	assert.match(source, /modifierRank\.get\(a\)/);
 	assert.match(
@@ -307,10 +268,7 @@ test("powerline fallback routing rejects reserved Pi shortcut defaults", () => {
 });
 
 test("powerline shortcuts have terminal-input fallback routing", () => {
-	assert.match(
-		source,
-		/function getPowerlineShortcutAction\(data: string\): PowerlineShortcutAction \| null/,
-	);
+	assert.match(source, /function getPowerlineShortcutAction\(data: string\): PowerlineShortcutAction \| null/);
 	assert.match(source, /matchesConfiguredShortcut\(data, resolvedShortcuts\.stashHistory\)/);
 	assert.match(source, /matchesConfiguredShortcut\(data, resolvedShortcuts\.copyEditor\)/);
 	assert.match(source, /matchesConfiguredShortcut\(data, resolvedShortcuts\.cutEditor\)/);

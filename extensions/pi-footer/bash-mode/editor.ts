@@ -1,8 +1,8 @@
-import { CustomEditor } from "@mariozechner/pi-coding-agent";
-import { isKeyRelease, visibleWidth, truncateToWidth } from "@mariozechner/pi-tui";
+import { CustomEditor } from "@earendil-works/pi-coding-agent";
+import { isKeyRelease, visibleWidth, truncateToWidth } from "@earendil-works/pi-tui";
 // @ts-expect-error internal module path
-import type { KeybindingsManager } from "@mariozechner/pi-coding-agent/dist/core/keybindings.js";
-import type { AutocompleteProvider } from "@mariozechner/pi-tui";
+import type { KeybindingsManager } from "@earendil-works/pi-coding-agent/dist/core/keybindings.js";
+import type { AutocompleteProvider } from "@earendil-works/pi-tui";
 import { matchesConfiguredShortcut } from "../shortcuts.ts";
 import { getOneOffBashCommandContext } from "./completion.ts";
 import type { GhostSuggestion } from "./types.ts";
@@ -50,12 +50,7 @@ export class BashModeEditor extends CustomEditor {
 	private ghostAbort: AbortController | null = null;
 	private ghostToken = 0;
 
-	constructor(
-		tui: any,
-		theme: any,
-		keybindings: KeybindingsManager,
-		options: BashModeEditorOptions,
-	) {
+	constructor(tui: any, theme: any, keybindings: KeybindingsManager, options: BashModeEditorOptions) {
 		super(tui, theme, keybindings);
 		this.keybindingsRef = keybindings;
 		this.optionsRef = options;
@@ -112,11 +107,7 @@ export class BashModeEditor extends CustomEditor {
 				return;
 			}
 
-			if (
-				bashMode &&
-				this.keybindingsRef.matches(data, "app.clear") &&
-				this.optionsRef.isShellRunning()
-			) {
+			if (bashMode && this.keybindingsRef.matches(data, "app.clear") && this.optionsRef.isShellRunning()) {
 				this.optionsRef.onInterrupt();
 				return;
 			}
@@ -131,12 +122,8 @@ export class BashModeEditor extends CustomEditor {
 				return;
 			}
 
-			const editorBoundaryShortcuts =
-				this.optionsRef.editorBoundaryShortcuts ?? DEFAULT_EDITOR_BOUNDARY_SHORTCUTS;
-			if (
-				!isKeyRelease(data) &&
-				matchesEditorBoundaryShortcut(data, editorBoundaryShortcuts.start)
-			) {
+			const editorBoundaryShortcuts = this.optionsRef.editorBoundaryShortcuts ?? DEFAULT_EDITOR_BOUNDARY_SHORTCUTS;
+			if (!isKeyRelease(data) && matchesEditorBoundaryShortcut(data, editorBoundaryShortcuts.start)) {
 				this.moveCursorToEditorBoundary("start");
 				return;
 			}
@@ -234,9 +221,7 @@ export class BashModeEditor extends CustomEditor {
 		const shownSuffix = truncateToWidth(suffix, availableWidth, "", true);
 		if (!shownSuffix) return lines;
 
-		const padding = " ".repeat(
-			Math.max(0, width - visibleWidth(text) - 1 - visibleWidth(shownSuffix)),
-		);
+		const padding = " ".repeat(Math.max(0, width - visibleWidth(text) - 1 - visibleWidth(shownSuffix)));
 		const ghost = `\x1b[38;5;244m${shownSuffix}\x1b[0m`;
 		lines[contentLine] = `${text}${cursorBlock}${ghost}${padding}`;
 		return lines;
@@ -263,11 +248,7 @@ export class BashModeEditor extends CustomEditor {
 		} else {
 			const lastLine = Math.max(0, lines.length - 1);
 			Reflect.set(state, "cursorLine", lastLine);
-			Reflect.set(
-				state,
-				"cursorCol",
-				typeof lines[lastLine] === "string" ? lines[lastLine].length : 0,
-			);
+			Reflect.set(state, "cursorCol", typeof lines[lastLine] === "string" ? lines[lastLine].length : 0);
 		}
 
 		Reflect.set(this, "lastAction", null);
@@ -303,10 +284,7 @@ export class BashModeEditor extends CustomEditor {
 		}
 
 		if (direction < 0) {
-			this.shellHistoryIndex = Math.min(
-				this.shellHistoryItems.length - 1,
-				this.shellHistoryIndex + 1,
-			);
+			this.shellHistoryIndex = Math.min(this.shellHistoryItems.length - 1, this.shellHistoryIndex + 1);
 			this.setText(this.shellHistoryItems[this.shellHistoryIndex] ?? this.shellHistoryDraft);
 			this.clearGhostSuggestion();
 			return;

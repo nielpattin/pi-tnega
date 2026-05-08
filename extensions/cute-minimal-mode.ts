@@ -15,7 +15,7 @@
  * Toggle collapsed/expanded with ctrl+o.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	createBashTool,
 	createEditTool,
@@ -24,8 +24,8 @@ import {
 	createLsTool,
 	createReadTool,
 	createWriteTool,
-} from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { homedir } from "os";
 
 // ---------------------------------------------------------------------------
@@ -152,12 +152,7 @@ export default async function (pi: ExtensionAPI) {
 				return resolution.match({
 					err: async () => original.execute(toolCallId, params, signal, onUpdate),
 					ok: async (resolved: any) =>
-						original.execute(
-							toolCallId,
-							{ ...params, path: resolved.absolutePath },
-							signal,
-							onUpdate,
-						),
+						original.execute(toolCallId, { ...params, path: resolved.absolutePath }, signal, onUpdate),
 				});
 			} catch {
 				return original.execute(toolCallId, params, signal, onUpdate);
@@ -174,11 +169,7 @@ export default async function (pi: ExtensionAPI) {
 				pathDisplay += theme.fg("warning", `:${startLine}${endLine ? `-${endLine}` : ""}`);
 			}
 
-			return new Text(
-				`${theme.fg("toolTitle", theme.bold(`${badges.read} read`))} ${pathDisplay}`,
-				0,
-				0,
-			);
+			return new Text(`${theme.fg("toolTitle", theme.bold(`${badges.read} read`))} ${pathDisplay}`, 0, 0);
 		},
 
 		renderResult(result, { expanded }, theme, _context) {
@@ -203,8 +194,7 @@ export default async function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "bash",
 		label: "bash",
-		description:
-			"Execute a bash command in the current working directory. Returns stdout and stderr.",
+		description: "Execute a bash command in the current working directory. Returns stdout and stderr.",
 		parameters: getBuiltInTools(process.cwd()).bash.parameters,
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
@@ -217,11 +207,7 @@ export default async function (pi: ExtensionAPI) {
 			const timeout = args.timeout as number | undefined;
 			const timeoutSuffix = timeout ? theme.fg("muted", ` (timeout ${timeout}s)`) : "";
 
-			return new Text(
-				theme.fg("toolTitle", theme.bold(`${badges.bash} $ ${command}`)) + timeoutSuffix,
-				0,
-				0,
-			);
+			return new Text(theme.fg("toolTitle", theme.bold(`${badges.bash} $ ${command}`)) + timeoutSuffix, 0, 0);
 		},
 
 		renderResult(result, { expanded }, theme, _context) {
@@ -251,8 +237,7 @@ export default async function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "write",
 		label: "write",
-		description:
-			"Write content to a file. Creates the file if it doesn't exist, overwrites if it does.",
+		description: "Write content to a file. Creates the file if it doesn't exist, overwrites if it does.",
 		parameters: getBuiltInTools(process.cwd()).write.parameters,
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
@@ -295,8 +280,7 @@ export default async function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "edit",
 		label: "edit",
-		description:
-			"Edit a file by replacing exact text. The oldText must match exactly (including whitespace).",
+		description: "Edit a file by replacing exact text. The oldText must match exactly (including whitespace).",
 		parameters: getBuiltInTools(process.cwd()).edit.parameters,
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
@@ -308,11 +292,7 @@ export default async function (pi: ExtensionAPI) {
 			const path = shortenPath(args.path || "");
 			const pathDisplay = path ? theme.fg("accent", path) : theme.fg("toolOutput", "??");
 
-			return new Text(
-				`${theme.fg("toolTitle", theme.bold(`${badges.edit} edit`))} ${pathDisplay}`,
-				0,
-				0,
-			);
+			return new Text(`${theme.fg("toolTitle", theme.bold(`${badges.edit} edit`))} ${pathDisplay}`, 0, 0);
 		},
 
 		renderResult(result, { expanded }, theme, _context) {
@@ -394,8 +374,7 @@ export default async function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "grep",
 		label: "grep",
-		description:
-			"Search file contents with fuzzy path scope resolution. Uses ripgrep for fast searching.",
+		description: "Search file contents with fuzzy path scope resolution. Uses ripgrep for fast searching.",
 		parameters: getBuiltInTools(process.cwd()).grep.parameters,
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
@@ -472,8 +451,7 @@ export default async function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "ls",
 		label: "ls",
-		description:
-			"List directory contents with file sizes. Shows files and directories with their sizes.",
+		description: "List directory contents with file sizes. Shows files and directories with their sizes.",
 		parameters: getBuiltInTools(process.cwd()).ls.parameters,
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {

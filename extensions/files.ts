@@ -5,9 +5,9 @@
  * coalesced by path and sorted newest first. Selecting a file opens it in VS Code.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { DynamicBorder } from "@mariozechner/pi-coding-agent";
-import { Container, Key, matchesKey, type SelectItem, SelectList, Text } from "@mariozechner/pi-tui";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { DynamicBorder } from "@earendil-works/pi-coding-agent";
+import { Container, Key, matchesKey, type SelectItem, SelectList, Text } from "@earendil-works/pi-tui";
 
 interface FileEntry {
 	path: string;
@@ -144,9 +144,7 @@ export default function (pi: ExtensionAPI) {
 				container.addChild(selectList);
 
 				// Help text
-				container.addChild(
-					new Text(theme.fg("dim", " ↑↓ navigate • ←→ page • enter open • esc close"), 0, 0),
-				);
+				container.addChild(new Text(theme.fg("dim", " ↑↓ navigate • ←→ page • enter open • esc close"), 0, 0));
 
 				// Bottom border
 				container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));

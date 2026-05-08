@@ -1,6 +1,6 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
-import type { AutocompleteItem } from "@mariozechner/pi-tui";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { registerRtkGrep } from "./rtkgrep";
 import { registerRtkFind } from "./rtkfind";
 
@@ -8,17 +8,7 @@ const KEY = "pi-rtk";
 const TIMEOUT_MS = 500;
 const LC_ALL_PREFIX = "export LC_ALL=C";
 
-const SUBCOMMANDS = [
-	"status",
-	"on",
-	"off",
-	"verbose",
-	"statusbar",
-	"tools",
-	"refresh",
-	"test",
-	"help",
-] as const;
+const SUBCOMMANDS = ["status", "on", "off", "verbose", "statusbar", "tools", "refresh", "test", "help"] as const;
 
 export default function piRtkExtension(pi: ExtensionAPI) {
 	let sessionEnabled = true;
@@ -31,8 +21,7 @@ export default function piRtkExtension(pi: ExtensionAPI) {
 	registerRtkFind(pi, () => toolsEnabled);
 
 	pi.registerCommand(KEY, {
-		description:
-			"Manage RTK bash rewriting: /pi-rtk [status|on|off|verbose|statusbar|tools|refresh|test <cmd>|help]",
+		description: "Manage RTK bash rewriting: /pi-rtk [status|on|off|verbose|statusbar|tools|refresh|test <cmd>|help]",
 		getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
 			const query = prefix.trim().toLowerCase();
 			const matches = SUBCOMMANDS.filter((cmd) => !query || cmd.startsWith(query)).map((cmd) => ({
@@ -92,10 +81,7 @@ export default function piRtkExtension(pi: ExtensionAPI) {
 					}
 					await refreshAvailability(ctx, true);
 					if (!rtkAvailable) {
-						ctx.ui.notify(
-							"RTK is not available. Install RTK and ensure `rtk rewrite` works in PATH.",
-							"warning",
-						);
+						ctx.ui.notify("RTK is not available. Install RTK and ensure `rtk rewrite` works in PATH.", "warning");
 						return;
 					}
 					const rewritten = await getRewrite(rawCommand, ctx);
@@ -193,10 +179,7 @@ export default function piRtkExtension(pi: ExtensionAPI) {
 		await refreshAvailability(ctx, false);
 		updateStatus(ctx);
 		if (rtkAvailable === false && ctx.hasUI) {
-			ctx.ui.notify(
-				"pi-rtk extension loaded, but `rtk rewrite` is not available from PATH.",
-				"warning",
-			);
+			ctx.ui.notify("pi-rtk extension loaded, but `rtk rewrite` is not available from PATH.", "warning");
 		}
 	});
 

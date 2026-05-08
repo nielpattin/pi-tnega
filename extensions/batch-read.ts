@@ -1,6 +1,6 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { Text } from "@mariozechner/pi-tui";
+import { Text } from "@earendil-works/pi-tui";
 import { readFile } from "node:fs/promises";
 import { resolve, relative } from "node:path";
 
@@ -17,9 +17,7 @@ export default function batchReadExtension(pi: ExtensionAPI) {
 		description:
 			"Read multiple files in a single call with per-file offset/limit. Returns contents separated by path headers.",
 		promptSnippet: "Read multiple files at once",
-		promptGuidelines: [
-			"Use batch_read when you need to read several files to reduce tool call round-trips.",
-		],
+		promptGuidelines: ["Use batch_read when you need to read several files to reduce tool call round-trips."],
 		parameters: Type.Object({
 			files: Type.Array(
 				Type.Object({
@@ -79,9 +77,7 @@ export default function batchReadExtension(pi: ExtensionAPI) {
 
 					sections.push(`--- ${display} ---\n${content}`);
 				} catch (err: any) {
-					sections.push(
-						`--- ${display} ---\n[error: ${err.code === "ENOENT" ? "file not found" : err.message}]`,
-					);
+					sections.push(`--- ${display} ---\n[error: ${err.code === "ENOENT" ? "file not found" : err.message}]`);
 				}
 			}
 

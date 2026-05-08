@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { TUI, visibleWidth } from "@mariozechner/pi-tui";
+import { TUI, visibleWidth } from "@earendil-works/pi-tui";
 import { CURSOR_MARKER, renderFixedEditorCluster } from "../fixed-editor/cluster.ts";
 import {
 	buildFixedClusterPaint,
@@ -78,11 +78,7 @@ test("fixed cluster caps selector-style editor replacements around the selected 
 		],
 	});
 
-	assert.deepEqual(rendered.lines, [
-		"  option-b",
-		"\x1b[38;5;39m→ \x1b[0m\x1b[38;5;39moption-c\x1b[0m",
-		"  option-d",
-	]);
+	assert.deepEqual(rendered.lines, ["  option-b", "\x1b[38;5;39m→ \x1b[0m\x1b[38;5;39moption-c\x1b[0m", "  option-d"]);
 });
 
 test("fixed cluster keeps tail status lines when compact", () => {
@@ -157,12 +153,7 @@ test("terminal split escape helpers generate DEC scroll region controls", () => 
 });
 
 test("fixed cluster paint clears bottom rows and positions hardware cursor", () => {
-	const paint = buildFixedClusterPaint(
-		{ lines: ["top", "edit"], cursor: { row: 1, col: 2 } },
-		10,
-		20,
-		true,
-	);
+	const paint = buildFixedClusterPaint({ lines: ["top", "edit"], cursor: { row: 1, col: 2 } }, 10, 20, true);
 
 	assert.match(paint, /^\x1b\[r/);
 	assert.ok(paint.includes("\x1b[9;1H\x1b[2Ktop"));
@@ -471,8 +462,7 @@ test("terminal split keeps tabbed overlay composition within terminal width", ()
 
 test("terminal split renders chat through an app-owned scroll viewport", () => {
 	const terminal = new FakeTerminal();
-	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null =
-		null;
+	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
 	const renderRequests: Array<boolean | undefined> = [];
 	let rootLines = Array.from({ length: 15 }, (_, index) => `line-${index}`);
 	const tui = {
@@ -583,8 +573,7 @@ test("terminal split renders chat through an app-owned scroll viewport", () => {
 
 test("terminal split handles modified SGR wheel packets", () => {
 	const terminal = new FakeTerminal();
-	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null =
-		null;
+	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
 	const renderRequests: Array<boolean | undefined> = [];
 	const tui = {
 		terminal,
@@ -649,8 +638,7 @@ test("terminal split handles modified SGR wheel packets", () => {
 
 test("terminal split pauses mouse reporting on right click for the terminal context menu", () => {
 	const terminal = new FakeTerminal();
-	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null =
-		null;
+	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
 	const renderRequests: Array<boolean | undefined> = [];
 	const copied: string[] = [];
 	const tui = {
@@ -693,8 +681,7 @@ test("terminal split pauses mouse reporting on right click for the terminal cont
 
 test("terminal split selects visible chat text and copies it on drag release", () => {
 	const terminal = new FakeTerminal();
-	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null =
-		null;
+	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
 	const renderRequests: Array<boolean | undefined> = [];
 	const copied: string[] = [];
 	const rootLines = [
@@ -771,8 +758,7 @@ test("terminal split restores app-owned selection after context menu copy", (t) 
 	t.mock.timers.enable({ apis: ["setTimeout"] });
 
 	const terminal = new FakeTerminal();
-	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null =
-		null;
+	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
 	let clipboard = "";
 	const rootLines = [
 		"old-0",
@@ -850,8 +836,7 @@ test("terminal split restores app-owned selection after context menu copy", (t) 
 test("terminal split selection does not expose OSC control sequences as text", () => {
 	const terminal = new FakeTerminal();
 	terminal.columns = 20;
-	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null =
-		null;
+	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
 	const rootLines = [
 		"old-0",
 		"old-1",
@@ -907,15 +892,12 @@ test("terminal split selection highlighting does not duplicate wide glyphs", () 
 	for (const glyph of ["🪃", "👨‍👩‍👧‍👦"]) {
 		const terminal = new FakeTerminal();
 		terminal.columns = 30;
-		let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null =
-			null;
+		let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
 		const prefix = "Done shows ";
 		const line = `${prefix}${glyph} auto${" ".repeat(30 - visibleWidth(`${prefix}${glyph} auto`))}`;
 		const tui = {
 			terminal,
-			addInputListener(
-				listener: (data: string) => { consume?: boolean; data?: string } | undefined,
-			) {
+			addInputListener(listener: (data: string) => { consume?: boolean; data?: string } | undefined) {
 				inputListener = listener;
 				return () => {
 					inputListener = null;
@@ -923,18 +905,7 @@ test("terminal split selection highlighting does not duplicate wide glyphs", () 
 			},
 			requestRender() {},
 			render() {
-				return [
-					"old-0",
-					"old-1",
-					"old-2",
-					"old-3",
-					"old-4",
-					"old-5",
-					"old-6",
-					"old-7",
-					"old-8",
-					line,
-				];
+				return ["old-0", "old-1", "old-2", "old-3", "old-4", "old-5", "old-6", "old-7", "old-8", line];
 			},
 		};
 
@@ -962,8 +933,7 @@ test("terminal split selection highlighting does not duplicate wide glyphs", () 
 
 test("terminal split copies chat and fixed cluster selections", () => {
 	const terminal = new FakeTerminal();
-	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null =
-		null;
+	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
 	const copied: string[] = [];
 	const rootLines = [
 		"old-0",
@@ -1041,8 +1011,7 @@ test("terminal split copies chat and fixed cluster selections", () => {
 
 test("terminal split selection scrolls when dragged to viewport edges", () => {
 	const terminal = new FakeTerminal();
-	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null =
-		null;
+	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
 	const copied: string[] = [];
 	const tui = {
 		terminal,
@@ -1091,8 +1060,7 @@ test("terminal split selection scrolls when dragged to viewport edges", () => {
 
 test("terminal split copies edge-scrolled selections without waiting for render", () => {
 	const terminal = new FakeTerminal();
-	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null =
-		null;
+	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
 	const copied: string[] = [];
 	const tui = {
 		terminal,
@@ -1152,8 +1120,7 @@ test("terminal split copies edge-scrolled selections without waiting for render"
 
 test("terminal split maps post-edge-scroll drags against the updated viewport", () => {
 	const terminal = new FakeTerminal();
-	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null =
-		null;
+	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
 	const copied: string[] = [];
 	const tui = {
 		terminal,
@@ -1192,8 +1159,7 @@ test("terminal split maps post-edge-scroll drags against the updated viewport", 
 
 test("terminal split keyboard scroll supports Pi page aliases and preserves app shortcuts", () => {
 	const terminal = new FakeTerminal();
-	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null =
-		null;
+	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
 	const tui = {
 		terminal,
 		addInputListener(listener: (data: string) => { consume?: boolean; data?: string } | undefined) {
@@ -1251,8 +1217,7 @@ test("terminal split keyboard scroll supports Pi page aliases and preserves app 
 test("terminal split keyboard scroll accepts configured shortcuts", () => {
 	const terminal = new FakeTerminal();
 	const renderRequests: Array<boolean | undefined> = [];
-	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null =
-		null;
+	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
 	const tui = {
 		terminal,
 		addInputListener(listener: (data: string) => { consume?: boolean; data?: string } | undefined) {
@@ -1415,8 +1380,7 @@ test("terminal split jumps to previous root target lines", () => {
 
 test("terminal split previous root target only moves to older targets", () => {
 	const terminal = new FakeTerminal();
-	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null =
-		null;
+	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
 	const tui = {
 		terminal,
 		addInputListener(listener: (data: string) => { consume?: boolean; data?: string } | undefined) {
@@ -1483,8 +1447,7 @@ test("terminal split previous root target only moves to older targets", () => {
 
 test("terminal split can disable mouse reporting for normal selection", () => {
 	const terminal = new FakeTerminal();
-	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null =
-		null;
+	let inputListener: ((data: string) => { consume?: boolean; data?: string } | undefined) | null = null;
 	const renderRequests: Array<boolean | undefined> = [];
 	const tui = {
 		terminal,
