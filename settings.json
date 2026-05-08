@@ -3,8 +3,8 @@
   "compaction": {
     "enabled": true
   },
-  "defaultModel": "deepseek/deepseek-v4-pro",
-  "defaultProvider": "cmd-code",
+  "defaultModel": "gpt-5.5",
+  "defaultProvider": "freemodel",
   "defaultThinkingLevel": "medium",
   "doubleEscapeAction": "none",
   "editorPaddingX": 0,
@@ -27,7 +27,8 @@
     "blazeai/DeepSeek-V4-Flash-TEST",
     "cmd-code/moonshotai/Kimi-K2.6",
     "cmd-code/deepseek/deepseek-v4-pro",
-    "cmd-code/deepseek/deepseek-v4-flash"
+    "cmd-code/deepseek/deepseek-v4-flash",
+    "freemodel/gpt-5.5"
   ],
   "extensions": [
     "+extensions\\tool-selector\\index.ts",
@@ -41,7 +42,7 @@
     "-extensions\\git-guard.ts",
     "-extensions\\rg-guard.ts",
     "+extensions\\pi-subagents\\src\\index.ts",
-    "-extensions\\pi-footer\\index.ts",
+    "+extensions\\pi-footer\\index.ts",
     "+extensions\\pi-mcp-adapter\\index.ts"
   ],
   "followUpMode": "all",

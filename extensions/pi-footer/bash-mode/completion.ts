@@ -434,8 +434,7 @@ export class BashCompletionEngine {
 }
 
 export class BashAutocompleteProvider implements AutocompleteProvider {
-	// @ts-expect-error interface mismatch with pi-tui version
-	getSuggestions(): AutocompleteSuggestions | null {
+	async getSuggestions(): Promise<AutocompleteSuggestions | null> {
 		return null;
 	}
 
@@ -484,8 +483,7 @@ function applyExtendedCompletion(
 }
 
 export class OneOffBashAutocompleteProvider implements AutocompleteProvider {
-	// @ts-expect-error interface mismatch with pi-tui version
-	getSuggestions(): AutocompleteSuggestions | null {
+	async getSuggestions(): Promise<AutocompleteSuggestions | null> {
 		return null;
 	}
 
@@ -530,13 +528,12 @@ export class ModeAwareAutocompleteProvider implements AutocompleteProvider {
 		this.isBashModeActive = isBashModeActive;
 	}
 
-	// @ts-expect-error interface mismatch with pi-tui version
-	getSuggestions(
+	async getSuggestions(
 		lines: string[],
 		cursorLine: number,
 		cursorCol: number,
 		options: { signal: AbortSignal; force?: boolean },
-	): AutocompleteSuggestions | null | Promise<AutocompleteSuggestions | null> {
+	): Promise<AutocompleteSuggestions | null> {
 		if (this.isBashModeActive()) {
 			return this.bashProvider.getSuggestions(lines, cursorLine, cursorCol, options);
 		}

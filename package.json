@@ -6,6 +6,8 @@
     "test:watch": "vitest",
     "lint": "oxlint -c .oxlintrc.json",
     "lint:fix": "oxlint -c .oxlintrc.json --fix",
+    "typecheck": "tsc --noEmit --pretty false --project tsconfig.json",
+    "check": "bun run fmt:check && bun run lint && bun run typecheck && bun run test",
     "fmt": "oxfmt -c .oxfmtrc.json",
     "fmt:check": "oxfmt -c .oxfmtrc.json --check",
     "prepare": "husky"
