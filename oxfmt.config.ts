@@ -1,7 +1,7 @@
 import { defineConfig } from "oxfmt";
 
 export default defineConfig({
-   ignorePatterns: ["dist", "build", "node_modules", "skills"],
+   ignorePatterns: ["dist", "build", "node_modules", "skills", "tests", "test", "*.test.ts", "settings.json"],
    printWidth: 120,
    tabWidth: 3,
    overrides: [

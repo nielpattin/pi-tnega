@@ -10,55 +10,7 @@ interface FileEntry {
    limit?: number;
 }
 
-function asksForChunkedRead(prompt: string) {
-   return /\b(chunk|chunks|chunked|incremental|incrementally|range|ranges|offset|offsets)\b/i.test(prompt);
-}
-
-function readPath(input: Record<string, unknown>) {
-   const path = input.path ?? input.file_path;
-   return typeof path === "string" ? path : undefined;
-}
-
-function hasReadRange(input: Record<string, unknown>) {
-   return input.offset !== undefined || input.limit !== undefined;
-}
-
 export default function batchReadExtension(pi: ExtensionAPI) {
-   let forceBatchReadForCurrentPrompt = false;
-   let readsByPath = new Map<string, { count: number; ranged: boolean }>();
-
-   pi.on("before_agent_start", async (event) => {
-      forceBatchReadForCurrentPrompt = asksForChunkedRead(event.prompt);
-      readsByPath = new Map();
-   });
-
-   pi.on("tool_call", async (event) => {
-      let result: { block: boolean; reason: string } | undefined;
-      if (event.toolName !== "read") return result;
-
-      const path = readPath(event.input);
-      const ranged = hasReadRange(event.input);
-      const previous = path ? readsByPath.get(path) : undefined;
-      const repeatedChunkRead = !!path && !!previous && (ranged || previous.ranged);
-
-      if (forceBatchReadForCurrentPrompt || repeatedChunkRead) {
-         result = {
-            block: true,
-            reason:
-               "Use batch_read instead of multiple read calls for chunked or repeated same-file reads. Put the chunks in one batch_read call, for example [{ path, offset: 1, limit: 500 }, { path, offset: 501, limit: 500 }, { path, offset: 1001, limit: 500 }]. A single read is fine when the file fits in one result.",
-         };
-      }
-
-      if (path) {
-         readsByPath.set(path, {
-            count: (previous?.count ?? 0) + 1,
-            ranged: (previous?.ranged ?? false) || ranged,
-         });
-      }
-
-      return result;
-   });
-
    pi.registerTool({
       name: "batch_read",
       label: "batch read",

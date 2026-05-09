@@ -1,111 +1,121 @@
 {
-   "collapseChangelog": true,
-   "compaction": {
-      "enabled": false
-   },
-   "defaultModel": "deepseek/deepseek-v4-pro",
-   "defaultProvider": "cmd-code",
-   "defaultThinkingLevel": "high",
-   "doubleEscapeAction": "none",
-   "editorPaddingX": 0,
-   "enableSkillCommands": true,
-   "enabledModels": [
-      "openai-codex/gpt-5.4",
-      "openai-codex/gpt-5.4-mini",
-      "openai-codex/gpt-5.5",
-      "github-copilot/gpt-5.4-mini",
-      "github-copilot/claude-haiku-4.5",
-      "github-copilot/gemini-3-flash-preview",
-      "github-copilot/gemini-3.1-pro-preview",
-      "google/gemini-3-flash-preview",
-      "google/gemini-3.1-flash-lite-preview",
-      "google/gemini-3.1-pro-preview",
-      "xiaomi-token-plan-sgp/mimo-v2.5-pro",
-      "xiaomi-token-plan-sgp/mimo-v2.5",
-      "cmd-code/moonshotai/Kimi-K2.6",
-      "cmd-code/deepseek/deepseek-v4-pro",
-      "cmd-code/deepseek/deepseek-v4-flash",
-      "freemodel/gpt-5.5",
-      "openrouter/baidu/cobuddy:free",
-      "openrouter/inclusionai/ring-2.6-1t:free"
-   ],
-   "extensions": [
-      "+extensions\\tool-selector\\index.ts",
-      "-extensions\\web-reader.ts",
-      "-extensions\\simplify-test.ts",
-      "-extensions\\notification\\index.ts",
-      "-extensions\\cute-minimal-mode.ts",
-      "+extensions\\context-stats.ts",
-      "-extensions\\files.ts",
-      "-extensions\\stats.ts",
-      "-extensions\\git-guard.ts",
-      "-extensions\\rg-guard.ts",
-      "+extensions\\pi-subagents\\src\\index.ts",
-      "+extensions\\pi-footer\\index.ts",
-      "+extensions\\pi-mcp-adapter\\index.ts"
-   ],
-   "followUpMode": "all",
-   "hideThinkingBlock": true,
-   "images": {
-      "autoResize": true
-   },
-   "lastChangelogVersion": "0.74.0",
-   "packages": [
-      {
-         "extensions": ["-extensions\\index.ts"],
-         "source": "C:\\Users\\niel\\.pi\\agent\\extensions\\pi-teams"
-      },
-      "git:github.com/raunovillberg/im-pi-eccable",
-      {
-         "source": "npm:pi-mcp-adapter",
-         "extensions": ["-index.ts"]
-      },
-      "npm:pi-simplify",
-      "git:github.com/Jon-Vii/pi-imagegen",
-      {
-         "source": "npm:@tintinweb/pi-subagents",
-         "extensions": ["-src\\index.ts"]
-      }
-   ],
-   "prompts": ["+prompts\\commit.md"],
-   "quietStartup": false,
-   "skills": [
-      "-skills\\writing-git-commits\\SKILL.md",
-      "-skills\\update-pi\\SKILL.md",
-      "-skills\\figma-use\\SKILL.md",
-      "+skills\\agent-browser\\SKILL.md",
-      "-skills\\playwriter\\SKILL.md",
-      "-skills\\drawio-diagrams-enhanced\\SKILL.md",
-      "-skills\\brainstorming\\SKILL.md",
-      "-skills\\using-superpowers\\SKILL.md"
-   ],
-   "steeringMode": "all",
-   "terminal": {
-      "clearOnShrink": false,
-      "showTerminalProgress": true
-   },
-   "theme": "catppuccin-mocha",
-   "themes": [
-      "-themes\\cyberpunk.json",
-      "-themes\\dracula.json",
-      "-themes\\everforest.json",
-      "-themes\\midnight-ocean.json",
-      "-themes\\ocean-breeze.json",
-      "-themes\\orng.json",
-      "-themes\\rose-pine.json",
-      "-themes\\synthwave.json",
-      "-themes\\tokyo-night.json",
-      "-themes\\terminal.json",
-      "-themes\\gruvbox.json",
-      "-themes\\nord.json"
-   ],
-   "transport": "auto",
-   "treeFilterMode": "no-tools",
-   "designDeck": {},
-   "retry": {
-      "enabled": true,
-      "maxRetries": 8
-   },
-   "npmCommand": ["bun"],
-   "powerline": "default"
+  "collapseChangelog": true,
+  "compaction": {
+    "enabled": false
+  },
+  "defaultModel": "gpt-5.5",
+  "defaultProvider": "freemodel",
+  "defaultThinkingLevel": "medium",
+  "doubleEscapeAction": "none",
+  "editorPaddingX": 0,
+  "enableSkillCommands": true,
+  "enabledModels": [
+    "openai-codex/gpt-5.4",
+    "openai-codex/gpt-5.4-mini",
+    "openai-codex/gpt-5.5",
+    "github-copilot/gpt-5.4-mini",
+    "github-copilot/claude-haiku-4.5",
+    "github-copilot/gemini-3-flash-preview",
+    "github-copilot/gemini-3.1-pro-preview",
+    "google/gemini-3-flash-preview",
+    "google/gemini-3.1-flash-lite-preview",
+    "google/gemini-3.1-pro-preview",
+    "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+    "xiaomi-token-plan-sgp/mimo-v2.5",
+    "cmd-code/moonshotai/Kimi-K2.6",
+    "cmd-code/deepseek/deepseek-v4-pro",
+    "cmd-code/deepseek/deepseek-v4-flash",
+    "freemodel/gpt-5.5",
+    "openrouter/baidu/cobuddy:free",
+    "openrouter/inclusionai/ring-2.6-1t:free"
+  ],
+  "extensions": [
+    "+extensions\\tool-selector\\index.ts",
+    "-extensions\\web-reader.ts",
+    "-extensions\\simplify-test.ts",
+    "-extensions\\notification\\index.ts",
+    "-extensions\\cute-minimal-mode.ts",
+    "+extensions\\context-stats.ts",
+    "-extensions\\files.ts",
+    "-extensions\\stats.ts",
+    "-extensions\\git-guard.ts",
+    "-extensions\\rg-guard.ts",
+    "+extensions\\pi-subagents\\src\\index.ts",
+    "+extensions\\pi-footer\\index.ts",
+    "+extensions\\pi-mcp-adapter\\index.ts"
+  ],
+  "followUpMode": "all",
+  "hideThinkingBlock": false,
+  "images": {
+    "autoResize": true
+  },
+  "lastChangelogVersion": "0.74.0",
+  "packages": [
+    {
+      "extensions": [
+        "-extensions\\index.ts"
+      ],
+      "source": "C:\\Users\\niel\\.pi\\agent\\extensions\\pi-teams"
+    },
+    "git:github.com/raunovillberg/im-pi-eccable",
+    {
+      "source": "npm:pi-mcp-adapter",
+      "extensions": [
+        "-index.ts"
+      ]
+    },
+    "npm:pi-simplify",
+    "git:github.com/Jon-Vii/pi-imagegen",
+    {
+      "source": "npm:@tintinweb/pi-subagents",
+      "extensions": [
+        "-src\\index.ts"
+      ]
+    }
+  ],
+  "prompts": [
+    "+prompts\\commit.md"
+  ],
+  "quietStartup": false,
+  "skills": [
+    "-skills\\writing-git-commits\\SKILL.md",
+    "-skills\\update-pi\\SKILL.md",
+    "-skills\\figma-use\\SKILL.md",
+    "+skills\\agent-browser\\SKILL.md",
+    "-skills\\playwriter\\SKILL.md",
+    "-skills\\drawio-diagrams-enhanced\\SKILL.md",
+    "-skills\\brainstorming\\SKILL.md",
+    "-skills\\using-superpowers\\SKILL.md"
+  ],
+  "steeringMode": "all",
+  "terminal": {
+    "clearOnShrink": false,
+    "showTerminalProgress": true
+  },
+  "theme": "catppuccin-mocha",
+  "themes": [
+    "-themes\\cyberpunk.json",
+    "-themes\\dracula.json",
+    "-themes\\everforest.json",
+    "-themes\\midnight-ocean.json",
+    "-themes\\ocean-breeze.json",
+    "-themes\\orng.json",
+    "-themes\\rose-pine.json",
+    "-themes\\synthwave.json",
+    "-themes\\tokyo-night.json",
+    "-themes\\terminal.json",
+    "-themes\\gruvbox.json",
+    "-themes\\nord.json"
+  ],
+  "transport": "auto",
+  "treeFilterMode": "no-tools",
+  "designDeck": {},
+  "retry": {
+    "enabled": true,
+    "maxRetries": 8
+  },
+  "npmCommand": [
+    "bun"
+  ],
+  "powerline": "default"
 }

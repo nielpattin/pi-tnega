@@ -8,7 +8,14 @@ export default defineConfig({
    env: {
       builtin: true,
    },
-   ignorePatterns: ["skills/**", "**/pi-mcp-adapter/**", "preciseVerboseReporter.ts"],
+   ignorePatterns: [
+      "skills/**",
+      "**/pi-mcp-adapter/**",
+      "**/test/**",
+      "**/tests/**",
+      "*.test.ts",
+      "preciseVerboseReporter.ts",
+   ],
    rules: {
       "eslint/no-control-regex": "off",
    },
