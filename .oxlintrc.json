@@ -1,61 +1,56 @@
 {
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "ignorePatterns": ["skills/**", "**/tests/**", "**/pi-mcp-adapter/**", "preciseVerboseReporter.ts"],
-  "options": {
-    "typeAware": true,
-    "typeCheck": false
-  },
-  "plugins": [
-    "eslint",
-    "typescript",
-    "unicorn",
-    "oxc"
-  ],
-  "categories": {
-    "correctness": "error",
-    "suspicious": "error"
-  },
-  "rules": {
-    "no-control-regex": "off",
-    "typescript/no-non-null-assertion": "off",
-    "typescript/no-explicit-any": "off",
-    "typescript/no-empty-interface": "off",
-    "unicorn/prefer-node-protocol": "off",
-    "unicorn/no-null": "off",
-    "unicorn/consistent-function-scoping": "off",
-    "unicorn/no-array-sort": "off",
-    "unicorn/no-nested-ternary": "off",
-    "unicorn/prefer-string-raw": "off",
-    "unicorn/text-encoding-identifier-case": "off",
-    "eslint/no-ternary": "off",
-    "eslint/sort-imports": "off",
-    "eslint/sort-keys": "off",
-    "eslint/prefer-destructuring": "off",
-    "eslint/prefer-template": "off",
-    "eslint/prefer-const": "off",
-    "eslint/prefer-object-has-own": "off",
-    "eslint/no-shadow": "off",
-    "typescript/array-type": "off",
-    "typescript/consistent-type-definitions": "off",
-    "typescript/no-unnecessary-type-assertion": "off",
-    "typescript/no-unsafe-type-assertion": "off",
-    "eslint/no-new": "off",
-    "eslint/no-unused-vars": "off",
-    "eslint/no-useless-escape": "off",
-    "typescript/await-thenable": "off",
-    "typescript/consistent-return": "off",
-    "typescript/no-base-to-string": "off",
-    "typescript/no-floating-promises": "off",
-    "typescript/no-redundant-type-constituents": "off",
-    "typescript/no-unnecessary-boolean-literal-compare": "off",
-    "typescript/no-unnecessary-type-arguments": "off",
-    "typescript/no-unnecessary-type-conversion": "off",
-    "typescript/no-unnecessary-type-parameters": "off",
-    "typescript/unbound-method": "off",
-    "unicorn/no-array-reverse": "off",
-    "unicorn/no-useless-fallback-in-spread": "off"
-  },
-  "env": {
-    "builtin": true
-  }
+   "$schema": "./node_modules/oxlint/configuration_schema.json",
+   "ignorePatterns": ["skills/**", "**/tests/**", "**/pi-mcp-adapter/**", "preciseVerboseReporter.ts"],
+   "options": {
+      "typeAware": true,
+      "typeCheck": false
+   },
+   "plugins": ["eslint", "typescript", "unicorn", "oxc"],
+   "categories": {
+      "correctness": "error",
+      "suspicious": "error"
+   },
+   "rules": {
+      "no-control-regex": "off",
+      "typescript/no-non-null-assertion": "off",
+      "typescript/no-explicit-any": "off",
+      "typescript/no-empty-interface": "off",
+      "unicorn/prefer-node-protocol": "off",
+      "unicorn/no-null": "off",
+      "unicorn/consistent-function-scoping": "off",
+      "unicorn/no-array-sort": "off",
+      "unicorn/no-nested-ternary": "off",
+      "unicorn/prefer-string-raw": "off",
+      "unicorn/text-encoding-identifier-case": "off",
+      "eslint/no-ternary": "off",
+      "eslint/sort-imports": "off",
+      "eslint/sort-keys": "off",
+      "eslint/prefer-destructuring": "off",
+      "eslint/prefer-template": "off",
+      "eslint/prefer-const": "off",
+      "eslint/prefer-object-has-own": "off",
+      "eslint/no-shadow": "off",
+      "typescript/array-type": "off",
+      "typescript/consistent-type-definitions": "off",
+      "typescript/no-unnecessary-type-assertion": "off",
+      "typescript/no-unsafe-type-assertion": "off",
+      "eslint/no-new": "off",
+      "eslint/no-unused-vars": "warn",
+      "eslint/no-useless-escape": "off",
+      "typescript/await-thenable": "off",
+      "typescript/consistent-return": "off",
+      "typescript/no-base-to-string": "off",
+      "typescript/no-floating-promises": "off",
+      "typescript/no-redundant-type-constituents": "off",
+      "typescript/no-unnecessary-boolean-literal-compare": "off",
+      "typescript/no-unnecessary-type-arguments": "off",
+      "typescript/no-unnecessary-type-conversion": "off",
+      "typescript/no-unnecessary-type-parameters": "off",
+      "typescript/unbound-method": "off",
+      "unicorn/no-array-reverse": "off",
+      "unicorn/no-useless-fallback-in-spread": "off"
+   },
+   "env": {
+      "builtin": true
+   }
 }

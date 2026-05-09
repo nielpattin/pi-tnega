@@ -1,41 +1,41 @@
 {
-  "packageManager": "bun@1.3.13",
-  "type": "module",
-  "scripts": {
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "lint": "oxlint -c .oxlintrc.json",
-    "lint:fix": "oxlint -c .oxlintrc.json --fix",
-    "typecheck": "tsc --noEmit --pretty false --project tsconfig.json",
-    "check": "bun run fmt:check && bun run lint && bun run typecheck && bun run test",
-    "fmt": "oxfmt -c .oxfmtrc.json",
-    "fmt:check": "oxfmt -c .oxfmtrc.json --check",
-    "prepare": "husky"
-  },
-  "lint-staged": {
-    "*.{js,jsx,ts,tsx,mjs,cjs}": [
-      "bun run lint:fix",
-      "bun run fmt"
-    ]
-  },
-  "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.74.0",
-    "@earendil-works/pi-ai": "^0.74.0",
-    "@earendil-works/pi-coding-agent": "^0.74.0",
-    "@earendil-works/pi-tui": "^0.74.0",
-    "@sinclair/typebox": "^0.34.49",
-    "@zenobius/pi-extension-config": "^0.2.0",
-    "fzf": "^0.5.2"
-  },
-  "devDependencies": {
-    "@types/node": "^25.6.0",
-    "husky": "^9.1.7",
-    "lint-staged": "^16.4.0",
-    "oxfmt": "^0.47.0",
-    "oxlint": "^1.62.0",
-    "oxlint-tsgolint": "^0.22.1",
-    "vitest": "^4.1.5",
-    "typescript": "^6.0.3",
-    "yoctocolors": "2.1.2"
-  }
+   "type": "module",
+   "scripts": {
+      "test": "vitest run",
+      "test:watch": "vitest",
+      "lint": "oxlint -c .oxlintrc.json",
+      "lint:fix": "oxlint -c .oxlintrc.json --fix",
+      "typecheck": "tsc --noEmit --pretty false --project tsconfig.json",
+      "check": "bun run fmt:check && bun run lint && bun run typecheck && bun run test",
+      "fmt": "oxfmt -c oxfmt.config.ts",
+      "fmt:check": "oxfmt -c oxfmt.config.ts --check",
+      "prepare": "husky"
+   },
+   "dependencies": {
+      "@earendil-works/pi-agent-core": "^0.74.0",
+      "@earendil-works/pi-ai": "^0.74.0",
+      "@earendil-works/pi-coding-agent": "^0.74.0",
+      "@earendil-works/pi-tui": "^0.74.0",
+      "@sinclair/typebox": "^0.34.49",
+      "@zenobius/pi-extension-config": "^0.2.0",
+      "fzf": "^0.5.2"
+   },
+   "devDependencies": {
+      "@types/node": "^25.6.0",
+      "husky": "^9.1.7",
+      "lint-staged": "^16.4.0",
+      "oxfmt": "^0.47.0",
+      "oxlint": "^1.62.0",
+      "oxlint-tsgolint": "^0.22.1",
+      "typescript": "^6.0.3",
+      "vitest": "^4.1.5",
+      "yoctocolors": "2.1.2"
+   },
+   "lint-staged": {
+      "*.{js,jsx,ts,tsx,mjs,cjs}": [
+         "bun run lint:fix",
+         "bun run fmt"
+      ]
+   },
+   "packageManager": "bun@1.3.13"
 }

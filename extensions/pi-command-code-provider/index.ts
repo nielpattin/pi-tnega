@@ -1,3 +1,3 @@
-import commandCodeProviderExtension from "./src/index.js";
+import commandCodeProviderExtension from "./src/index";
 
 export default commandCodeProviderExtension;

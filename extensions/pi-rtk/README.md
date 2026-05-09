@@ -52,10 +52,10 @@ Once installed, restart pi or run `/reload`.
 
 Disabled by default. Enable with `/pi-rtk tools on`.
 
-| Tool | Description | RTK command |
-|------|-------------|-------------|
-| `rtk_grep` | Token-optimized content search | `rtk grep` |
-| `rtk_find` | Token-optimized file search | `rtk find` |
+| Tool       | Description                    | RTK command |
+| ---------- | ------------------------------ | ----------- |
+| `rtk_grep` | Token-optimized content search | `rtk grep`  |
+| `rtk_find` | Token-optimized file search    | `rtk find`  |
 
 ## Notes
 

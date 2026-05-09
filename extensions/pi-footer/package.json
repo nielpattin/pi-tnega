@@ -1,32 +1,32 @@
 {
-  "name": "pi-footer",
-  "version": "0.0.1",
-  "description": "Powerline-style status bar with bash mode, git integration, context awareness, thinking-level indicator, editor stash, and fixed-editor scrolling for pi",
-  "type": "module",
-  "files": [
-    "*.ts",
-    "*.md",
-    "*.json",
-    "bash-mode/*.ts",
-    "fixed-editor/*.ts"
-  ],
-  "keywords": [
-    "pi-package",
-    "pi",
-    "coding-agent",
-    "status-bar",
-    "powerline",
-    "extension"
-  ],
-  "license": "MIT",
-  "pi": {
-    "extensions": [
-      "./index.ts"
-    ]
-  },
-  "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-tui": "*"
-  }
+   "name": "pi-footer",
+   "version": "0.0.1",
+   "description": "Powerline-style status bar with bash mode, git integration, context awareness, thinking-level indicator, editor stash, and fixed-editor scrolling for pi",
+   "keywords": [
+      "coding-agent",
+      "extension",
+      "pi",
+      "pi-package",
+      "powerline",
+      "status-bar"
+   ],
+   "license": "MIT",
+   "files": [
+      "*.ts",
+      "*.md",
+      "*.json",
+      "bash-mode/*.ts",
+      "fixed-editor/*.ts"
+   ],
+   "type": "module",
+   "peerDependencies": {
+      "@earendil-works/pi-ai": "*",
+      "@earendil-works/pi-coding-agent": "*",
+      "@earendil-works/pi-tui": "*"
+   },
+   "pi": {
+      "extensions": [
+         "./index.ts"
+      ]
+   }
 }

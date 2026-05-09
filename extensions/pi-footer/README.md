@@ -1,6 +1,7 @@
 # pi-footer
 
-Customizes the default [pi](https://github.com/badlogic/pi-mono) editor with a powerline-style status bar. 
+Customizes the default [pi](https://github.com/badlogic/pi-mono) editor with a powerline-style status bar.
+
 ## Features
 
 **Editor stash** — Press `Alt+S` to save your editor content and clear the editor, type a quick prompt, and your stashed text auto-restores when the agent finishes. Toggles between stash, pop, and update-existing-stash. A `stash` indicator appears in the powerline bar while text is stashed.
@@ -13,7 +14,7 @@ Customizes the default [pi](https://github.com/badlogic/pi-mono) editor with a p
 
 **Smart defaults** — Nerd Font auto-detection for iTerm, WezTerm, Kitty, Ghostty, and Alacritty with ASCII fallbacks. Colors matched to oh-my-pi's dark theme.
 
-**Git integration** — Async status fetching with 1s cache TTL. Automatically invalidates on file writes/edits. Shows branch, staged (+), unstaged (*), and untracked (?) counts.
+**Git integration** — Async status fetching with 1s cache TTL. Automatically invalidates on file writes/edits. Shows branch, staged (+), unstaged (\*), and untracked (?) counts.
 
 **Context awareness** — Color-coded warnings at 70% (yellow) and 90% (red) context usage. During streaming, the context segment refreshes from live assistant usage instead of waiting for the next turn. Auto-compact indicator when enabled. If `pi-custom-compaction` is installed and enabled, the powerline automatically hides native context segments so the footer does not show stale post-summary usage.
 
@@ -33,40 +34,21 @@ Restart pi to activate.
 
 ## Usage
 
-Activates automatically. Toggle with `/powerline`, switch presets with `/powerline <name>`, fixed-editor mode with `/powerline fixed-editor on|off|toggle`, and wheel mode with `/powerline mouse-scroll on|off|toggle`.
+Activates automatically. Enable with `/powerline on`, disable with `/powerline off`.
 
-Fixed editor is on by default.
-
-- `/powerline fixed-editor off` — return to Pi's regular scrolling layout
-- `/powerline fixed-editor on` — re-enable the fixed editor
-- `/powerline fixed-editor toggle` — switch between the two
-
-You can also set it in `~/.pi/agent/settings.json` or project-local `.pi/settings.json`:
+You can also set fixed-editor and mouse-scroll options in `~/.pi/agent/settings.json` or project-local `.pi/settings.json`:
 
 ```json
 {
-  "powerline": {
-    "preset": "default",
-    "fixedEditor": false
-  }
+    "powerline": {
+        "fixedEditor": false
+    }
 }
 ```
 
 Use `"fixedEditor": true` to enable it again. Add `"mouseScroll": false` if you want native terminal selection instead of fixed-editor mouse handling.
 
-| Preset | Description |
-|--------|-------------|
-| `default` | Model, thinking, path (basename), git, context, tokens, cost |
-| `minimal` | Just path (basename), git, context |
-| `compact` | Model, git, cost, context |
-| `full` | Everything including hostname, time, abbreviated path |
-| `nerd` | Maximum detail for Nerd Font users |
-| `ascii` | Safe for any terminal |
-
 **Environment:** `POWERLINE_NERD_FONTS=1` to force Nerd Fonts, `=0` for ASCII.
-
-Preset selection is saved to `~/.pi/agent/settings.json` under `powerline` and restored on startup.
-Run `/powerline default` to switch back to the default preset.
 
 ### Custom items from extension statuses
 
@@ -77,24 +59,23 @@ You can promote any extension status key into its own dedicated powerline item. 
 
 ```json
 {
-  "powerline": {
-    "preset": "default",
-    "customItems": [
-      {
-        "id": "ci",
-        "statusKey": "ci-status",
-        "position": "right",
-        "prefix": "CI",
-        "color": "warning"
-      },
-      {
-        "id": "review",
-        "position": "secondary",
-        "hideWhenMissing": false,
-        "prefix": "review"
-      }
-    ]
-  }
+    "powerline": {
+        "customItems": [
+            {
+                "id": "ci",
+                "statusKey": "ci-status",
+                "position": "right",
+                "prefix": "CI",
+                "color": "warning"
+            },
+            {
+                "id": "review",
+                "position": "secondary",
+                "hideWhenMissing": false,
+                "prefix": "review"
+            }
+        ]
+    }
 }
 ```
 
@@ -107,8 +88,6 @@ You can promote any extension status key into its own dedicated powerline item. 
 - `color` (optional): any Pi theme color (`warning`, `accent`, etc.) or hex (`#RRGGBB`)
 - `hideWhenMissing` (optional): hide item when no status is present (default `true`)
 - `excludeFromExtensionStatuses` (optional): omit this key from the aggregate `extension_statuses` segment (default `true`)
-
-If you still prefer the old style, `"powerline": "default"` continues to work.
 
 ## Bash mode
 
@@ -138,11 +117,11 @@ In `~/.pi/agent/settings.json`:
 
 ```json
 {
-  "bashMode": {
-    "toggleShortcut": "ctrl+shift+b",
-    "transcriptMaxLines": 2000,
-    "transcriptMaxBytes": 524288
-  }
+    "bashMode": {
+        "toggleShortcut": "ctrl+shift+b",
+        "transcriptMaxLines": 2000,
+        "transcriptMaxBytes": 524288
+    }
 }
 ```
 
@@ -150,16 +129,16 @@ In `~/.pi/agent/settings.json`:
 
 Use `Alt+S` / `Option+S` as a quick stash toggle while drafting. It keeps one active stash and clears the editor when stashing.
 
-| Editor | Stash | `Alt+S` result |
-|--------|-------|----------------|
-| Has text | Empty | Stash current text, clear editor |
-| Empty | Has stash | Restore stash into editor |
+| Editor   | Stash     | `Alt+S` result                               |
+| -------- | --------- | -------------------------------------------- |
+| Has text | Empty     | Stash current text, clear editor             |
+| Empty    | Has stash | Restore stash into editor                    |
 | Has text | Has stash | Update stash with current text, clear editor |
-| Empty | Empty | Show "Nothing to stash" |
+| Empty    | Empty     | Show "Nothing to stash"                      |
 
 Auto-restore after an agent run only happens when the editor is still empty. If you typed meanwhile, the stash is preserved.
 
-The `stash` indicator appears in the powerline bar (on presets with `extension_statuses`). Active stash is still session-local and resets on session switch / disable, but stash history is persisted to `~/.pi/agent/pi-footer-hist/stash-history.json` so it survives restarts.
+The `stash` indicator appears in the powerline bar when `extension_statuses` is present. Active stash is still session-local and resets on session switch / disable, but stash history is persisted to `~/.pi/agent/pi-footer-hist/stash-history.json` so it survives restarts.
 
 ### Stash history
 
@@ -197,20 +176,20 @@ You can override shortcut keys in `~/.pi/agent/settings.json`:
 
 ```json
 {
-  "powerlineShortcuts": {
-    "stashHistory": "ctrl+alt+h",
-    "copyEditor": "ctrl+alt+c",
-    "cutEditor": "ctrl+alt+x",
-    "jumpPreviousUserMessage": "ctrl+shift+u",
-    "jumpNextUserMessage": "ctrl+shift+i",
-    "jumpPreviousLlmMessage": "ctrl+alt+,",
-    "jumpNextLlmMessage": "ctrl+alt+.",
-    "jumpChatBottom": "ctrl+shift+g",
-    "scrollChatUp": "cmd+up",
-    "scrollChatDown": "cmd+down",
-    "editorStart": "cmd+shift+up",
-    "editorEnd": "cmd+shift+down"
-  }
+    "powerlineShortcuts": {
+        "stashHistory": "ctrl+alt+h",
+        "copyEditor": "ctrl+alt+c",
+        "cutEditor": "ctrl+alt+x",
+        "jumpPreviousUserMessage": "ctrl+shift+u",
+        "jumpNextUserMessage": "ctrl+shift+i",
+        "jumpPreviousLlmMessage": "ctrl+alt+,",
+        "jumpNextLlmMessage": "ctrl+alt+.",
+        "jumpChatBottom": "ctrl+shift+g",
+        "scrollChatUp": "cmd+up",
+        "scrollChatDown": "cmd+down",
+        "editorStart": "cmd+shift+up",
+        "editorEnd": "cmd+shift+down"
+    }
 }
 ```
 
@@ -220,26 +199,26 @@ After changing bindings, run `/reload`. Invalid bindings, reserved key conflicts
 
 The thinking segment shows live updates when you change thinking level:
 
-| Level | Display | Color |
-|-------|---------|-------|
-| off | `think:off` | gray |
-| minimal | `think:min` | purple-gray |
-| low | `think:low` | blue |
-| medium | `think:med` | teal |
-| high | `think:high` | rainbow |
-| xhigh | `think:xhigh` | rainbow |
+| Level   | Display       | Color       |
+| ------- | ------------- | ----------- |
+| off     | `think:off`   | gray        |
+| minimal | `think:min`   | purple-gray |
+| low     | `think:low`   | blue        |
+| medium  | `think:med`   | teal        |
+| high    | `think:high`  | rainbow     |
+| xhigh   | `think:xhigh` | rainbow     |
 
 ## Path Display
 
 The path segment supports three modes:
 
-| Mode | Example | Description |
-|------|---------|-------------|
-| `basename` | `pi-footer` | Just the directory name (default) |
-| `abbreviated` | `…/extensions/pi-footer` | Full path with home abbreviated and length limit |
-| `full` | `~/.pi/agent/extensions/pi-footer` | Complete path with home abbreviated |
+| Mode          | Example                            | Description                                      |
+| ------------- | ---------------------------------- | ------------------------------------------------ |
+| `basename`    | `pi-footer`                        | Just the directory name (default)                |
+| `abbreviated` | `…/extensions/pi-footer`           | Full path with home abbreviated and length limit |
+| `full`        | `~/.pi/agent/extensions/pi-footer` | Complete path with home abbreviated              |
 
-Configure via preset options: `path: { mode: "full" }`
+Configure via layout options: `path: { mode: "full" }`
 
 ## Segments
 
@@ -251,26 +230,26 @@ Configure via preset options: `path: { mode: "full" }`
 
 ## Theming
 
-Colors are configurable via pi's theme system. Each preset defines its own color scheme, and you can override individual colors and icons with a `theme.json` file in the extension directory.
+Colors are configurable via pi's theme system. The default layout uses its own color scheme, and you can override individual colors and icons with a `theme.json` file in the extension directory.
 
 ### Default Colors
 
-| Semantic | Theme Color | Description |
-|----------|-------------|-------------|
-| `model` | `#d787af` | Model name |
-| `shellMode` | `accent` | Bash mode segment |
-| `path` | `#00afaf` | Directory path |
-| `gitClean` | `success` | Git branch (clean) |
-| `gitDirty` | `warning` | Git branch (dirty) |
-| `thinking` | `thinkingOff` | Thinking level (`off`) |
+| Semantic          | Theme Color       | Description                |
+| ----------------- | ----------------- | -------------------------- |
+| `model`           | `#d787af`         | Model name                 |
+| `shellMode`       | `accent`          | Bash mode segment          |
+| `path`            | `#00afaf`         | Directory path             |
+| `gitClean`        | `success`         | Git branch (clean)         |
+| `gitDirty`        | `warning`         | Git branch (dirty)         |
+| `thinking`        | `thinkingOff`     | Thinking level (`off`)     |
 | `thinkingMinimal` | `thinkingMinimal` | Thinking level (`minimal`) |
-| `thinkingLow` | `thinkingLow` | Thinking level (`low`) |
-| `thinkingMedium` | `thinkingMedium` | Thinking level (`medium`) |
-| `context` | `dim` | Context usage |
-| `contextWarn` | `warning` | Context usage >70% |
-| `contextError` | `error` | Context usage >90% |
-| `cost` | `text` | Cost display |
-| `tokens` | `muted` | Token counts |
+| `thinkingLow`     | `thinkingLow`     | Thinking level (`low`)     |
+| `thinkingMedium`  | `thinkingMedium`  | Thinking level (`medium`)  |
+| `context`         | `dim`             | Context usage              |
+| `contextWarn`     | `warning`         | Context usage >70%         |
+| `contextError`    | `error`           | Context usage >90%         |
+| `cost`            | `text`            | Cost display               |
+| `tokens`          | `muted`           | Token counts               |
 
 ### Custom Theme Override
 
@@ -278,25 +257,26 @@ Create `~/.pi/agent/extensions/pi-footer/theme.json`:
 
 ```json
 {
-  "colors": {
-    "pi": "#ff5500",
-    "model": "accent",
-    "shellMode": "accent",
-    "path": "#00afaf",
-    "gitClean": "success",
-    "thinking": "thinkingOff",
-    "thinkingMinimal": "thinkingMinimal",
-    "thinkingLow": "thinkingLow",
-    "thinkingMedium": "thinkingMedium"
-  },
-  "icons": {
-    "auto": "↯",
-    "warning": ""
-  }
+    "colors": {
+        "pi": "#ff5500",
+        "model": "accent",
+        "shellMode": "accent",
+        "path": "#00afaf",
+        "gitClean": "success",
+        "thinking": "thinkingOff",
+        "thinkingMinimal": "thinkingMinimal",
+        "thinkingLow": "thinkingLow",
+        "thinkingMedium": "thinkingMedium"
+    },
+    "icons": {
+        "auto": "↯",
+        "warning": ""
+    }
 }
 ```
 
 Colors can be:
+
 - **Theme color names**: `accent`, `muted`, `dim`, `text`, `success`, `warning`, `error`, `border`, `borderAccent`, `borderMuted`
 - **Hex colors**: `#ff5500`, `#d787af`
 

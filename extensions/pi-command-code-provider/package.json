@@ -1,41 +1,41 @@
 {
-  "name": "pi-command-code-provider",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Pi extension provider for CommandCode's native /alpha/generate API.",
-  "type": "module",
-  "main": "./index.ts",
-  "exports": {
-    ".": "./index.ts"
-  },
-  "pi": {
-    "extensions": [
-      "./index.ts"
-    ]
-  },
-  "scripts": {
-    "typecheck": "bun run tsc --noEmit",
-    "build": "bun run typecheck",
-    "test": "bun test"
-  },
-  "keywords": [
-    "pi",
-    "pi-extension",
-    "command-code",
-    "provider"
-  ],
-  "license": "MIT",
-  "engines": {
-    "node": ">=20"
-  },
-  "peerDependencies": {
-    "@earendil-works/pi-ai": "^0.74.0",
-    "@earendil-works/pi-coding-agent": "^0.74.0"
-  },
-  "devDependencies": {
-    "@earendil-works/pi-ai": "^0.74.0",
-    "@earendil-works/pi-coding-agent": "^0.74.0",
-    "@types/node": "^25.6.0",
-    "typescript": "^6.0.3"
-  }
+   "name": "pi-command-code-provider",
+   "version": "0.1.0",
+   "private": true,
+   "description": "Pi extension provider for CommandCode's native /alpha/generate API.",
+   "keywords": [
+      "command-code",
+      "pi",
+      "pi-extension",
+      "provider"
+   ],
+   "license": "MIT",
+   "type": "module",
+   "main": "./index.ts",
+   "exports": {
+      ".": "./index.ts"
+   },
+   "scripts": {
+      "typecheck": "bun run tsc --noEmit",
+      "build": "bun run typecheck",
+      "test": "bun test"
+   },
+   "devDependencies": {
+      "@earendil-works/pi-ai": "^0.74.0",
+      "@earendil-works/pi-coding-agent": "^0.74.0",
+      "@types/node": "^25.6.0",
+      "typescript": "^6.0.3"
+   },
+   "peerDependencies": {
+      "@earendil-works/pi-ai": "^0.74.0",
+      "@earendil-works/pi-coding-agent": "^0.74.0"
+   },
+   "engines": {
+      "node": ">=20"
+   },
+   "pi": {
+      "extensions": [
+         "./index.ts"
+      ]
+   }
 }

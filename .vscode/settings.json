@@ -1,13 +1,13 @@
 {
-  "js/ts.tsdk.path": "node_modules\\typescript\\lib",
-  "[typescript]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
-  },
-  "editor.formatOnSave": true,
-  "editor.formatOnSaveMode": "file",
-  "oxc.fmt.configPath": "src/Frontend/.oxfmtrc.json",
-  "oxc.configPath": "src/Frontend/.oxlintrc.json",
-  "[json]": {
-    "editor.defaultFormatter": "vscode.json-language-features"
-  }
+   "js/ts.tsdk.path": "node_modules\\typescript\\lib",
+   "editor.defaultFormatter": "oxc.oxc-vscode",
+   "editor.formatOnSave": true,
+   "editor.formatOnSaveMode": "file",
+   "oxc.fmt.configPath": "oxfmt.config.ts",
+   "oxc.configPath": ".oxlintrc.json",
+   "editor.codeActionsOnSave": {
+      "source.format.oxc": "always"
+   },
+   "oxc.requireConfig": true,
+   "oxc.tsConfigPath": "tsconfig.json"
 }

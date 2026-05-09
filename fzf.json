@@ -1,9 +1,9 @@
 {
-  "commands": {
-    "file": {
-      "list": "fd --hidden --type f --max-depth 4",
-      "action": "@{{selected}}",
-      "shortcut": "f1"
-    }
-  }
+   "commands": {
+      "file": {
+         "list": "fd --hidden --type f --max-depth 4",
+         "action": "@{{selected}}",
+         "shortcut": "f1"
+      }
+   }
 }

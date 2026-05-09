@@ -13,49 +13,49 @@ import type { ExtensionAPI, AgentEndEvent, ExtensionContext, CustomEntry } from 
 
 // Event types not exported from main package - define locally
 interface TurnStartEvent {
-	type: "turn_start";
-	turnIndex: number;
-	timestamp: number;
+   type: "turn_start";
+   turnIndex: number;
+   timestamp: number;
 }
 
 interface MessageStartEvent {
-	type: "message_start";
-	message: unknown;
+   type: "message_start";
+   message: unknown;
 }
 
 interface MessageEndEvent {
-	type: "message_end";
-	message: unknown;
+   type: "message_end";
+   message: unknown;
 }
 
 interface TPSData {
-	message: string;
-	timestamp: number;
+   message: string;
+   timestamp: number;
 }
 
 interface TurnTiming {
-	turnStartMs: number;
-	firstTokenMs: number | null;
-	lastTokenMs: number | null;
-	assistantMessages: AssistantMessage[]; // Messages generated in THIS turn only
-	totalGenerationMs: number; // Accumulated streaming time (excludes gaps)
-	currentMessageStartMs: number | null; // When the current message started streaming
+   turnStartMs: number;
+   firstTokenMs: number | null;
+   lastTokenMs: number | null;
+   assistantMessages: AssistantMessage[]; // Messages generated in THIS turn only
+   totalGenerationMs: number; // Accumulated streaming time (excludes gaps)
+   currentMessageStartMs: number | null; // When the current message started streaming
 }
 
 function isAssistantMessage(message: unknown): message is AssistantMessage {
-	if (!message || typeof message !== "object") return false;
-	const role = (message as { role?: unknown }).role;
-	return role === "assistant";
+   if (!message || typeof message !== "object") return false;
+   const role = (message as { role?: unknown }).role;
+   return role === "assistant";
 }
 
 function isTpsEntry(entry: unknown): entry is CustomEntry<TPSData> {
-	if (!entry || typeof entry !== "object") return false;
-	const candidate = entry as { type?: unknown; customType?: unknown };
-	return candidate.type === "custom" && candidate.customType === "tps";
+   if (!entry || typeof entry !== "object") return false;
+   const candidate = entry as { type?: unknown; customType?: unknown };
+   return candidate.type === "custom" && candidate.customType === "tps";
 }
 
 function formatNumber(num: number): string {
-	return num.toLocaleString();
+   return num.toLocaleString();
 }
 
 /**
@@ -64,188 +64,188 @@ function formatNumber(num: number): string {
  * Exported for testing.
  */
 export function formatDuration(totalSeconds: number): string {
-	if (totalSeconds < 60) {
-		return `${Math.round(totalSeconds)}s`;
-	}
+   if (totalSeconds < 60) {
+      return `${Math.round(totalSeconds)}s`;
+   }
 
-	const seconds = Math.round(totalSeconds);
-	const units = [
-		{ label: "mo", seconds: 30 * 24 * 60 * 60 }, // 30 days
-		{ label: "w", seconds: 7 * 24 * 60 * 60 },
-		{ label: "d", seconds: 24 * 60 * 60 },
-		{ label: "h", seconds: 60 * 60 },
-		{ label: "m", seconds: 60 },
-		{ label: "s", seconds: 1 },
-	];
+   const seconds = Math.round(totalSeconds);
+   const units = [
+      { label: "mo", seconds: 30 * 24 * 60 * 60 }, // 30 days
+      { label: "w", seconds: 7 * 24 * 60 * 60 },
+      { label: "d", seconds: 24 * 60 * 60 },
+      { label: "h", seconds: 60 * 60 },
+      { label: "m", seconds: 60 },
+      { label: "s", seconds: 1 },
+   ];
 
-	const parts: { value: number; label: string }[] = [];
-	let remaining = seconds;
+   const parts: { value: number; label: string }[] = [];
+   let remaining = seconds;
 
-	// First pass: extract all units with non-zero values
-	for (const unit of units) {
-		if (remaining >= unit.seconds) {
-			const value = Math.floor(remaining / unit.seconds);
-			parts.push({ value, label: unit.label });
-			remaining %= unit.seconds;
-		}
-	}
+   // First pass: extract all units with non-zero values
+   for (const unit of units) {
+      if (remaining >= unit.seconds) {
+         const value = Math.floor(remaining / unit.seconds);
+         parts.push({ value, label: unit.label });
+         remaining %= unit.seconds;
+      }
+   }
 
-	// If we only found one unit, add the next smaller unit as zero
-	// Skip 'w' (weeks) when the primary unit is 'mo' (months) for better readability
-	const firstPart = parts[0];
-	if (parts.length === 1 && firstPart) {
-		const firstUnitIndex = units.findIndex((u) => u.label === firstPart.label);
-		if (firstUnitIndex < units.length - 1) {
-			let nextIndex = firstUnitIndex + 1;
-			let nextUnit = units[nextIndex];
-			// Skip weeks when showing months - go directly to days
-			if (firstPart.label === "mo" && nextUnit?.label === "w") {
-				nextIndex++;
-				nextUnit = units[nextIndex];
-			}
-			if (nextUnit) {
-				parts.push({ value: 0, label: nextUnit.label });
-			}
-		}
-	}
+   // If we only found one unit, add the next smaller unit as zero
+   // Skip 'w' (weeks) when the primary unit is 'mo' (months) for better readability
+   const firstPart = parts[0];
+   if (parts.length === 1 && firstPart) {
+      const firstUnitIndex = units.findIndex((u) => u.label === firstPart.label);
+      if (firstUnitIndex < units.length - 1) {
+         let nextIndex = firstUnitIndex + 1;
+         let nextUnit = units[nextIndex];
+         // Skip weeks when showing months - go directly to days
+         if (firstPart.label === "mo" && nextUnit?.label === "w") {
+            nextIndex++;
+            nextUnit = units[nextIndex];
+         }
+         if (nextUnit) {
+            parts.push({ value: 0, label: nextUnit.label });
+         }
+      }
+   }
 
-	// Return up to 2 most significant units
-	const top2 = parts.slice(0, 2);
-	return top2.map((p) => `${p.value}${p.label}`).join(" ");
+   // Return up to 2 most significant units
+   const top2 = parts.slice(0, 2);
+   return top2.map((p) => `${p.value}${p.label}`).join(" ");
 }
 
 function calculateStats(event: AgentEndEvent, timing: TurnTiming): string | null {
-	// Aggregate token usage ONLY from assistant messages generated in this turn
-	// (not all messages from the session history)
-	let input = 0;
-	let output = 0;
-	let cacheRead = 0;
-	let cacheWrite = 0;
-	let totalTokens = 0;
+   // Aggregate token usage ONLY from assistant messages generated in this turn
+   // (not all messages from the session history)
+   let input = 0;
+   let output = 0;
+   let cacheRead = 0;
+   let cacheWrite = 0;
+   let totalTokens = 0;
 
-	for (const message of timing.assistantMessages) {
-		input += message.usage.input || 0;
-		output += message.usage.output || 0;
-		cacheRead += message.usage.cacheRead || 0;
-		cacheWrite += message.usage.cacheWrite || 0;
-		totalTokens += message.usage.totalTokens || 0;
-	}
+   for (const message of timing.assistantMessages) {
+      input += message.usage.input || 0;
+      output += message.usage.output || 0;
+      cacheRead += message.usage.cacheRead || 0;
+      cacheWrite += message.usage.cacheWrite || 0;
+      totalTokens += message.usage.totalTokens || 0;
+   }
 
-	if (output <= 0) return null;
-	if (!timing.firstTokenMs || !timing.lastTokenMs) return null;
+   if (output <= 0) return null;
+   if (!timing.firstTokenMs || !timing.lastTokenMs) return null;
 
-	const ttftMs = timing.firstTokenMs - timing.turnStartMs;
-	const totalMs = timing.lastTokenMs - timing.turnStartMs;
+   const ttftMs = timing.firstTokenMs - timing.turnStartMs;
+   const totalMs = timing.lastTokenMs - timing.turnStartMs;
 
-	// True generation TPS: only counts actual streaming time (excludes TTFT and tool gaps)
-	if (timing.totalGenerationMs <= 0) return null;
+   // True generation TPS: only counts actual streaming time (excludes TTFT and tool gaps)
+   if (timing.totalGenerationMs <= 0) return null;
 
-	const generationSeconds = timing.totalGenerationMs / 1000;
-	const tps = output / generationSeconds;
+   const generationSeconds = timing.totalGenerationMs / 1000;
+   const tps = output / generationSeconds;
 
-	const ttftFormatted = `${(ttftMs / 1000).toFixed(2)}s`;
-	const totalFormatted = `${(totalMs / 1000).toFixed(2)}s`;
+   const ttftFormatted = `${(ttftMs / 1000).toFixed(2)}s`;
+   const totalFormatted = `${(totalMs / 1000).toFixed(2)}s`;
 
-	return `TPS ${tps.toFixed(2)} tok/s · TTFT ${ttftFormatted} · ${totalFormatted} · out ${formatNumber(output)} · in ${formatNumber(input)}`;
+   return `TPS ${tps.toFixed(2)} tok/s · TTFT ${ttftFormatted} · ${totalFormatted} · out ${formatNumber(output)} · in ${formatNumber(input)}`;
 }
 
 export default function tpsExtension(pi: ExtensionAPI) {
-	// Current turn timing state
-	let currentTiming: TurnTiming | null = null;
-	// Track if we've seen any assistant messages in this turn
-	let hasSeenAssistantMessage = false;
+   // Current turn timing state
+   let currentTiming: TurnTiming | null = null;
+   // Track if we've seen any assistant messages in this turn
+   let hasSeenAssistantMessage = false;
 
-	// Restore notification on session resume if we have saved stats
-	pi.on("session_start", (event, ctx) => {
-		setTimeout(() => {
-			if (!ctx.hasUI) return;
-			// Only restore for existing sessions (resume, fork, switch), not new ones
-			if (event.reason === "startup" || event.reason === "reload") return;
+   // Restore notification on session resume if we have saved stats
+   pi.on("session_start", (event, ctx) => {
+      setTimeout(() => {
+         if (!ctx.hasUI) return;
+         // Only restore for existing sessions (resume, fork, switch), not new ones
+         if (event.reason === "startup" || event.reason === "reload") return;
 
-			const entries = ctx.sessionManager.getEntries();
-			// Find the most recent TPS entry
-			for (let i = entries.length - 1; i >= 0; i--) {
-				const entry = entries[i];
-				if (isTpsEntry(entry)) {
-					const data = entry.data;
-					if (data?.message) {
-						ctx.ui.notify(data.message, "info");
-					}
-					break;
-				}
-			}
-		}, 0);
-	});
+         const entries = ctx.sessionManager.getEntries();
+         // Find the most recent TPS entry
+         for (let i = entries.length - 1; i >= 0; i--) {
+            const entry = entries[i];
+            if (isTpsEntry(entry)) {
+               const data = entry.data;
+               if (data?.message) {
+                  ctx.ui.notify(data.message, "info");
+               }
+               break;
+            }
+         }
+      }, 0);
+   });
 
-	// Track when a turn starts (request sent to LLM)
-	pi.on("turn_start", (event: TurnStartEvent) => {
-		currentTiming = {
-			turnStartMs: event.timestamp,
-			firstTokenMs: null,
-			lastTokenMs: null,
-			assistantMessages: [],
-			totalGenerationMs: 0,
-			currentMessageStartMs: null,
-		};
-		hasSeenAssistantMessage = false;
-	});
+   // Track when a turn starts (request sent to LLM)
+   pi.on("turn_start", (event: TurnStartEvent) => {
+      currentTiming = {
+         turnStartMs: event.timestamp,
+         firstTokenMs: null,
+         lastTokenMs: null,
+         assistantMessages: [],
+         totalGenerationMs: 0,
+         currentMessageStartMs: null,
+      };
+      hasSeenAssistantMessage = false;
+   });
 
-	// Track when a message starts (first token received)
-	pi.on("message_start", (event: MessageStartEvent) => {
-		if (!currentTiming) return;
-		if (!isAssistantMessage(event.message)) return;
+   // Track when a message starts (first token received)
+   pi.on("message_start", (event: MessageStartEvent) => {
+      if (!currentTiming) return;
+      if (!isAssistantMessage(event.message)) return;
 
-		const now = Date.now();
+      const now = Date.now();
 
-		// Only capture TTFT for the first assistant message
-		if (!hasSeenAssistantMessage) {
-			currentTiming.firstTokenMs = now;
-			hasSeenAssistantMessage = true;
-		}
+      // Only capture TTFT for the first assistant message
+      if (!hasSeenAssistantMessage) {
+         currentTiming.firstTokenMs = now;
+         hasSeenAssistantMessage = true;
+      }
 
-		// Track when THIS message started streaming (for generation TPS)
-		currentTiming.currentMessageStartMs = now;
-	});
+      // Track when THIS message started streaming (for generation TPS)
+      currentTiming.currentMessageStartMs = now;
+   });
 
-	// Track when a message ends
-	pi.on("message_end", (event: MessageEndEvent) => {
-		if (!currentTiming) return;
-		if (!isAssistantMessage(event.message)) return;
+   // Track when a message ends
+   pi.on("message_end", (event: MessageEndEvent) => {
+      if (!currentTiming) return;
+      if (!isAssistantMessage(event.message)) return;
 
-		const now = Date.now();
+      const now = Date.now();
 
-		// Update last token time for the overall turn
-		currentTiming.lastTokenMs = now;
+      // Update last token time for the overall turn
+      currentTiming.lastTokenMs = now;
 
-		// Accumulate ACTUAL streaming time for this message (true generation time)
-		if (currentTiming.currentMessageStartMs) {
-			const messageGenerationMs = now - currentTiming.currentMessageStartMs;
-			currentTiming.totalGenerationMs += messageGenerationMs;
-			currentTiming.currentMessageStartMs = null; // Reset for next message
-		}
+      // Accumulate ACTUAL streaming time for this message (true generation time)
+      if (currentTiming.currentMessageStartMs) {
+         const messageGenerationMs = now - currentTiming.currentMessageStartMs;
+         currentTiming.totalGenerationMs += messageGenerationMs;
+         currentTiming.currentMessageStartMs = null; // Reset for next message
+      }
 
-		// Store this message to count its tokens later (only current turn's messages)
-		currentTiming.assistantMessages.push(event.message as AssistantMessage);
-	});
+      // Store this message to count its tokens later (only current turn's messages)
+      currentTiming.assistantMessages.push(event.message as AssistantMessage);
+   });
 
-	// Calculate and display stats when agent loop ends
-	pi.on("agent_end", (event: AgentEndEvent, ctx: ExtensionContext) => {
-		setTimeout(() => {
-			if (!ctx.hasUI) return;
-			if (!currentTiming) return;
+   // Calculate and display stats when agent loop ends
+   pi.on("agent_end", (event: AgentEndEvent, ctx: ExtensionContext) => {
+      setTimeout(() => {
+         if (!ctx.hasUI) return;
+         if (!currentTiming) return;
 
-			const timing = currentTiming;
-			currentTiming = null;
-			hasSeenAssistantMessage = false;
+         const timing = currentTiming;
+         currentTiming = null;
+         hasSeenAssistantMessage = false;
 
-			const message = calculateStats(event, timing);
-			if (!message) return;
+         const message = calculateStats(event, timing);
+         if (!message) return;
 
-			// Show notification immediately
-			ctx.ui.notify(message, "info");
+         // Show notification immediately
+         ctx.ui.notify(message, "info");
 
-			// Save to session for restoration on resume
-			pi.appendEntry("tps", { message, timestamp: Date.now() });
-		}, 0);
-	});
+         // Save to session for restoration on resume
+         pi.appendEntry("tps", { message, timestamp: Date.now() });
+      }, 0);
+   });
 }

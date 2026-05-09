@@ -169,3 +169,5 @@ generated-images
 intercom/
 pi-footer-hist
 mcp-onboarding.json
+# Nested extension repos
+/extensions/pi-mcp-adapter/
