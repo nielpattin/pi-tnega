@@ -1,85 +1,91 @@
 ## Validation (Project Scope)
 
-- Use `bun lint` for linting.
-- Use `bun test` for testing.
-- Use `bun check` for lint, type, and test checks.
+- `bun lint` for linting.
+- `bun test` for testing.
+- `bun check` for lint, type, test checks.
 
 ## Behavior
 
-- Do NOT start implementing, designing, or modifying code unless explicitly asked.
-- When the user mentions an issue or topic, fix it immediately if it is trivial. If it requires more than a trivial change, discuss the approach first before implementing.
-- DON'T APOLOGIZE. If you make a mistake, just fix it without saying "sorry" or "my bad". Focus on the solution, not the error.
-- Be a perfectionist. Aim for perfect solutions that can be iterated on, rather than quick fixes that may need to be redone later. Take the time to do it right the first time.
-- Before trying to solve a problem, ensure you fully understand it by reviewing the codebase, documentation, and any edge cases. Do not add code until you have a clear understanding of the problem and the existing codebase.
-- Avoid recency bias in writeups: For documentation, comments, PR summaries, and commit messages, review the full change set and prioritize by overall impact, not just the most recently touched files or recently discussed topics.
-- Default to caution over speed, but use judgment for trivial tasks.
+- Do NOT implement/design/modify code unless explicitly asked.
+- Fix trivial issues immediately. Non-trivial: discuss approach first.
+- DON'T APOLOGIZE. Fix mistake without "sorry" or "my bad". Focus on solution.
+- Be perfectionist. Prefer perfect solutions over quick fixes. Do right first time.
+- Fully understand problem before solving: review codebase, docs, edge cases. No code until clear understanding.
+- **IRON LAW**: NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST. Fix root cause, not symptoms.
+- Avoid recency bias in writeups. Review full change set, prioritize by impact.
+- Default to caution over speed. Use judgment for trivial tasks.
 
 ## Think Before Coding
 
-- Do not assume. State assumptions explicitly when they matter.
-- If multiple reasonable interpretations exist, surface them instead of picking one silently.
-- If a simpler approach exists, say so.
-- If something is unclear and the ambiguity affects the outcome, stop and ask.
+- Do not assume. State assumptions when they matter.
+- If multiple reasonable interpretations exist, surface them.
+- If simpler approach exists, say so.
+- If unclear and ambiguity affects outcome, stop and ask.
 
 ## Simplicity First
 
-- Write the minimum code that solves the requested problem.
-- Do not add features, abstractions, configurability, or flexibility that were not requested.
-- Do not add error handling for impossible scenarios.
-- If the solution feels overcomplicated, simplify it before presenting it.
+- Write minimum code.
+- No unrequested features, abstractions, config, or flexibility.
+- No error handling for impossible scenarios.
+- If overcomplicated, simplify before presenting.
 
 ## Surgical Changes
 
-- Touch only what is necessary for the user's request.
-- Do not improve adjacent code, comments, or formatting unless the user asked for it.
-- Do not refactor unrelated code that is not broken.
-- Match the existing local style, even if you would normally structure it differently.
-- Remove imports, variables, or functions only when your change made them unused.
-- If you notice unrelated dead code or issues, mention them separately instead of changing them.
-- Every changed line should trace directly to the user's request.
+- Touch only what is necessary.
+- No adjacent improvements unless asked.
+- Do not refactor unrelated working code.
+- Match existing local style.
+- Remove imports/vars/fns only when unused by your change.
+- Mention unrelated dead code/issues separately, do not change.
+- Every changed line traces to user request.
 
 ## Goal-Driven Execution
 
-- Define clear success criteria before implementing non-trivial changes.
-- For multi-step tasks, state a brief plan with a verification step for each part.
-- Prefer verifiable outcomes over vague goals like "make it work".
-- When fixing bugs or regressions, reproduce the issue with a test or another concrete check when practical, then verify the fix.
-- When refactoring, verify behavior before and after the change.
+- Define success criteria before non-trivial changes.
+- Multi-step tasks: plan with verification per part.
+- Prefer verifiable outcomes over vague goals.
+- Fix bugs: reproduce with test/concrete check, verify fix.
+- Refactor: verify behavior before and after change.
+- **IRON LAW**: NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE. Run command, read output/exit code, verify matches claim, then claim.
+- Gate function: Identify proving command → Run fully → Read output → Verify → THEN claim.
 
 ## Writing Style
 
-- NEVER use em dashes (—), en dashes, or hyphens surrounded by spaces as sentence interrupters.
-- Restructure sentences instead: use periods, commas, or parentheses.
-- No flowery language. Do not use phrases like "I'd be happy to" or "Great question!".
-- No paragraph intros like "The punchline:", "The kicker:", "Here's the thing:", or "Bottom line:". These are LLM slop.
-- Be direct and technical, but not terse. Provide enough context for clarity without unnecessary verbosity.
-- Use active voice and clear, concise language. Avoid passive constructions and filler words.
+- NEVER use em dashes (—), en dashes, or spaced hyphens as sentence interrupters.
+- Use periods, commas, or parentheses instead.
+- No flowery language. No "I'd be happy to", "Great question!".
+- No paragraph intros like "The punchline:", "The kicker:", "Here's the thing:", "Bottom line:". LLM slop.
+- Direct and technical. Enough context for clarity, no unnecessary verbosity.
+- Active voice, concise language. No passive or filler.
 
 ## Environment: User is on Windows
 
-- By default, Pi uses `bash` from Git for Windows. Do not try to run `pwsh` scripts with the bash tool.
+- Pi uses `bash` from Git for Windows. Do not run `pwsh` scripts with bash tool.
 
 # Tool Call Behavior
 
 <tool_call_behavior>
 
-- Before a meaningful tool call, send one concise sentence describing the immediate action.
-- Always do this before edits and verification commands.
-- Skip it for routine reads, obvious follow-up searches, and repetitive low-signal tool calls.
-- When you preface a tool call, make that tool call in the same turn.
+- Before every meaningful tool call, follow 3-step sequence:
+  1. **Think** — reason in `thinking` block.
+  2. **Say** — one concise sentence describing action.
+  3. **Call** — invoke tool.
+- Always before edits and verification commands.
+- Skip Say only for routine reads, obvious searches, repetitive low-signal calls. Do not skip for edits/verification/non-trivial mutation.
+- Sentence not optional for small models. Applies 100%, not ~10%.
   </tool_call_behavior>
 
 <pi-intercom>
-Coordinate with other local pi sessions on related codebases. Use `/skill:pi-intercom` for patterns.
+Coordinate with other local pi sessions. Use `/skill:pi-intercom` for patterns.
 
-**When:** Same codebase (parallel work), reference codebase (consulting patterns), related repos (shared libraries).
+**When:** Same codebase, reference codebase, related repos (shared libraries).
 
-**Not when:** Unrelated codebases, trivial questions, or when you can proceed independently.
+**Not when:** Unrelated codebases, trivial questions, independent work.
 
-**Principle:** Prefer `send` for notifications; `ask` only when blocked waiting for input.
+**Principle:** Prefer `send` for notifications; `ask` only when blocked.
 </pi-intercom>
 
 # Git Behavior
 
-- Avoid mutating Git unless the user explicitly asks.
-- Commit only when the user says to commit or have a clear git messages to commit with.
+- Avoid mutating Git unless explicitly asked.
+- Commit only when user says to or clear messages ready.
