@@ -12,6 +12,7 @@ export default defineConfig({
       "settings.json",
       "mcp.json",
       "pnpm-workspace.yaml",
+      "*yml",
    ],
    printWidth: 120,
    tabWidth: 3,

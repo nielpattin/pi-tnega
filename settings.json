@@ -3,9 +3,9 @@
   "compaction": {
     "enabled": true
   },
-  "defaultModel": "gpt-5.4-mini",
+  "defaultModel": "gpt-5.5",
   "defaultProvider": "openai-codex",
-  "defaultThinkingLevel": "high",
+  "defaultThinkingLevel": "low",
   "doubleEscapeAction": "none",
   "editorPaddingX": 0,
   "enableSkillCommands": true,
@@ -51,7 +51,7 @@
     "+extensions\\recover-mimo-thinking.ts"
   ],
   "followUpMode": "all",
-  "hideThinkingBlock": true,
+  "hideThinkingBlock": false,
   "images": {
     "autoResize": true
   },
@@ -70,16 +70,7 @@
       ]
     },
     {
-      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\pi-caveman",
-      "extensions": [
-        "+extensions\\caveman\\index.ts"
-      ],
-      "skills": [
-        "+skills\\caveman-commit\\SKILL.md",
-        "+skills\\caveman-review\\SKILL.md",
-        "+skills\\compress\\SKILL.md",
-        "+skills\\caveman\\SKILL.md"
-      ]
+      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\pi-caveman"
     },
     {
       "source": "git:github.com/PurpleMyst/pi-goal",
@@ -91,16 +82,10 @@
       "source": "git:github.com/nicobailon/pi-mcp-adapter"
     },
     {
-      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\pi-simplify",
-      "extensions": [
-        "+src/index.ts"
-      ]
+      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\pi-simplify"
     },
     {
-      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\pi-station",
-      "extensions": [
-        "+index.ts"
-      ]
+      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\pi-station"
     }
   ],
   "prompts": [
@@ -154,7 +139,7 @@
   "station": {
     "fixedEditor": true,
     "scrollbar": true,
-    "mouseScroll": true
+    "scrollBar": true
   },
   "enableInstallTelemetry": false,
   "warnings": {

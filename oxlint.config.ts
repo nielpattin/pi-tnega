@@ -17,6 +17,7 @@ export default defineConfig({
       "*.test.ts",
       "preciseVerboseReporter.ts",
       "*/recover-mimo-thinking.ts",
+      "*/treepluss/**",
    ],
    rules: {
       "eslint/no-control-regex": "off",
