@@ -1,6 +1,9 @@
 packages:
   - "extensions/*"
 
+minimumReleaseAgeExclude:
+  - "@earendil-works/*"
+
 allowBuilds:
   "@google/genai": true
   esbuild: true

@@ -3,8 +3,8 @@
   "compaction": {
     "enabled": true
   },
-  "defaultModel": "mimo-v2.5-pro",
-  "defaultProvider": "xiaomi-token-plan-sgp",
+  "defaultModel": "gpt-5.4-mini",
+  "defaultProvider": "openai-codex",
   "defaultThinkingLevel": "high",
   "doubleEscapeAction": "none",
   "editorPaddingX": 0,
