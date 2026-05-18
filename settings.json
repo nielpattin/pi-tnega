@@ -3,9 +3,9 @@
   "compaction": {
     "enabled": true
   },
-  "defaultModel": "gpt-5.5",
-  "defaultProvider": "openai-codex",
-  "defaultThinkingLevel": "low",
+  "defaultModel": "deepseek/deepseek-v4-pro",
+  "defaultProvider": "cmd-code",
+  "defaultThinkingLevel": "high",
   "doubleEscapeAction": "none",
   "editorPaddingX": 0,
   "enableSkillCommands": true,
@@ -40,7 +40,6 @@
     "+extensions\\opencode-free\\index.ts",
     "-extensions\\batch-read.ts",
     "-extensions\\pi-footer\\index.ts",
-    "-extensions\\git-guard.ts",
     "+extensions\\pi-command-code-provider\\index.ts",
     "+extensions\\pi-intercom\\index.ts",
     "-extensions\\pi-rtk\\index.ts",
@@ -48,7 +47,8 @@
     "+extensions\\tps.ts",
     "+extensions\\notification\\index.ts",
     "+extensions\\kinda\\index.ts",
-    "+extensions\\recover-mimo-thinking.ts"
+    "-extensions\\git-guard.ts",
+    "-extensions\\recover-mimo-thinking.ts"
   ],
   "followUpMode": "all",
   "hideThinkingBlock": true,
