@@ -33,6 +33,10 @@
         "@next-ai-drawio/mcp-server@latest"
       ],
       "enable": false
+    },
+    "browseros": {
+      "url": "http://127.0.0.1:9000/mcp",
+      "lifecycle": "lazy"
     }
   },
   "imports": [

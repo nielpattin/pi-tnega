@@ -3,9 +3,9 @@
   "compaction": {
     "enabled": true
   },
-  "defaultModel": "gpt-5.5",
-  "defaultProvider": "openai-codex",
-  "defaultThinkingLevel": "low",
+  "defaultModel": "claude-opus-4-6",
+  "defaultProvider": "freecc",
+  "defaultThinkingLevel": "medium",
   "doubleEscapeAction": "none",
   "editorPaddingX": 0,
   "enableSkillCommands": true,
@@ -55,7 +55,7 @@
   "images": {
     "autoResize": true
   },
-  "lastChangelogVersion": "0.74.1",
+  "lastChangelogVersion": "0.75.1",
   "packages": [
     {
       "source": "git:github.com/raunovillberg/im-pi-eccable",
@@ -85,8 +85,12 @@
       "source": "C:\\Users\\niel\\.pi\\agent\\packages\\pi-simplify"
     },
     {
-      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\pi-station"
-    }
+      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\pi-station",
+      "extensions": [
+        "+dist\\index.js"
+      ]
+    },
+    "https://github.com/chandra447/pi-hermes-memory"
   ],
   "prompts": [
     "+prompts\\commit.md"
@@ -132,7 +136,7 @@
     "maxRetries": 8
   },
   "npmCommand": [
-    "pnpm",
+    "pnpm.cmd",
     "--loglevel=error"
   ],
   "caveman": "ultra",

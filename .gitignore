@@ -148,6 +148,5 @@ sessions
 bin/
 cache/
 auth.json
-multicodex.json
 *.jsonl
 git
