@@ -5,6 +5,7 @@ minimumReleaseAgeExclude:
   - "@earendil-works/*"
   - "@nielpattin/*"
   - "@mariozechner/*"
+  - "pi-hermes-memory"
 allowBuilds:
   "@google/genai": true
   esbuild: true

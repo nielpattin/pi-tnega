@@ -3,9 +3,9 @@
   "compaction": {
     "enabled": true
   },
-  "defaultModel": "claude-opus-4-6",
-  "defaultProvider": "freecc",
-  "defaultThinkingLevel": "medium",
+  "defaultModel": "gpt-5.5",
+  "defaultProvider": "openai-codex",
+  "defaultThinkingLevel": "low",
   "doubleEscapeAction": "none",
   "editorPaddingX": 0,
   "enableSkillCommands": true,
@@ -51,11 +51,11 @@
     "+extensions\\recover-mimo-thinking.ts"
   ],
   "followUpMode": "all",
-  "hideThinkingBlock": false,
+  "hideThinkingBlock": true,
   "images": {
     "autoResize": true
   },
-  "lastChangelogVersion": "0.75.1",
+  "lastChangelogVersion": "0.75.3",
   "packages": [
     {
       "source": "git:github.com/raunovillberg/im-pi-eccable",
@@ -90,7 +90,7 @@
         "+dist\\index.js"
       ]
     },
-    "https://github.com/chandra447/pi-hermes-memory"
+    "npm:pi-hermes-memory"
   ],
   "prompts": [
     "+prompts\\commit.md"
@@ -136,8 +136,7 @@
     "maxRetries": 8
   },
   "npmCommand": [
-    "pnpm.cmd",
-    "--loglevel=error"
+    "pnpm.cmd"
   ],
   "caveman": "ultra",
   "station": {
