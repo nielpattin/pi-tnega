@@ -11,5 +11,8 @@
    },
    "oxc.requireConfig": true,
    "oxc.typeAware": true,
-   "oxc.tsConfigPath": "tsconfig.json"
+   "oxc.tsConfigPath": "tsconfig.json",
+   "[json]": {
+      "editor.defaultFormatter": "oxc.oxc-vscode"
+   }
 }

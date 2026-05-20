@@ -4,8 +4,8 @@
       "check": "pnpm run fmt:check && pnpm run lint && pnpm run test",
       "test": "vitest run",
       "test:watch": "vitest",
-      "lint": "oxlint -c oxlint.config.ts",
-      "lint:fix": "oxlint -c oxlint.config.ts --fix",
+      "lint": "oxlint -c oxlint.config.ts --no-error-on-unmatched-pattern",
+      "lint:fix": "oxlint -c oxlint.config.ts --fix --no-error-on-unmatched-pattern",
       "fmt": "oxfmt -c oxfmt.config.ts",
       "fmt:check": "oxfmt -c oxfmt.config.ts --check",
       "prepare": "husky"

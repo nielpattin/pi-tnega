@@ -1,5 +1,6 @@
 packages:
   - "extensions/*"
+  - "packages/*"
 
 minimumReleaseAgeExclude:
   - "@earendil-works/*"
@@ -12,3 +13,4 @@ allowBuilds:
   koffi: true
   protobufjs: true
   better-sqlite3: true
+  tree-sitter-bash: true

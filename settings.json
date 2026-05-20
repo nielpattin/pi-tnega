@@ -66,7 +66,7 @@
     {
       "source": "git:github.com/Jon-Vii/pi-imagegen",
       "extensions": [
-        "-imagegen.ts"
+        "+imagegen.ts"
       ]
     },
     {
@@ -90,7 +90,12 @@
         "+dist\\index.js"
       ]
     },
-    "npm:pi-hermes-memory"
+    {
+      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\pi-permission-system",
+      "extensions": [
+        "+dist\\src\\index.js"
+      ]
+    }
   ],
   "prompts": [
     "+prompts\\commit.md"
@@ -142,7 +147,12 @@
   "station": {
     "fixedEditor": true,
     "scrollbar": true,
-    "scrollBar": true
+    "scrollBar": true,
+    "shortcuts": {
+      "bashMode": "ctrl+shift+b",
+      "stash": "ctrl+shift+s",
+      "stashHistory": "ctrl+shift+h"
+    }
   },
   "enableInstallTelemetry": false,
   "warnings": {
