@@ -23,16 +23,18 @@ Example:
 ## Command
 
 ```bash
-bash checkout.sh <repo> --path-only
+bash "<skill_dir>/checkout.sh" <repo> --path-only
 ```
 
 Examples:
 
 ```bash
-bash checkout.sh niel/pi-tnega --path-only
-bash checkout.sh github.com/niel/pi-tnega --path-only
-bash checkout.sh https://github.com/niel/pi-tnega --path-only
+bash "C:/Users/niel/.pi/agent/skills/librarian/checkout.sh" niel/pi-tnega --path-only
+bash "C:/Users/niel/.pi/agent/skills/librarian/checkout.sh" github.com/niel/pi-tnega --path-only
+bash "C:/Users/niel/.pi/agent/skills/librarian/checkout.sh" https://github.com/niel/pi-tnega --path-only
 ```
+
+> **Note**: Use POSIX-style path (forward slashes) for Git for Windows bash. Do not rely on `cd` to the skill directory — the script self-locates via `BASH_SOURCE[0]`.
 
 The script will:
 1. Parse the repo reference into host/org/repo.
@@ -47,7 +49,7 @@ The script will:
 - Force immediate refresh with:
 
 ```bash
-bash checkout.sh <repo> --force-update --path-only
+bash "<skill_dir>/checkout.sh" <repo> --force-update --path-only
 ```
 
 ## Recommended workflow

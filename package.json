@@ -11,10 +11,10 @@
       "prepare": "husky"
    },
    "dependencies": {
-      "@earendil-works/pi-agent-core": "^0.74.1",
-      "@earendil-works/pi-ai": "^0.74.1",
-      "@earendil-works/pi-coding-agent": "^0.74.1",
-      "@earendil-works/pi-tui": "^0.74.1",
+      "@earendil-works/pi-agent-core": "^0.75.4",
+      "@earendil-works/pi-ai": "^0.75.4",
+      "@earendil-works/pi-coding-agent": "^0.75.4",
+      "@earendil-works/pi-tui": "^0.75.4",
       "@sinclair/typebox": "^0.34.49",
       "fzf": "^0.5.2",
       "typebox": "^1.1.38"
@@ -36,5 +36,5 @@
          "pnpm run fmt"
       ]
    },
-   "packageManager": "pnpm@11.1.2+sha512.415a1cc25974731e75455c1468371be74c5aa5fb7621b50d4056d222451609f11412f23fd602e6169f1e060466641f798597e1be961a10688836a67b16569499"
+   "packageManager": "pnpm@11.2.2"
 }

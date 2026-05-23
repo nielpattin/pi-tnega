@@ -4,7 +4,7 @@
     "enabled": true
   },
   "defaultModel": "deepseek/deepseek-v4-pro",
-  "defaultProvider": "cmd-code",
+  "defaultProvider": "command-code",
   "defaultThinkingLevel": "high",
   "doubleEscapeAction": "none",
   "editorPaddingX": 0,
@@ -17,18 +17,20 @@
     "github-copilot/claude-haiku-4.5",
     "github-copilot/gemini-3-flash-preview",
     "github-copilot/gemini-3.1-pro-preview",
-    "google/gemini-3-flash-preview",
-    "google/gemini-3.1-flash-lite-preview",
-    "google/gemini-3.1-pro-preview",
     "xiaomi-token-plan-sgp/mimo-v2.5-pro",
     "xiaomi-token-plan-sgp/mimo-v2.5",
-    "opencode/deepseek-v4-flash-free",
     "deepseek/deepseek-v4-flash",
     "deepseek/deepseek-v4-pro",
-    "cmd-code/deepseek/deepseek-v4-pro",
-    "cmd-code/deepseek/deepseek-v4-flash",
-    "cmd-code/moonshotai/Kimi-K2.6",
-    "freemodel/gpt-5.5"
+    "freemodel/gpt-5.5",
+    "opencode-go/deepseek-v4-flash",
+    "command-code/moonshotai/Kimi-K2.6",
+    "command-code/deepseek/deepseek-v4-pro",
+    "command-code/Qwen/Qwen3.6-Max-Preview",
+    "command-code/deepseek/deepseek-v4-flash",
+    "opencode-go/kimi-k2.6",
+    "opencode-go/glm-5.1",
+    "opencode-go/deepseek-v4-pro",
+    "opencode-go/qwen3.6-plus"
   ],
   "extensions": [
     "-extensions\\web-reader.ts",
@@ -48,14 +50,15 @@
     "+extensions\\notification\\index.ts",
     "+extensions\\kinda\\index.ts",
     "-extensions\\git-guard.ts",
-    "-extensions\\recover-mimo-thinking.ts"
+    "-extensions\\recover-mimo-thinking.ts",
+    "+extensions\\pi-explorer\\index.ts"
   ],
   "followUpMode": "all",
-  "hideThinkingBlock": true,
+  "hideThinkingBlock": false,
   "images": {
     "autoResize": true
   },
-  "lastChangelogVersion": "0.75.3",
+  "lastChangelogVersion": "0.75.4",
   "packages": [
     {
       "source": "git:github.com/raunovillberg/im-pi-eccable",
@@ -73,27 +76,12 @@
       "source": "C:\\Users\\niel\\.pi\\agent\\packages\\pi-caveman"
     },
     {
-      "source": "git:github.com/PurpleMyst/pi-goal",
-      "extensions": [
-        "-src\\extension.ts"
-      ]
-    },
-    {
-      "source": "git:github.com/nicobailon/pi-mcp-adapter"
-    },
-    {
       "source": "C:\\Users\\niel\\.pi\\agent\\packages\\pi-simplify"
     },
     {
       "source": "C:\\Users\\niel\\.pi\\agent\\packages\\pi-station",
       "extensions": [
         "+dist\\index.js"
-      ]
-    },
-    {
-      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\pi-permission-system",
-      "extensions": [
-        "+dist\\src\\index.js"
       ]
     }
   ],
@@ -153,9 +141,5 @@
       "stash": "ctrl+shift+s",
       "stashHistory": "ctrl+shift+h"
     }
-  },
-  "enableInstallTelemetry": false,
-  "warnings": {
-    "anthropicExtraUsage": false
   }
 }

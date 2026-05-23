@@ -19,6 +19,7 @@ import type { DebugLogger } from "./debug-logger";
 
 interface CommandCodeRuntimeState {
    cwd?: string;
+   sessionId?: string;
 }
 
 interface CommandCodeContentPart {
@@ -61,6 +62,7 @@ interface CommandCodeRequest {
       model: string;
    };
    config: Record<string, unknown>;
+   threadId?: string;
 }
 
 interface CommandCodeResponse {
@@ -105,7 +107,7 @@ function buildCommandConfig(runtime: CommandCodeRuntimeState): Record<string, un
    return {
       workingDir: runtime.cwd ?? "",
       date: nowDate(),
-      environment: `${process.platform}-${process.arch}, Node ${process.version}`,
+      environment: `${process.platform}-${process.arch}, Node.js ${process.version}`,
       structure: [],
       isGitRepo: false,
       currentBranch: "",
@@ -232,6 +234,7 @@ function buildRequest(
          model: model.id,
       },
       config: buildCommandConfig(runtime),
+      threadId: runtime.sessionId,
    };
 }
 
@@ -245,14 +248,31 @@ function resolveApiKey(config: ExtensionConfig, options?: SimpleStreamOptions): 
    return apiKey;
 }
 
-function buildHeaders(config: ExtensionConfig, apiKey: string, options?: SimpleStreamOptions): Record<string, string> {
+function buildHeaders(
+   config: ExtensionConfig,
+   apiKey: string,
+   options?: SimpleStreamOptions,
+   runtime?: CommandCodeRuntimeState,
+): Record<string, string> {
    const headers: Record<string, string> = {
       ...config.headers,
       ...options?.headers,
       "Content-Type": "application/json",
       Accept: "text/event-stream, application/json",
-      "X-Command-Code-Version": config.commandCodeVersion,
+      "x-command-code-version": config.commandCodeVersion,
+      "x-cli-environment": `${process.platform}-${process.arch}, Node.js ${process.version}`,
    };
+   if (runtime?.sessionId) {
+      headers["x-session-id"] = runtime.sessionId;
+   }
+   const projectSlug = runtime?.cwd ? runtime.cwd.split(/[/\\]/).pop() : "";
+   if (projectSlug) {
+      headers["x-project-slug"] = projectSlug;
+   }
+   const ossPrimary = process.env.OSS_PRIMARY_PROVIDER;
+   if (ossPrimary) {
+      headers["x-oss-primary-provider"] = ossPrimary;
+   }
    if (!headers.Authorization && !headers.authorization) {
       headers.Authorization = `Bearer ${apiKey}`;
    }
@@ -945,7 +965,7 @@ async function executeCommandCodeRequest(
       const payload = options?.onPayload ? ((await options.onPayload(request, model)) ?? request) : request;
       const response = await fetch(`${config.upstreamUrl.replace(/\/+$/, "")}/alpha/generate`, {
          method: "POST",
-         headers: buildHeaders(config, apiKey, options),
+         headers: buildHeaders(config, apiKey, options, runtime),
          body: JSON.stringify(payload),
          signal: signal.signal,
       });

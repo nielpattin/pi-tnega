@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,7 +23,8 @@ export default function commandCodeProviderExtension(pi: ExtensionAPI): void {
       return;
    }
 
-   const runtime: { cwd?: string } = {};
+   const runtime: { cwd?: string; sessionId?: string } = {};
+   runtime.sessionId = randomUUID();
    const streamSimple = createCommandCodeStream(config, runtime, logger);
    const emitRuntimeProviderRegistration = (): void => {
       pi.events?.emit(RUNTIME_PROVIDER_REGISTRATION_EVENT, {
@@ -43,11 +45,13 @@ export default function commandCodeProviderExtension(pi: ExtensionAPI): void {
 
    pi.on("session_start", (_event, ctx) => {
       runtime.cwd = ctx.cwd;
+      runtime.sessionId = randomUUID();
       emitRuntimeProviderRegistration();
    });
 
    pi.on("before_agent_start", (_event, ctx) => {
       runtime.cwd = ctx.cwd;
+      runtime.sessionId = randomUUID();
       emitRuntimeProviderRegistration();
       return {};
    });

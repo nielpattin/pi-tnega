@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Self-locate: cd to script dir so it works from any CWD (critical for Windows Git Bash)
+cd "$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+
 usage() {
   cat <<'EOF'
 Usage: checkout.sh <repo> [options]

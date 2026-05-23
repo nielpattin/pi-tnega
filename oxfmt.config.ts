@@ -13,6 +13,7 @@ export default defineConfig({
       "mcp.json",
       "pnpm-workspace.yaml",
       "*yml",
+      "**/pi-mcp-adapter/**",
    ],
    printWidth: 120,
    tabWidth: 3,
