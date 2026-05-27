@@ -36,7 +36,7 @@ function shortSessionId(sessionId: string): string {
 function sessionTitle(session: SessionInfo, options?: { self?: boolean; sameCwd?: boolean }): string {
    const name = session.name || "Unnamed session";
    const tags = [options?.self ? "self" : undefined, options?.sameCwd ? "same cwd" : undefined].filter(
-      (tag): tag is string => Boolean(tag),
+      (tag): tag is string => Boolean(tag)
    );
    const suffix = tags.length ? ` [${tags.join(", ")}]` : "";
    return `${name} (${shortSessionId(session.id)})${suffix}`;
@@ -47,6 +47,7 @@ export class SessionListOverlay implements Component {
    private keybindings: KeybindingsManager;
    private currentSession: SessionInfo;
    private done: (result: SessionInfo | undefined) => void;
+   private onCopyCurrentSession?: (text: string) => void;
    private sessions: SessionInfo[];
    private selectedIndex = 0;
    private maxVisible = 8;
@@ -57,12 +58,15 @@ export class SessionListOverlay implements Component {
       currentSession: SessionInfo,
       sessions: SessionInfo[],
       done: (result: SessionInfo | undefined) => void,
+      onCopyCurrentSession?: (text: string) => void
    ) {
       this.theme = theme;
       this.keybindings = keybindings;
       this.currentSession = currentSession;
       this.sessions = sessions;
+      this.selectedIndex = sessions.length === 0 ? -1 : 0;
       this.done = done;
+      this.onCopyCurrentSession = onCopyCurrentSession;
    }
 
    private onSessionSelect(sessionId: string): void {
@@ -74,6 +78,14 @@ export class SessionListOverlay implements Component {
    invalidate(): void {}
 
    handleInput(data: string): void {
+      if (data.toLowerCase() === "c") {
+         const selectedSession = this.selectedIndex === -1 ? this.currentSession : this.sessions[this.selectedIndex];
+         if (selectedSession) {
+            this.onCopyCurrentSession?.(selectedSession.name || "Unnamed session");
+         }
+         return;
+      }
+
       if (this.keybindings.matches(data, "tui.select.cancel")) {
          this.done(undefined);
          return;
@@ -84,17 +96,22 @@ export class SessionListOverlay implements Component {
       }
 
       if (this.keybindings.matches(data, "tui.select.up")) {
-         this.selectedIndex = this.selectedIndex === 0 ? this.sessions.length - 1 : this.selectedIndex - 1;
+         this.selectedIndex =
+            this.selectedIndex === -1
+               ? this.sessions.length - 1
+               : this.selectedIndex === 0
+                 ? -1
+                 : this.selectedIndex - 1;
          return;
       }
 
       if (this.keybindings.matches(data, "tui.select.down")) {
-         this.selectedIndex = this.selectedIndex === this.sessions.length - 1 ? 0 : this.selectedIndex + 1;
+         this.selectedIndex = this.selectedIndex === this.sessions.length - 1 ? -1 : this.selectedIndex + 1;
          return;
       }
 
       if (this.keybindings.matches(data, "tui.select.confirm")) {
-         const session = this.sessions[this.selectedIndex];
+         const session = this.selectedIndex === -1 ? undefined : this.sessions[this.selectedIndex];
          if (session) {
             this.onSessionSelect(session.id);
          }
@@ -104,7 +121,7 @@ export class SessionListOverlay implements Component {
    render(width: number): string[] {
       const innerWidth = Math.max(36, Math.min(width - 2, 88));
       const contentWidth = Math.max(1, innerWidth - 2);
-      const footer = `${this.keybindings.getKeys("tui.select.confirm").join("/")}: Message • ${this.keybindings.getKeys("tui.select.cancel").join("/")}: Close`;
+      const footer = `${this.keybindings.getKeys("tui.select.confirm").join("/")}: Message • C: Copy Selected Session • ${this.keybindings.getKeys("tui.select.cancel").join("/")}: Close`;
       const border = (text: string) => this.theme.fg("accent", text);
       const row = (text = "") => {
          const clipped = truncateToWidth(text, contentWidth, "", true);
@@ -116,11 +133,16 @@ export class SessionListOverlay implements Component {
       lines.push(row(this.theme.bold(" Current Session")));
       lines.push(border(`├${"─".repeat(contentWidth)}┤`));
       lines.push(row());
-      lines.push(row(`  ${this.theme.fg("dim", sessionTitle(this.currentSession, { self: true }))}`));
+      const currentPrefix = this.selectedIndex === -1 ? this.theme.fg("accent", "→ ") : "  ";
       lines.push(
          row(
-            `  ${this.theme.fg("dim", `${middleTruncate(this.currentSession.cwd, Math.max(8, contentWidth - 4))} • ${this.currentSession.model}`)}`,
-         ),
+            `${currentPrefix}${this.selectedIndex === -1 ? this.theme.fg("accent", sessionTitle(this.currentSession, { self: true })) : this.theme.fg("dim", sessionTitle(this.currentSession, { self: true }))}`
+         )
+      );
+      lines.push(
+         row(
+            `  ${this.theme.fg("dim", `${middleTruncate(this.currentSession.cwd, Math.max(8, contentWidth - 4))} • ${this.currentSession.model}`)}`
+         )
       );
       lines.push(row());
       lines.push(border(`├${"─".repeat(contentWidth)}┤`));
@@ -130,9 +152,10 @@ export class SessionListOverlay implements Component {
       if (this.sessions.length === 0) {
          lines.push(row(this.theme.fg("dim", " No other intercom-connected sessions")));
       } else {
+         const selectedOtherIndex = Math.max(0, this.selectedIndex);
          const startIndex = Math.max(
             0,
-            Math.min(this.selectedIndex - Math.floor(this.maxVisible / 2), this.sessions.length - this.maxVisible),
+            Math.min(selectedOtherIndex - Math.floor(this.maxVisible / 2), this.sessions.length - this.maxVisible)
          );
          const endIndex = Math.min(startIndex + this.maxVisible, this.sessions.length);
 
@@ -153,7 +176,7 @@ export class SessionListOverlay implements Component {
 
          if (startIndex > 0 || endIndex < this.sessions.length) {
             lines.push(row());
-            lines.push(row(this.theme.fg("dim", ` ${this.selectedIndex + 1}/${this.sessions.length}`)));
+            lines.push(row(this.theme.fg("dim", ` ${selectedOtherIndex + 1}/${this.sessions.length}`)));
          }
       }
 

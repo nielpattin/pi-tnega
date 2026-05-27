@@ -6,9 +6,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@earendil-works/pi-ai", () => ({
    getModel: vi.fn().mockReturnValue({
-      id: "gpt-5.4-mini",
-      name: "GPT-5.4 Mini",
-      provider: "openai-codex",
+      id: "gemini-3.1-flash-lite",
+      name: "Gemini 3.1 Flash Lite",
+      provider: "google",
       input: ["text", "image"],
    }),
 }));
@@ -139,8 +139,8 @@ describe("runOmni", () => {
       expect(vi.mocked(createAgentSession)).toHaveBeenCalledWith(
          expect.objectContaining({
             model: expect.objectContaining({
-               id: "gpt-5.4-mini",
-               provider: "openai-codex",
+               id: "gemini-3.1-flash-lite",
+               provider: "google",
             }),
             thinkingLevel: "off",
             tools: ["read"],

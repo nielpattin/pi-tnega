@@ -16,13 +16,13 @@ import {
    DefaultResourceLoader,
    getAgentDir,
    SessionManager,
-   SettingsManager,
+   SettingsManager
 } from "@earendil-works/pi-coding-agent";
 import { mkdirSync, writeFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { Type } from "typebox";
 
-const OMNI_MODEL = getModel("openai-codex", "gpt-5.4-mini");
+const OMNI_MODEL = getModel("google", "gemini-3.1-flash-lite");
 const OMNI_TIMEOUT_MS = 30_000;
 
 const OMNI_SYSTEM_PROMPT = [
@@ -39,7 +39,7 @@ const OMNI_SYSTEM_PROMPT = [
    "- For code screenshots: transcribe the visible code accurately.",
    "",
    "Be thorough. Your output is consumed by another AI that cannot see images.",
-   "Do NOT suggest changes. Only describe.",
+   "Do NOT suggest changes. Only describe."
 ].join("\n");
 
 interface OmniResult {
@@ -64,7 +64,7 @@ function abortSignalPromise(signal?: AbortSignal): Promise<never> {
       }
       if (signal) {
          signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), {
-            once: true,
+            once: true
          });
       }
    });
@@ -81,7 +81,7 @@ export async function runOmni(
    cwd: string,
    options: {
       signal?: AbortSignal;
-   },
+   }
 ): Promise<OmniResult> {
    if (options.signal?.aborted) {
       return { text: "Inspection cancelled." };
@@ -100,7 +100,7 @@ export async function runOmni(
       noPromptTemplates: true,
       noThemes: true,
       noContextFiles: true,
-      systemPrompt: OMNI_SYSTEM_PROMPT,
+      systemPrompt: OMNI_SYSTEM_PROMPT
    });
    await resourceLoader.reload();
 
@@ -115,7 +115,7 @@ export async function runOmni(
       writeFileSync(
          logPath,
          `# Omni transcript\n# File: ${imagePath}\n# Timeout: ${OMNI_TIMEOUT_MS}ms\n# Started: ${new Date().toISOString()}\n\n`,
-         "utf-8",
+         "utf-8"
       );
    }
 
@@ -129,7 +129,7 @@ export async function runOmni(
       resourceLoader,
       model: OMNI_MODEL_STUB,
       thinkingLevel: "off",
-      tools: ["read"],
+      tools: ["read"]
    });
 
    const unsub = debug
@@ -157,7 +157,7 @@ export async function runOmni(
          return {
             text: "",
             error: "Omni model not available. Check your auth with /auth or models with /models.",
-            logPath,
+            logPath
          };
       }
 
@@ -165,7 +165,7 @@ export async function runOmni(
          await Promise.race([
             session.prompt(`Read the file at "${imagePath}" and describe it in detail.`),
             timeoutPromise(OMNI_TIMEOUT_MS),
-            abortSignalPromise(options.signal),
+            abortSignalPromise(options.signal)
          ]);
       } catch (e) {
          if (e instanceof DOMException && e.name === "TimeoutError") {
@@ -228,12 +228,12 @@ export default function omniExtension(pi: ExtensionAPI) {
       promptGuidelines: [
          "Use omni when you need to see images, screenshots, UI mockups, diagrams, or any visual file.",
          "Pass the exact filepath as imagePath. The agent reads the file and returns a text description.",
-         "The main model cannot see images directly. Omni bridges this gap.",
+         "The main model cannot see images directly. Omni bridges this gap."
       ],
       parameters: Type.Object({
          imagePath: Type.String({
-            description: "Absolute or relative path to the image file to inspect",
-         }),
+            description: "Absolute or relative path to the image file to inspect"
+         })
       }),
 
       async execute(_toolCallId, params, signal, onUpdate, ctx) {
@@ -247,10 +247,10 @@ export default function omniExtension(pi: ExtensionAPI) {
                content: [
                   {
                      type: "text",
-                     text: `${frames[dots]} Omni: inspecting ${params.imagePath} (${secs}s)`,
-                  },
+                     text: `${frames[dots]} Omni: inspecting ${params.imagePath} (${secs}s)`
+                  }
                ],
-               details: {},
+               details: {}
             });
          }, 120);
 
@@ -261,15 +261,15 @@ export default function omniExtension(pi: ExtensionAPI) {
          if (result.error) {
             return {
                content: [{ type: "text" as const, text: result.error }],
-               details: undefined,
+               details: undefined
             };
          }
 
          return {
             content: [{ type: "text" as const, text: result.text }],
-            details: result.logPath ? { logPath: result.logPath } : {},
+            details: result.logPath ? { logPath: result.logPath } : {}
          };
-      },
+      }
    });
 
    pi.registerCommand("omni", {
@@ -303,6 +303,6 @@ export default function omniExtension(pi: ExtensionAPI) {
             ctx.ui.setWorkingMessage();
             ctx.ui.setWorkingVisible(false);
          }
-      },
+      }
    });
 }

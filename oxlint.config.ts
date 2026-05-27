@@ -4,10 +4,10 @@ export default defineConfig({
    plugins: ["eslint"],
    options: {
       typeAware: true,
-      typeCheck: true,
+      typeCheck: true
    },
    env: {
-      builtin: true,
+      builtin: true
    },
    ignorePatterns: [
       "skills/**",
@@ -17,9 +17,9 @@ export default defineConfig({
       "*.test.ts",
       "preciseVerboseReporter.ts",
       "*/recover-mimo-thinking.ts",
-      "*/treepluss/**",
+      "*/treepluss/**"
    ],
    rules: {
-      "eslint/no-control-regex": "off",
-   },
+      "eslint/no-control-regex": "off"
+   }
 });

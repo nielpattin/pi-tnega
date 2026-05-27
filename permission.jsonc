@@ -1,0 +1,16 @@
+{
+   // pi-permission-system config
+   "debugLog": true,
+   "permissionReviewLog": true,
+   "yoloMode": false,
+   "permission": {
+      "*": "ask",
+      "bash": {
+         "*": "ask"
+      },
+      "skill": {
+         "*": "allow"
+      },
+      "external_directory": "ask"
+   }
+}

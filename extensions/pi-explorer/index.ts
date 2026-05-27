@@ -7,27 +7,30 @@
  * persistence and loads no extensions to prevent recursion.
  */
 
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getModel } from "@earendil-works/pi-ai";
 import type { Model } from "@earendil-works/pi-ai";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
    createAgentSession,
    DefaultResourceLoader,
    getAgentDir,
-   ModelRegistry,
+   keyHint,
    SessionManager,
-   SettingsManager,
+   SettingsManager
 } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
 const EXPLORER_TOOLS = ["read", "grep", "find", "ls"] as const;
+const EXPLORER_MODEL = getModel("opencode-go", "deepseek-v4-flash");
+const EXPLORER_MODEL_STUB: Model<any> = EXPLORER_MODEL as Model<any>;
 
 const EXPLORER_SYSTEM_PROMPT = [
    "You are a codebase explorer. Your job is to scan and analyze the project to gather context.",
    "You have access to read-only tools: read, grep, find, ls.",
    "Be thorough but efficient. Focus on answering the user's question accurately.",
    "Do NOT attempt to modify any files. Do NOT suggest changes. Only report findings.",
-   "Keep your final answer concise and well-structured.",
+   "Keep your final answer concise and well-structured."
 ].join("\n");
 
 interface ExploreResult {
@@ -41,11 +44,9 @@ export async function runExplorer(
    cwd: string,
    options: {
       signal?: AbortSignal;
-      onToolStart?: (toolName: string) => void;
-      model?: Model<any>;
-      modelRegistry?: ModelRegistry;
-      thinkingLevel?: ThinkingLevel;
-   },
+      onToolStart?: (toolName: string, args?: unknown) => void;
+      onFindings?: (findings: string[]) => void;
+   }
 ): Promise<ExploreResult> {
    // Early return if parent signal already aborted.
    if (options.signal?.aborted) {
@@ -67,14 +68,21 @@ export async function runExplorer(
       noPromptTemplates: true,
       noThemes: true,
       noContextFiles: true,
-      systemPrompt: EXPLORER_SYSTEM_PROMPT,
+      systemPrompt: EXPLORER_SYSTEM_PROMPT
    });
    await resourceLoader.reload();
 
-   // Abort controller for the background session. Links to parent signal if provided.
+   // Abort controller for the background session.
    const ac = new AbortController();
+
+   // Wire parent signal: call session.abort() immediately.
+   let abortHandler: (() => void) | undefined;
    if (options.signal) {
-      options.signal.addEventListener("abort", () => ac.abort(), { once: true });
+      abortHandler = () => {
+         ac.abort();
+         session.abort();
+      };
+      options.signal.addEventListener("abort", abortHandler, { once: true });
    }
 
    const { session } = await createAgentSession({
@@ -83,17 +91,71 @@ export async function runExplorer(
       sessionManager,
       settingsManager,
       resourceLoader,
-      model: options.model,
-      modelRegistry: options.modelRegistry,
-      thinkingLevel: options.thinkingLevel,
-      tools: [...EXPLORER_TOOLS],
+      model: EXPLORER_MODEL_STUB,
+      thinkingLevel: "high",
+      tools: [...EXPLORER_TOOLS]
    });
 
-   // Subscribe to events for progress reporting.
+   // Subscribe to events for progress reporting and findings extraction.
+   const toolArgs = new Map<string, unknown>();
    const unsubscribe = session.subscribe((event) => {
       if (event.type === "tool_execution_start") {
          toolsExecuted++;
-         options.onToolStart?.(event.toolName);
+         options.onToolStart?.(event.toolName, event.args);
+         toolArgs.set(event.toolCallId, event.args);
+      }
+
+      if (event.type === "tool_execution_end" && !event.isError) {
+         const args = toolArgs.get(event.toolCallId);
+         toolArgs.delete(event.toolCallId);
+
+         const paths: string[] = [];
+
+         // 1. Extract from result content.
+         const content = event.result?.content;
+         if (Array.isArray(content)) {
+            for (const item of content) {
+               if (item.type === "text" && item.text) {
+                  const lines = item.text.split("\n").filter(Boolean);
+                  for (const line of lines) {
+                     // grep: "path/to/file.ext:line:content"
+                     const grepMatch = line.match(/^([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+):/);
+                     if (grepMatch) {
+                        paths.push(grepMatch[1]);
+                        continue;
+                     }
+                     // ls/find result: standalone path-ish token
+                     const trimmed = line.trim();
+                     if (/^[a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+$/.test(trimmed)) {
+                        paths.push(trimmed);
+                     }
+                  }
+               }
+            }
+         }
+
+         // 2. read tool always has path in args.
+         if (args && typeof args === "object") {
+            const argPath = (args as Record<string, unknown>)["path"];
+            if (typeof argPath === "string" && argPath.length > 0) {
+               paths.push(argPath);
+            }
+         }
+
+         if (paths.length > 0) {
+            options.onFindings?.(paths);
+         }
+      }
+   });
+
+   const abortPromise = new Promise<never>((_, reject) => {
+      if (options.signal) {
+         if (options.signal.aborted) {
+            reject(new DOMException("Aborted", "AbortError"));
+            return;
+         }
+         const onAbort = () => reject(new DOMException("Aborted", "AbortError"));
+         options.signal.addEventListener("abort", onAbort, { once: true });
       }
    });
 
@@ -102,11 +164,11 @@ export async function runExplorer(
          return {
             text: "",
             toolsExecuted: 0,
-            error: "No model configured. Set a model with /model or in settings before using the explorer.",
+            error: "No model configured. Set a model with /model or in settings before using the explorer."
          };
       }
 
-      await session.prompt(prompt);
+      await Promise.race([session.prompt(prompt), abortPromise]);
 
       // Wait for the agent to finish (it may still be streaming after prompt returns).
       const deadline = Date.now() + 300_000;
@@ -125,6 +187,9 @@ export async function runExplorer(
       const message = err instanceof Error ? err.message : String(err);
       return { text: "", toolsExecuted, error: `Explorer error: ${message}` };
    } finally {
+      if (abortHandler && options.signal) {
+         options.signal.removeEventListener("abort", abortHandler);
+      }
       unsubscribe();
       session.dispose();
    }
@@ -143,39 +208,90 @@ export default function exploreSubagentExtension(pi: ExtensionAPI) {
       promptSnippet: "Spawn a read-only background explorer to scan the codebase and return findings",
       promptGuidelines: [
          "Use explore_codebase when you need broad codebase context (project structure, dependency analysis, pattern searches) without polluting the main conversation context.",
-         "The explorer cannot modify files or run commands. It only reads.",
+         "The explorer cannot modify files or run commands. It only reads."
       ],
       parameters: Type.Object({
          prompt: Type.String({
-            description: "Instructions for what the explorer should scan or find in the codebase",
-         }),
+            description: "Instructions for what the explorer should scan or find in the codebase"
+         })
       }),
 
+      renderResult(result, { expanded, isPartial }, theme) {
+         const text = result.content.find((item) => item.type === "text")?.text ?? "";
+
+         if (isPartial) {
+            return new Text(theme.fg("toolOutput", text), 0, 0);
+         }
+
+         if (expanded) {
+            return new Text(theme.fg("toolOutput", text), 0, 0);
+         }
+
+         const details = result.details as { toolsExecuted?: number } | undefined;
+         const toolCount = typeof details?.toolsExecuted === "number" ? details.toolsExecuted : 0;
+         const toolLabel = toolCount === 1 ? "tool" : "tools";
+         const summary = `Explorer finished (${toolCount} ${toolLabel}). ${keyHint("app.tools.expand", "to expand")}`;
+         return new Text(theme.fg("muted", summary), 0, 0);
+      },
+
       async execute(_toolCallId, params, signal, onUpdate, ctx) {
-         onUpdate?.({ content: [{ type: "text", text: "Explorer is scanning..." }], details: {} });
+         const elapsed = Date.now();
+         const doneLines: string[] = [];
+         let activeLine = "";
+         const spinners = ["\u25D0", "\u25D1", "\u25D2", "\u25D3"];
+
+         // onToolStart: capture active tool call + args for display.
+         const onToolStart = (toolName: string, args?: unknown) => {
+            let label = toolName;
+            if (args && typeof args === "object") {
+               const a = args as Record<string, unknown>;
+               const target = a["path"] || a["pattern"] || a["dir"] || a["file"];
+               if (typeof target === "string") label = toolName + ": " + target;
+               else if (typeof target === "number") label = toolName + ": " + target;
+            }
+            if (typeof args === "string" && args.length > 0 && args.length < 60) {
+               label = toolName + ": " + args;
+            }
+            if (activeLine) doneLines.push("  \u2713 " + activeLine);
+            activeLine = label;
+         };
+
+         // Run and wait for result.
+         let count = 0;
+         const tick = setInterval(() => {
+            const secs = Math.floor((Date.now() - elapsed) / 1000);
+            const past = doneLines.slice(-4).join("\n");
+            const spinner = spinners[count++ % spinners.length];
+            const active = activeLine ? spinner + " " + activeLine : "";
+            const lines = [past, active, "  [" + secs + "s]"].filter(Boolean).join("\n");
+            onUpdate?.({ content: [{ type: "text", text: lines }], details: {} });
+         }, 200);
 
          const result = await runExplorer(params.prompt, ctx.cwd, {
             signal,
-            model: ctx.model,
-            modelRegistry: ctx.modelRegistry,
-            thinkingLevel: pi.getThinkingLevel(),
-            onToolStart(toolName) {
-               onUpdate?.({ content: [{ type: "text", text: `Explorer: running ${toolName}...` }], details: {} });
-            },
+            onToolStart
          });
+
+         clearInterval(tick);
+
+         if (activeLine) doneLines.push("  \u2713 " + activeLine);
+
+         const secs = Math.floor((Date.now() - elapsed) / 1000);
+         const text = doneLines.slice(-8).join("\n") + "\n  [" + secs + "s]";
+         onUpdate?.({ content: [{ type: "text", text }], details: {} });
 
          if (result.error) {
             return {
                content: [{ type: "text" as const, text: result.error }],
-               details: undefined,
+               details: undefined
             };
          }
 
          return {
             content: [{ type: "text" as const, text: result.text }],
-            details: { toolsExecuted: result.toolsExecuted },
+            details: { toolsExecuted: result.toolsExecuted }
          };
-      },
+      }
    });
 
    // Register the /explore slash command.
@@ -194,7 +310,7 @@ export default function exploreSubagentExtension(pi: ExtensionAPI) {
                "Find all TODOs and FIXMEs",
                "Summarize project structure",
                "Analyze dependencies",
-               "Custom query...",
+               "Custom query..."
             ]);
 
             if (!choice) return;
@@ -213,12 +329,9 @@ export default function exploreSubagentExtension(pi: ExtensionAPI) {
 
          try {
             const result = await runExplorer(prompt, ctx.cwd, {
-               model: ctx.model,
-               modelRegistry: ctx.modelRegistry,
-               thinkingLevel: pi.getThinkingLevel(),
                onToolStart(toolName) {
                   ctx.ui.setWorkingMessage(`Explorer: running ${toolName}...`);
-               },
+               }
             });
 
             if (result.error) {
@@ -231,6 +344,6 @@ export default function exploreSubagentExtension(pi: ExtensionAPI) {
             ctx.ui.setWorkingMessage();
             ctx.ui.setWorkingVisible(false);
          }
-      },
+      }
    });
 }

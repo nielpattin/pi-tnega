@@ -14,15 +14,17 @@ export default defineConfig({
       "pnpm-workspace.yaml",
       "*yml",
       "**/pi-mcp-adapter/**",
+      ".pi/**"
    ],
+   trailingComma: "none",
    printWidth: 120,
    tabWidth: 3,
    overrides: [
       {
          files: ["*.md", "*.html"],
          options: {
-            tabWidth: 4,
-         },
-      },
-   ],
+            tabWidth: 4
+         }
+      }
+   ]
 });

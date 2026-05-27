@@ -1,6 +1,7 @@
 {
    "compilerOptions": {
       "lib": ["ESNext"],
+      "types": ["node"],
       "target": "ESNext",
       "module": "Preserve",
       "moduleDetection": "force",
@@ -23,15 +24,5 @@
       "noPropertyAccessFromIndexSignature": false
    },
    "include": ["extensions/**/*.ts"],
-   "exclude": [
-      "node_modules",
-      "git",
-      "tmp",
-      "dist",
-      "extensions/**/test",
-      "extensions/**/tests",
-      "extensions/**/__tests__",
-      "extensions/**/examples",
-      "extensions/pi-mcp-adapter"
-   ]
+   "exclude": ["node_modules", "git", "tmp", "dist", "extensions/**/examples", "extensions/pi-mcp-adapter"]
 }

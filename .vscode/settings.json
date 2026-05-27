@@ -1,6 +1,6 @@
 {
    "js/ts.tsdk.path": "node_modules/typescript/lib",
-   "oxc.path.tsgolint": "src/Frontend/node_modules/.bin/tsgolint.cmd",
+   "oxc.path.tsgolint": "node_modules/.bin/tsgolint.cmd",
    "editor.defaultFormatter": "oxc.oxc-vscode",
    "editor.formatOnSave": true,
    "editor.formatOnSaveMode": "file",

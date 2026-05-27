@@ -41,7 +41,7 @@ export default function toolsExtension(pi: ExtensionAPI) {
    // Persist current state
    function persistState() {
       pi.appendEntry<ToolsState>("tools-config", {
-         enabledTools: Array.from(enabledTools),
+         enabledTools: Array.from(enabledTools)
       });
    }
 
@@ -86,7 +86,7 @@ export default function toolsExtension(pi: ExtensionAPI) {
                id: tool.name,
                label: tool.name,
                currentValue: enabledTools.has(tool.name) ? "enabled" : "disabled",
-               values: ["enabled", "disabled"],
+               values: ["enabled", "disabled"]
             }));
 
             const container = new Container();
@@ -96,7 +96,7 @@ export default function toolsExtension(pi: ExtensionAPI) {
                      return [theme.fg("accent", theme.bold("Tool Configuration")), ""];
                   }
                   invalidate() {}
-               })(),
+               })()
             );
 
             const settingsList = new SettingsList(
@@ -116,7 +116,7 @@ export default function toolsExtension(pi: ExtensionAPI) {
                () => {
                   // Close dialog
                   done(undefined);
-               },
+               }
             );
 
             container.addChild(settingsList);
@@ -131,18 +131,21 @@ export default function toolsExtension(pi: ExtensionAPI) {
                handleInput(data: string) {
                   settingsList.handleInput?.(data);
                   tui.requestRender();
-               },
+               }
             };
 
             return component;
          });
-      },
+      }
    });
 
    // Restore state on session start
    pi.on("session_start", async (_event, ctx) => {
-      setTimeout(() => {
-         restoreFromBranch(ctx);
-      }, 0);
+      restoreFromBranch(ctx);
+   });
+
+   // Restore state when navigating the session tree
+   pi.on("session_tree", async (_event, ctx) => {
+      restoreFromBranch(ctx);
    });
 }

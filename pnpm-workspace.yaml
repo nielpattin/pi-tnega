@@ -16,10 +16,6 @@ allowBuilds:
   
 # Supply chain security
 minimumReleaseAge: 7200          # 5 days (or 1440 for 1 day)
-trustPolicy: "no-downgrade"
-trustPolicyExclude:
-  - "@mariozechner/clipboard"
-  - "@mariozechner/clipboard-*"
 blockExoticSubdeps: true
 
 # Extra hardening (recommended in v11)

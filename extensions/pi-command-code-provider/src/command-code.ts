@@ -11,7 +11,7 @@ import {
    type TextContent,
    type Tool,
    type ToolCall,
-   type Usage,
+   type Usage
 } from "@earendil-works/pi-ai";
 
 import type { ExtensionConfig } from "./config";
@@ -113,7 +113,7 @@ function buildCommandConfig(runtime: CommandCodeRuntimeState): Record<string, un
       currentBranch: "",
       mainBranch: "main",
       gitStatus: "",
-      recentCommits: [],
+      recentCommits: []
    };
 }
 
@@ -149,7 +149,7 @@ function assistantContent(message: AssistantMessage): string | CommandCodeConten
             type: "tool-call",
             toolCallId: part.id,
             toolName: part.name,
-            input: part.arguments ?? {},
+            input: part.arguments ?? {}
          });
       }
    }
@@ -158,7 +158,7 @@ function assistantContent(message: AssistantMessage): string | CommandCodeConten
 }
 
 function toolResultContent(
-   message: Extract<Context["messages"][number], { role: "toolResult" }>,
+   message: Extract<Context["messages"][number], { role: "toolResult" }>
 ): CommandCodeContentPart[] {
    return [
       {
@@ -167,9 +167,9 @@ function toolResultContent(
          toolName: message.toolName,
          output: {
             type: message.isError ? "error-text" : "text",
-            value: textFromContent(message.content),
-         },
-      },
+            value: textFromContent(message.content)
+         }
+      }
    ];
 }
 
@@ -196,7 +196,7 @@ function buildTools(tools: Tool[] | undefined): CommandCodeTool[] | undefined {
    return tools.map((tool) => ({
       name: tool.name,
       description: tool.description,
-      input_schema: toolSchemaForRequest(tool),
+      input_schema: toolSchemaForRequest(tool)
    }));
 }
 
@@ -213,13 +213,20 @@ function resolveMaxTokens(model: Model<Api>, options?: SimpleStreamOptions): num
    return Math.max(1, Math.min(requested, API_MAX_OUTPUT_TOKENS));
 }
 
+function resolveReasoningEffort(model: Model<Api>, options?: SimpleStreamOptions): string | undefined {
+   if (!options?.reasoning) return undefined;
+   const mapped = model.thinkingLevelMap?.[options.reasoning];
+   return typeof mapped === "string" && mapped.length > 0 ? mapped : undefined;
+}
+
 function buildRequest(
    model: Model<Api>,
    context: Context,
    config: ExtensionConfig,
    runtime: CommandCodeRuntimeState,
-   options?: SimpleStreamOptions,
+   options?: SimpleStreamOptions
 ): CommandCodeRequest {
+   const reasoningEffort = resolveReasoningEffort(model, options);
    return {
       memory: "",
       taste: null,
@@ -229,12 +236,13 @@ function buildRequest(
          stream: true,
          max_tokens: resolveMaxTokens(model, options),
          temperature: options?.temperature,
+         ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
          system: buildSystemPrompt(config, context),
          messages: buildMessages(context),
-         model: model.id,
+         model: model.id
       },
       config: buildCommandConfig(runtime),
-      threadId: runtime.sessionId,
+      threadId: runtime.sessionId
    };
 }
 
@@ -242,7 +250,7 @@ function resolveApiKey(config: ExtensionConfig, options?: SimpleStreamOptions): 
    const apiKey = options?.apiKey;
    if (!apiKey || (apiKey === config.apiKey && ENV_VAR_PATTERN.test(config.apiKey) && !process.env[config.apiKey])) {
       throw new Error(
-         `No CommandCode API token configured. Set ${config.apiKey} or update pi-command-code-provider/config.json.`,
+         `No CommandCode API token configured. Set ${config.apiKey} or update pi-command-code-provider/config.json.`
       );
    }
    return apiKey;
@@ -252,7 +260,7 @@ function buildHeaders(
    config: ExtensionConfig,
    apiKey: string,
    options?: SimpleStreamOptions,
-   runtime?: CommandCodeRuntimeState,
+   runtime?: CommandCodeRuntimeState
 ): Record<string, string> {
    const headers: Record<string, string> = {
       ...config.headers,
@@ -260,7 +268,7 @@ function buildHeaders(
       "Content-Type": "application/json",
       Accept: "text/event-stream, application/json",
       "x-command-code-version": config.commandCodeVersion,
-      "x-cli-environment": `${process.platform}-${process.arch}, Node.js ${process.version}`,
+      "x-cli-environment": `${process.platform}-${process.arch}, Node.js ${process.version}`
    };
    if (runtime?.sessionId) {
       headers["x-session-id"] = runtime.sessionId;
@@ -281,7 +289,7 @@ function buildHeaders(
 
 function createRequestSignal(
    options: SimpleStreamOptions | undefined,
-   timeoutMs: number,
+   timeoutMs: number
 ): { signal: AbortSignal; dispose(): void } {
    const controller = new AbortController();
    let disposed = false;
@@ -299,7 +307,7 @@ function createRequestSignal(
          disposed = true;
          clearTimeout(timeout);
          options?.signal?.removeEventListener("abort", abortFromParent);
-      },
+      }
    };
 }
 
@@ -348,7 +356,7 @@ function parseUsage(model: Model<Api>, rawUsage: unknown): Usage {
       cacheRead,
       cacheWrite,
       totalTokens: input + output + cacheRead + cacheWrite,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
    };
    calculateCost(model, usage);
    return usage;
@@ -368,7 +376,7 @@ function parseEventUsage(model: Model<Api>, rawUsage: unknown): Usage | undefine
       cacheRead,
       cacheWrite: 0,
       totalTokens: input + output + cacheRead,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
    };
    calculateCost(model, usage);
    return usage;
@@ -429,7 +437,7 @@ function parseDsmlToolCalls(dsml: string, baseIndex: number): ToolCall[] {
          type: "toolCall",
          id: `command-code-tool-${baseIndex + toolCalls.length}`,
          name,
-         arguments: args,
+         arguments: args
       });
    }
    return toolCalls;
@@ -455,7 +463,7 @@ function parseXmlToolCalls(xml: string, baseIndex: number): ToolCall[] {
          type: "toolCall",
          id: `command-code-tool-${baseIndex + toolCalls.length}`,
          name,
-         arguments: args,
+         arguments: args
       });
    }
    return toolCalls;
@@ -477,15 +485,15 @@ function parseTextMarkup(text: string, baseIndex: number): ParsedContentBlock[] 
          blocks.push(
             ...parseXmlToolCalls(match[2], baseIndex + blocks.length).map((toolCall) => ({
                type: "toolCall" as const,
-               toolCall,
-            })),
+               toolCall
+            }))
          );
       } else if (match[3] !== undefined) {
          blocks.push(
             ...parseDsmlToolCalls(match[3], baseIndex + blocks.length).map((toolCall) => ({
                type: "toolCall" as const,
-               toolCall,
-            })),
+               toolCall
+            }))
          );
       }
       cursor = pattern.lastIndex;
@@ -505,7 +513,7 @@ function parseToolCall(part: Record<string, unknown>, index: number): ToolCall |
       type: "toolCall",
       id,
       name,
-      arguments: isRecord(rawArguments) ? rawArguments : { value: rawArguments },
+      arguments: isRecord(rawArguments) ? rawArguments : { value: rawArguments }
    };
 }
 
@@ -539,7 +547,7 @@ function parseContentBlocks(content: unknown): ParsedContentBlock[] {
 
 function mapStopReason(
    rawStopReason: unknown,
-   hasToolCalls: boolean,
+   hasToolCalls: boolean
 ): { stopReason: "stop" | "length" | "toolUse" | "error"; errorMessage?: string } {
    const reason = typeof rawStopReason === "string" ? rawStopReason : "stop";
    switch (reason) {
@@ -574,10 +582,10 @@ function createOutput(model: Model<Api>): AssistantMessage {
          cacheRead: 0,
          cacheWrite: 0,
          totalTokens: 0,
-         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
       },
       stopReason: "stop",
-      timestamp: Date.now(),
+      timestamp: Date.now()
    };
 }
 
@@ -592,7 +600,7 @@ function emitTextDelta(
    stream: AssistantMessageEventStream,
    output: AssistantMessage,
    contentIndex: number,
-   delta: string,
+   delta: string
 ): void {
    const block = output.content[contentIndex];
    if (block?.type === "text") block.text += delta;
@@ -622,7 +630,7 @@ function emitThinkingDelta(
    stream: AssistantMessageEventStream,
    output: AssistantMessage,
    contentIndex: number,
-   delta: string,
+   delta: string
 ): void {
    const block = output.content[contentIndex];
    if (block?.type === "thinking") block.thinking += delta;
@@ -651,7 +659,7 @@ const COMMAND_CODE_TOOL_ALIASES: Record<string, string> = {
    edit_file: "edit",
    read_directory: "ls",
    shell_command: "bash",
-   glob: "find",
+   glob: "find"
 };
 
 function normalizeToolArguments(name: string, args: Record<string, unknown>): Record<string, unknown> {
@@ -684,7 +692,7 @@ function normalizeToolArguments(name: string, args: Record<string, unknown>): Re
          return {
             ...rest,
             path: typeof filePath === "string" ? filePath : rest.path,
-            edits: [{ oldText: oldValue, newText: newValue }],
+            edits: [{ oldText: oldValue, newText: newValue }]
          };
       }
       return { ...rest, path: typeof filePath === "string" ? filePath : rest.path };
@@ -705,7 +713,7 @@ function emitToolCall(
    stream: AssistantMessageEventStream,
    output: AssistantMessage,
    toolCall: ToolCall,
-   context: Context,
+   context: Context
 ): void {
    const normalizedToolCall = normalizeToolCallForContext(toolCall, context);
    const contentIndex = output.content.length;
@@ -715,13 +723,13 @@ function emitToolCall(
       type: "toolcall_delta",
       contentIndex,
       delta: JSON.stringify(normalizedToolCall.arguments),
-      partial: output,
+      partial: output
    });
    stream.push({
       type: "toolcall_end",
       contentIndex,
       toolCall: normalizedToolCall,
-      partial: output,
+      partial: output
    });
 }
 
@@ -730,7 +738,7 @@ function emitResponse(
    output: AssistantMessage,
    response: CommandCodeResponse,
    model: Model<Api>,
-   context: Context,
+   context: Context
 ): void {
    output.responseId = typeof response.id === "string" ? response.id : undefined;
    output.responseModel =
@@ -792,7 +800,7 @@ async function consumeEventStream(
    output: AssistantMessage,
    model: Model<Api>,
    context: Context,
-   logger: DebugLogger,
+   logger: DebugLogger
 ): Promise<void> {
    stream.push({ type: "start", partial: output });
    const textBlocks = new Map<string, number>();
@@ -855,7 +863,7 @@ async function consumeEventStream(
          const accumulator = toolInputs.get(id) ?? {
             id,
             toolName: optionalString(event.toolName) ?? "tool",
-            inputText: "",
+            inputText: ""
          };
          accumulator.inputText += eventText(event);
          toolInputs.set(id, accumulator);
@@ -889,9 +897,9 @@ async function consumeEventStream(
                type: "toolCall",
                id,
                name: optionalString(event.toolName) ?? accumulator?.toolName ?? "tool",
-               arguments: args,
+               arguments: args
             },
-            context,
+            context
          );
          return;
       }
@@ -956,7 +964,7 @@ async function executeCommandCodeRequest(
    config: ExtensionConfig,
    runtime: CommandCodeRuntimeState,
    logger: DebugLogger,
-   options?: SimpleStreamOptions,
+   options?: SimpleStreamOptions
 ): Promise<void> {
    const apiKey = resolveApiKey(config, options);
    const signal = createRequestSignal(options, options?.timeoutMs ?? config.requestTimeoutMs);
@@ -967,12 +975,12 @@ async function executeCommandCodeRequest(
          method: "POST",
          headers: buildHeaders(config, apiKey, options, runtime),
          body: JSON.stringify(payload),
-         signal: signal.signal,
+         signal: signal.signal
       });
 
       await options?.onResponse?.(
          { status: response.status, headers: responseHeadersToRecord(response.headers) },
-         model,
+         model
       );
 
       if (!response.ok) {
@@ -982,7 +990,7 @@ async function executeCommandCodeRequest(
             model: model.id,
             status: response.status,
             error: errorMessage,
-            rawPayload: errorPayload,
+            rawPayload: errorPayload
          });
          throw new Error(errorMessage);
       }
@@ -1002,7 +1010,7 @@ async function executeCommandCodeRequest(
       logger.error("request_failed", {
          model: model.id,
          stopReason: output.stopReason,
-         error: output.errorMessage,
+         error: output.errorMessage
       });
       stream.push({ type: "error", reason: output.stopReason, error: output });
       stream.end(output);
@@ -1014,7 +1022,7 @@ async function executeCommandCodeRequest(
 export function createCommandCodeStream(
    config: ExtensionConfig,
    runtime: CommandCodeRuntimeState,
-   logger: DebugLogger,
+   logger: DebugLogger
 ) {
    return (model: Model<Api>, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream => {
       const stream = createAssistantMessageEventStream();

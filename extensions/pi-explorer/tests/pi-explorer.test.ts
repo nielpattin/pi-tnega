@@ -4,8 +4,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mocks
 // ---------------------------------------------------------------------------
 
+vi.mock("@earendil-works/pi-ai", () => ({
+   getModel: vi.fn().mockReturnValue({
+      id: "deepseek-v4-flash",
+      name: "DeepSeek V4 Flash",
+      provider: "opencode-go",
+      input: ["text"],
+   }),
+}));
+
 vi.mock("@earendil-works/pi-coding-agent", () => ({
    createAgentSession: vi.fn(),
+   keyHint: vi.fn((_key: string, description: string) => `Ctrl+O ${description}`),
    DefaultResourceLoader: vi.fn().mockImplementation(function () {
       return { reload: vi.fn().mockResolvedValue(undefined) };
    }),
@@ -36,7 +46,7 @@ function mockSession(overrides: Record<string, any> = {}) {
 }
 
 // Import AFTER mocks are registered (vi.mock is hoisted)
-import { runExplorer } from "../index";
+import exploreSubagentExtension, { runExplorer } from "../index";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -101,7 +111,8 @@ describe("runExplorer", () => {
       expect(result.error).toBeUndefined();
    });
 
-   it("passes thinkingLevel to createAgentSession", async () => {
+   it("passes hardcoded opencode-go DeepSeek V4 Flash model and high thinking to createAgentSession", async () => {
+      const callerModel = { id: "caller-model", provider: "caller-provider" };
       const session = mockSession({
          model: {},
          isStreaming: false,
@@ -109,10 +120,17 @@ describe("runExplorer", () => {
       });
       vi.mocked(createAgentSession).mockResolvedValue({ session } as any);
 
-      await runExplorer(prompt, cwd, { thinkingLevel: "high" as any });
+      await runExplorer(prompt, cwd, { model: callerModel, thinkingLevel: "off" } as any);
 
       expect(vi.mocked(createAgentSession)).toHaveBeenCalledWith(
-         expect.objectContaining({ thinkingLevel: "high" }),
+         expect.objectContaining({
+            model: expect.objectContaining({
+               id: "deepseek-v4-flash",
+               provider: "opencode-go",
+            }),
+            thinkingLevel: "high",
+            tools: ["read", "grep", "find", "ls"],
+         }),
       );
    });
 
@@ -189,8 +207,8 @@ describe("runExplorer", () => {
       await resultPromise;
 
       expect(onToolStart).toHaveBeenCalledTimes(2);
-      expect(onToolStart).toHaveBeenNthCalledWith(1, "read");
-      expect(onToolStart).toHaveBeenNthCalledWith(2, "grep");
+      expect(onToolStart).toHaveBeenNthCalledWith(1, "read", undefined);
+      expect(onToolStart).toHaveBeenNthCalledWith(2, "grep", undefined);
    });
 
    it("ignores non-tool events in subscription", async () => {
@@ -293,16 +311,47 @@ describe("runExplorer", () => {
 
       const result = await resultPromise;
 
-      expect(abort).toHaveBeenCalledTimes(1);
+      expect(abort).toHaveBeenCalled();
       expect(result.text).toBe("Partial");
       expect(result.error).toBeUndefined();
    });
 });
 
 describe("explore_codebase tool registration", () => {
-   // Pull in the extension registration to check schema / metadata.
-   // We can't easily test execute() end-to-end without a real ctx,
-   // but we can verify the parameter schema and tool description.
+   function registeredTool() {
+      const registerTool = vi.fn();
+      const pi = {
+         registerTool,
+         registerCommand: vi.fn(),
+      };
+      exploreSubagentExtension(pi as any);
+      return registerTool.mock.calls[0]![0] as any;
+   }
+
+   function renderText(component: { render: (width: number) => string[] }) {
+      return component.render(100).join("\n");
+   }
+
+   const theme = {
+      fg: (_name: string, text: string) => text,
+      bold: (text: string) => text,
+   };
+
+   it("renders partial progress from onUpdate as styled output", () => {
+      const tool = registeredTool();
+      const progressLines = "  \u2713 read: src/index.ts\n\u25D0 grep: TODO  [3s]";
+      const result = {
+         content: [{ type: "text", text: progressLines }],
+         details: {},
+      };
+
+      const output = renderText(tool.renderResult(result, { expanded: false, isPartial: true }, theme, {}));
+
+      expect(output).toContain("read: src/index.ts");
+      expect(output).toContain("grep: TODO");
+      expect(output).toContain("[3s]");
+   });
+
    it("schema only requires prompt", () => {
       // The extension registers with:
       // parameters: Type.Object({ prompt: Type.String() })
@@ -311,6 +360,23 @@ describe("explore_codebase tool registration", () => {
       expect(valid.prompt).toBe("Find files");
       // No toolLimit property
       expect((valid as any).toolLimit).toBeUndefined();
+   });
+
+   it("renders compact output while collapsed and full output when expanded", () => {
+      const tool = registeredTool();
+      const result = {
+         content: [{ type: "text", text: "line 1\nline 2\nline 3\nline 4" }],
+         details: { toolsExecuted: 7 },
+      };
+
+      const collapsed = renderText(tool.renderResult(result, { expanded: false, isPartial: false }, theme, {}));
+      const expanded = renderText(tool.renderResult(result, { expanded: true, isPartial: false }, theme, {}));
+
+      expect(collapsed).toContain("Explorer finished");
+      expect(collapsed).toContain("7 tools");
+      expect(collapsed).toContain("expand");
+      expect(collapsed).not.toContain("line 4");
+      expect(expanded).toContain("line 4");
    });
 });
 

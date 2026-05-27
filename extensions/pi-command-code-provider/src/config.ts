@@ -50,8 +50,8 @@ const DEFAULT_MODEL_DEFAULTS = {
       input: 0,
       output: 0,
       cacheRead: 0,
-      cacheWrite: 0,
-   },
+      cacheWrite: 0
+   }
 } satisfies Omit<ProviderModelConfig, "id" | "name">;
 
 const OPENAI_REASONING_MAP = {
@@ -60,7 +60,7 @@ const OPENAI_REASONING_MAP = {
    low: "low",
    medium: "medium",
    high: "high",
-   xhigh: null,
+   xhigh: null
 } satisfies ThinkingLevelMap;
 const ANTHROPIC_REASONING_MAP = {
    off: "disabled",
@@ -68,17 +68,17 @@ const ANTHROPIC_REASONING_MAP = {
    low: "low",
    medium: "medium",
    high: "high",
-   xhigh: null,
+   xhigh: null
 } satisfies ThinkingLevelMap;
 const ANTHROPIC_OPUS_4_7_REASONING_MAP = { ...ANTHROPIC_REASONING_MAP, xhigh: "xhigh" } satisfies ThinkingLevelMap;
 const ANTHROPIC_OPUS_4_6_REASONING_MAP = { ...ANTHROPIC_REASONING_MAP, xhigh: "max" } satisfies ThinkingLevelMap;
 const COMMAND_CODE_AUTO_REASONING_MAP = {
-   off: "off",
-   minimal: "minimal",
-   low: "low",
-   medium: "medium",
+   off: null,
+   minimal: null,
+   low: null,
+   medium: null,
    high: "high",
-   xhigh: null,
+   xhigh: "max"
 } satisfies ThinkingLevelMap;
 
 const DEFAULT_RAW_MODELS: Record<string, unknown>[] = [
@@ -89,7 +89,7 @@ const DEFAULT_RAW_MODELS: Record<string, unknown>[] = [
       reasoning: false,
       contextWindow: 256000,
       maxTokens: 262144,
-      cost: { input: 0.6, output: 3, cacheRead: 0, cacheWrite: 0 },
+      cost: { input: 0.6, output: 3, cacheRead: 0, cacheWrite: 0 }
    },
    {
       id: "moonshotai/Kimi-K2.6",
@@ -98,7 +98,7 @@ const DEFAULT_RAW_MODELS: Record<string, unknown>[] = [
       reasoning: false,
       contextWindow: 256000,
       maxTokens: 262144,
-      cost: { input: 0.95, output: 4, cacheRead: 0.16, cacheWrite: 0 },
+      cost: { input: 0.95, output: 4, cacheRead: 0.16, cacheWrite: 0 }
    },
    {
       id: "deepseek/deepseek-v4-pro",
@@ -108,7 +108,7 @@ const DEFAULT_RAW_MODELS: Record<string, unknown>[] = [
       thinkingLevelMap: COMMAND_CODE_AUTO_REASONING_MAP,
       contextWindow: 1000000,
       maxTokens: 393216,
-      cost: { input: 0.435, output: 0.87, cacheRead: 0.003625, cacheWrite: 0 },
+      cost: { input: 0.435, output: 0.87, cacheRead: 0.003625, cacheWrite: 0 }
    },
    {
       id: "deepseek/deepseek-v4-flash",
@@ -118,7 +118,7 @@ const DEFAULT_RAW_MODELS: Record<string, unknown>[] = [
       thinkingLevelMap: COMMAND_CODE_AUTO_REASONING_MAP,
       contextWindow: 1000000,
       maxTokens: 384000,
-      cost: { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 },
+      cost: { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 }
    },
    {
       id: "Qwen/Qwen3.6-Plus",
@@ -128,7 +128,7 @@ const DEFAULT_RAW_MODELS: Record<string, unknown>[] = [
       thinkingLevelMap: COMMAND_CODE_AUTO_REASONING_MAP,
       contextWindow: 1000000,
       maxTokens: 65536,
-      cost: { input: 0.5, output: 3, cacheRead: 0.1, cacheWrite: 0 },
+      cost: { input: 0.5, output: 3, cacheRead: 0.1, cacheWrite: 0 }
    },
    {
       id: "Qwen/Qwen3.6-Max-Preview",
@@ -138,7 +138,7 @@ const DEFAULT_RAW_MODELS: Record<string, unknown>[] = [
       thinkingLevelMap: COMMAND_CODE_AUTO_REASONING_MAP,
       contextWindow: 1000000,
       maxTokens: 65536,
-      cost: { input: 0.5, output: 3, cacheRead: 0.1, cacheWrite: 0 },
+      cost: { input: 0.5, output: 3, cacheRead: 0.1, cacheWrite: 0 }
    },
    {
       id: "stepfun/Step-3.5-Flash",
@@ -148,7 +148,7 @@ const DEFAULT_RAW_MODELS: Record<string, unknown>[] = [
       thinkingLevelMap: COMMAND_CODE_AUTO_REASONING_MAP,
       contextWindow: 1000000,
       maxTokens: 131072,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
    },
    {
       id: "zai-org/GLM-5",
@@ -157,7 +157,7 @@ const DEFAULT_RAW_MODELS: Record<string, unknown>[] = [
       reasoning: false,
       contextWindow: 200000,
       maxTokens: 131072,
-      cost: { input: 0.95, output: 3.15, cacheRead: 0, cacheWrite: 0 },
+      cost: { input: 0.95, output: 3.15, cacheRead: 0, cacheWrite: 0 }
    },
    {
       id: "zai-org/GLM-5.1",
@@ -166,7 +166,7 @@ const DEFAULT_RAW_MODELS: Record<string, unknown>[] = [
       reasoning: false,
       contextWindow: 200000,
       maxTokens: 131072,
-      cost: { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
+      cost: { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 }
    },
    {
       id: "MiniMaxAI/MiniMax-M2.5",
@@ -175,7 +175,7 @@ const DEFAULT_RAW_MODELS: Record<string, unknown>[] = [
       reasoning: false,
       contextWindow: 200000,
       maxTokens: 131072,
-      cost: { input: 0.5, output: 2, cacheRead: 0, cacheWrite: 0 },
+      cost: { input: 0.5, output: 2, cacheRead: 0, cacheWrite: 0 }
    },
    {
       id: "MiniMaxAI/MiniMax-M2.7",
@@ -184,7 +184,7 @@ const DEFAULT_RAW_MODELS: Record<string, unknown>[] = [
       reasoning: false,
       contextWindow: 1000000,
       maxTokens: 131072,
-      cost: { input: 0.5, output: 2, cacheRead: 0, cacheWrite: 0 },
+      cost: { input: 0.5, output: 2, cacheRead: 0, cacheWrite: 0 }
    },
    {
       id: "gpt-5.5",
@@ -194,7 +194,7 @@ const DEFAULT_RAW_MODELS: Record<string, unknown>[] = [
       thinkingLevelMap: OPENAI_REASONING_MAP,
       contextWindow: 1000000,
       maxTokens: 128000,
-      cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
+      cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 }
    },
    {
       id: "gpt-5.4",
@@ -204,7 +204,7 @@ const DEFAULT_RAW_MODELS: Record<string, unknown>[] = [
       thinkingLevelMap: OPENAI_REASONING_MAP,
       contextWindow: 400000,
       maxTokens: 128000,
-      cost: { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 0 },
+      cost: { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 0 }
    },
    {
       id: "gpt-5.3-codex",
@@ -214,7 +214,7 @@ const DEFAULT_RAW_MODELS: Record<string, unknown>[] = [
       thinkingLevelMap: OPENAI_REASONING_MAP,
       contextWindow: 400000,
       maxTokens: 128000,
-      cost: { input: 2, output: 8, cacheRead: 0.5, cacheWrite: 0 },
+      cost: { input: 2, output: 8, cacheRead: 0.5, cacheWrite: 0 }
    },
    {
       id: "gpt-5.4-mini",
@@ -224,7 +224,7 @@ const DEFAULT_RAW_MODELS: Record<string, unknown>[] = [
       thinkingLevelMap: OPENAI_REASONING_MAP,
       contextWindow: 400000,
       maxTokens: 128000,
-      cost: { input: 0.75, output: 4.5, cacheRead: 0.075, cacheWrite: 0 },
+      cost: { input: 0.75, output: 4.5, cacheRead: 0.075, cacheWrite: 0 }
    },
    {
       id: "claude-sonnet-4-6",
@@ -234,7 +234,7 @@ const DEFAULT_RAW_MODELS: Record<string, unknown>[] = [
       thinkingLevelMap: ANTHROPIC_REASONING_MAP,
       contextWindow: 1000000,
       maxTokens: 64000,
-      cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+      cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }
    },
    {
       id: "claude-opus-4-7",
@@ -244,7 +244,7 @@ const DEFAULT_RAW_MODELS: Record<string, unknown>[] = [
       thinkingLevelMap: ANTHROPIC_OPUS_4_7_REASONING_MAP,
       contextWindow: 1000000,
       maxTokens: 128000,
-      cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+      cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 }
    },
    {
       id: "claude-opus-4-6",
@@ -254,7 +254,7 @@ const DEFAULT_RAW_MODELS: Record<string, unknown>[] = [
       thinkingLevelMap: ANTHROPIC_OPUS_4_6_REASONING_MAP,
       contextWindow: 200000,
       maxTokens: 128000,
-      cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+      cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 }
    },
    {
       id: "claude-haiku-4-5-20251001",
@@ -264,8 +264,8 @@ const DEFAULT_RAW_MODELS: Record<string, unknown>[] = [
       thinkingLevelMap: ANTHROPIC_REASONING_MAP,
       contextWindow: 200000,
       maxTokens: 64000,
-      cost: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
-   },
+      cost: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 }
+   }
 ];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -295,7 +295,7 @@ function numberOr(value: unknown, fallback: number): number {
 function stringRecordOr(value: unknown, fallback?: Record<string, string>): Record<string, string> | undefined {
    if (!isRecord(value)) return fallback ? { ...fallback } : undefined;
    const parsed = Object.fromEntries(
-      Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+      Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string")
    );
    return Object.keys(parsed).length > 0 ? parsed : fallback ? { ...fallback } : undefined;
 }
@@ -308,7 +308,7 @@ function recordOr(value: unknown, fallback?: Record<string, unknown>): Record<st
 function capabilitiesOr(value: unknown, fallback?: CapabilityFlags): CapabilityFlags | undefined {
    if (!isRecord(value)) return fallback ? { ...fallback } : undefined;
    const parsed = Object.fromEntries(
-      Object.entries(value).filter((entry): entry is [string, boolean] => typeof entry[1] === "boolean"),
+      Object.entries(value).filter((entry): entry is [string, boolean] => typeof entry[1] === "boolean")
    );
    return Object.keys(parsed).length > 0 ? parsed : fallback ? { ...fallback } : undefined;
 }
@@ -323,7 +323,7 @@ function outputOr(value: unknown, fallback?: OutputModality[]): OutputModality[]
    if (!Array.isArray(value)) return fallback ? [...fallback] : undefined;
    const parsed = value.filter(
       (entry): entry is OutputModality =>
-         entry === "text" || entry === "image" || entry === "audio" || entry === "video",
+         entry === "text" || entry === "image" || entry === "audio" || entry === "video"
    );
    return parsed.length > 0 ? parsed : fallback ? [...fallback] : undefined;
 }
@@ -334,7 +334,7 @@ function costOr(value: unknown, fallback: ProviderModelConfig["cost"]): Provider
       input: typeof value.input === "number" ? value.input : fallback.input,
       output: typeof value.output === "number" ? value.output : fallback.output,
       cacheRead: typeof value.cacheRead === "number" ? value.cacheRead : fallback.cacheRead,
-      cacheWrite: typeof value.cacheWrite === "number" ? value.cacheWrite : fallback.cacheWrite,
+      cacheWrite: typeof value.cacheWrite === "number" ? value.cacheWrite : fallback.cacheWrite
    };
 }
 
@@ -365,13 +365,13 @@ function modelDefaultsFrom(raw: Record<string, unknown>): Omit<CommandCodeProvid
       headers: stringRecordOr(defaults.headers),
       compat: recordOr(defaults.compat) as ProviderModelConfig["compat"],
       isFree: optionalBoolean(defaults.isFree, undefined),
-      importOwnership: optionalString(defaults.importOwnership),
+      importOwnership: optionalString(defaults.importOwnership)
    };
 }
 
 function normalizeModel(
    rawModel: unknown,
-   defaults: Omit<CommandCodeProviderModelConfig, "id" | "name">,
+   defaults: Omit<CommandCodeProviderModelConfig, "id" | "name">
 ): CommandCodeProviderModelConfig | null {
    if (!isRecord(rawModel)) return null;
    const id = stringOr(rawModel.id, "");
@@ -392,10 +392,10 @@ function normalizeModel(
       headers: stringRecordOr(rawModel.headers, defaults.headers),
       compat: recordOr(
          rawModel.compat,
-         isRecord(defaults.compat) ? defaults.compat : undefined,
+         isRecord(defaults.compat) ? defaults.compat : undefined
       ) as ProviderModelConfig["compat"],
       isFree: optionalBoolean(rawModel.isFree, defaults.isFree),
-      importOwnership: optionalString(rawModel.importOwnership) ?? defaults.importOwnership,
+      importOwnership: optionalString(rawModel.importOwnership) ?? defaults.importOwnership
    };
 
    for (const key of [
@@ -406,7 +406,7 @@ function normalizeModel(
       "headers",
       "compat",
       "isFree",
-      "importOwnership",
+      "importOwnership"
    ] as const) {
       if (model[key] === undefined) delete model[key];
    }
@@ -420,7 +420,7 @@ function readRawConfig(extensionRoot: string, warnings: string[]): Record<string
       warnings.push("config.json root must be an object; using defaults.");
    } catch (error) {
       warnings.push(
-         `Unable to read config.json; using defaults: ${error instanceof Error ? error.message : "unknown error"}`,
+         `Unable to read config.json; using defaults: ${error instanceof Error ? error.message : "unknown error"}`
       );
    }
    return {};
@@ -428,7 +428,7 @@ function readRawConfig(extensionRoot: string, warnings: string[]): Record<string
 
 function normalizeModelList(
    rawModels: unknown,
-   defaults: Omit<CommandCodeProviderModelConfig, "id" | "name">,
+   defaults: Omit<CommandCodeProviderModelConfig, "id" | "name">
 ): CommandCodeProviderModelConfig[] {
    if (!Array.isArray(rawModels)) return [];
    return rawModels
@@ -456,13 +456,13 @@ export function loadConfig(extensionRoot: string): ConfigLoadResult {
          displayName: stringOr(raw.displayName, "CommandCode"),
          upstreamUrl: stringOr(raw.upstreamUrl, "https://api.commandcode.ai"),
          apiKey: stringOr(raw.apiKey, "COMMAND_CODE_TOKEN"),
-         commandCodeVersion: stringOr(raw.commandCodeVersion, "0.26.18"),
+         commandCodeVersion: stringOr(raw.commandCodeVersion, "0.26.25"),
          commandCodeProvider: stringOr(raw.commandCodeProvider, "command-code"),
          requestTimeoutMs: numberOr(raw.requestTimeoutMs, 300_000),
          memory: typeof raw.memory === "string" ? raw.memory : "",
          headers: stringRecordOr(raw.headers) ?? {},
-         models,
+         models
       },
-      warnings,
+      warnings
    };
 }

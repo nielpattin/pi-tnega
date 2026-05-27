@@ -3,9 +3,9 @@
   "compaction": {
     "enabled": true
   },
-  "defaultModel": "deepseek/deepseek-v4-pro",
-  "defaultProvider": "command-code",
-  "defaultThinkingLevel": "high",
+  "defaultModel": "gpt-5.5",
+  "defaultProvider": "codex-lb",
+  "defaultThinkingLevel": "low",
   "doubleEscapeAction": "none",
   "editorPaddingX": 0,
   "enableSkillCommands": true,
@@ -21,7 +21,6 @@
     "xiaomi-token-plan-sgp/mimo-v2.5",
     "deepseek/deepseek-v4-flash",
     "deepseek/deepseek-v4-pro",
-    "freemodel/gpt-5.5",
     "opencode-go/deepseek-v4-flash",
     "command-code/moonshotai/Kimi-K2.6",
     "command-code/deepseek/deepseek-v4-pro",
@@ -30,35 +29,36 @@
     "opencode-go/kimi-k2.6",
     "opencode-go/glm-5.1",
     "opencode-go/deepseek-v4-pro",
-    "opencode-go/qwen3.6-plus"
+    "opencode-go/qwen3.6-plus",
+    "codex-lb/gpt-5.5",
+    "codex-lb/gpt-5.4-mini",
+    "codex-lb/gpt-5.3-codex"
   ],
   "extensions": [
     "-extensions\\web-reader.ts",
-    "-extensions\\simplify-test.ts",
     "-extensions\\cute-minimal-mode.ts",
     "-extensions\\files.ts",
     "-extensions\\stats.ts",
     "-extensions\\rg-guard.ts",
-    "+extensions\\opencode-free\\index.ts",
     "-extensions\\batch-read.ts",
-    "-extensions\\pi-footer\\index.ts",
     "+extensions\\pi-command-code-provider\\index.ts",
     "+extensions\\pi-intercom\\index.ts",
     "-extensions\\pi-rtk\\index.ts",
     "+extensions\\tool-selector\\index.ts",
     "+extensions\\tps.ts",
-    "+extensions\\notification\\index.ts",
-    "+extensions\\kinda\\index.ts",
+    "-extensions\\notification\\index.ts",
+    "-extensions\\kinda\\index.ts",
     "-extensions\\git-guard.ts",
-    "-extensions\\recover-mimo-thinking.ts",
-    "+extensions\\pi-explorer\\index.ts"
+    "+extensions\\pi-explorer\\index.ts",
+    "-extensions\\harness\\index.ts",
+    "-extensions\\pi-permission-system\\index.ts"
   ],
   "followUpMode": "all",
-  "hideThinkingBlock": false,
+  "hideThinkingBlock": true,
   "images": {
     "autoResize": true
   },
-  "lastChangelogVersion": "0.75.4",
+  "lastChangelogVersion": "0.75.5",
   "packages": [
     {
       "source": "git:github.com/raunovillberg/im-pi-eccable",
@@ -83,7 +83,8 @@
       "extensions": [
         "+dist\\index.js"
       ]
-    }
+    },
+    "npm:@ygncode/pi-insights"
   ],
   "prompts": [
     "+prompts\\commit.md"
@@ -100,7 +101,8 @@
     "+skills\\distill\\SKILL.md",
     "-skills\\drawio-diagrams-enhanced\\SKILL.md",
     "-skills\\drawio-skill\\SKILL.md",
-    "+skills\\extract\\SKILL.md"
+    "+skills\\extract\\SKILL.md",
+    "+skills\\librarian\\SKILL.md"
   ],
   "steeringMode": "all",
   "terminal": {
@@ -137,9 +139,9 @@
     "scrollbar": true,
     "scrollBar": true,
     "shortcuts": {
-      "bashMode": "ctrl+shift+b",
-      "stash": "ctrl+shift+s",
-      "stashHistory": "ctrl+shift+h"
+      "bashMode": "ctrl+b",
+      "stash": "alt+s",
+      "stashHistory": "alt+h"
     }
   }
 }

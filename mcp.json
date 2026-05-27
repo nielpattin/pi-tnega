@@ -30,10 +30,20 @@
     "browseros": {
       "url": "http://127.0.0.1:9000/mcp",
       "lifecycle": "lazy"
+    },
+    "pencil": {
+      "command": "C:\\Users\\niel\\.pencil\\mcp\\visual_studio_code\\out\\mcp-server-windows-x64.exe",
+      "args": [
+        "--app",
+        "visual_studio_code",
+        "--agent",
+        "openCodeCLI"
+      ]
     }
   },
   "imports": [
     "cursor",
-    "codex"
+    "codex",
+    "claude-code"
   ]
 }

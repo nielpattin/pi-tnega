@@ -1,11 +1,13 @@
 {
    "providers": {
-      "opencode": {
-         "apiKey": "opencode",
+      "codex-lb": {
+         "apiKey": "LB-API-KEY",
+         "api": "openai-codex-responses",
+         "baseUrl": "http://127.0.0.1:2455/backend-api",
          "models": [
             {
-               "id": "deepseek-v4-flash-free",
-               "name": "OpenCode Zen: DeepSeek V4 Flash Free",
+               "id": "gpt-5.5",
+               "name": "gpt-5.5 (codex-lb)",
                "reasoning": true,
                "thinkingLevelMap": {
                   "off": "off",
@@ -15,19 +17,51 @@
                   "high": "high",
                   "xhigh": "xhigh"
                },
-               "input": ["text"],
-               "contextWindow": 1000000,
-               "maxTokens": 384000,
+               "input": ["text", "image"],
+               "contextWindow": 1050000,
+               "maxTokens": 128000,
                "cost": {
                   "input": 0,
                   "output": 0,
                   "cacheRead": 0,
                   "cacheWrite": 0
                }
+            },
+            {
+               "id": "gpt-5.3-codex",
+               "name": "gpt-5.3-codex (codex-lb)",
+               "reasoning": true,
+               "thinkingLevelMap": {
+                  "off": "off",
+                  "minimal": "minimal",
+                  "low": "low",
+                  "medium": "medium",
+                  "high": "high",
+                  "xhigh": "xhigh"
+               },
+               "input": ["text", "image"],
+               "contextWindow": 272000,
+               "maxTokens": 65536,
+               "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+            },
+            {
+               "id": "gpt-5.4-mini",
+               "name": "gpt-5.4-mini (codex-lb)",
+               "reasoning": true,
+               "thinkingLevelMap": {
+                  "off": "off",
+                  "minimal": "minimal",
+                  "low": "low",
+                  "medium": "medium",
+                  "high": "high",
+                  "xhigh": "xhigh"
+               },
+               "input": ["text", "image"],
+               "contextWindow": 272000,
+               "maxTokens": 65536,
+               "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
             }
-         ],
-         "api": "openai-completions",
-         "baseUrl": "https://opencode.ai/zen/v1"
+         ]
       }
    }
 }

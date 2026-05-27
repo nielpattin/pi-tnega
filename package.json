@@ -11,23 +11,23 @@
       "prepare": "husky"
    },
    "dependencies": {
-      "@earendil-works/pi-agent-core": "^0.75.4",
-      "@earendil-works/pi-ai": "^0.75.4",
-      "@earendil-works/pi-coding-agent": "^0.75.4",
-      "@earendil-works/pi-tui": "^0.75.4",
+      "@earendil-works/pi-agent-core": "^0.75.5",
+      "@earendil-works/pi-ai": "^0.75.5",
+      "@earendil-works/pi-coding-agent": "^0.75.5",
+      "@earendil-works/pi-tui": "^0.75.5",
       "@sinclair/typebox": "^0.34.49",
       "fzf": "^0.5.2",
       "typebox": "^1.1.38"
    },
    "devDependencies": {
-      "@types/node": "^25.8.0",
+      "@types/node": "^25.9.1",
       "husky": "^9.1.7",
-      "lint-staged": "^17.0.4",
+      "lint-staged": "^17.0.5",
       "oxfmt": "^0.50.0",
-      "oxlint": "^1.65.0",
+      "oxlint": "^1.66.0",
       "oxlint-tsgolint": "^0.22.1",
       "typescript": "^6.0.3",
-      "vitest": "^4.1.6",
+      "vitest": "^4.1.7",
       "yoctocolors": "2.1.2"
    },
    "lint-staged": {
