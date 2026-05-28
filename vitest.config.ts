@@ -9,7 +9,7 @@ export default defineConfig({
       exclude: [
          ...configDefaults.exclude,
          "extensions/pi-intercom/**/*.test.ts",
-         "extensions/pi-mcp-adapter/*.test.ts"
+         "extensions/pi-mcp-adapter/**/*.test.ts"
       ],
       reporters: [new PreciseVerboseReporter()],
       restoreMocks: true,

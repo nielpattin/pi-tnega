@@ -474,14 +474,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
          return Promise.reject(new Error("Cancelled"));
       }
       return new Promise((resolve, reject) => {
-         const timeout = setTimeout(
-            () => {
-               rejectReplyWaiter(new Error(`No reply from "${from}" within 10 minutes`));
-            },
-            10 * 60 * 1000
-         );
          const cleanup = () => {
-            clearTimeout(timeout);
             signal?.removeEventListener("abort", onAbort);
             if (replyWaiter?.replyTo === replyTo) {
                replyWaiter = null;

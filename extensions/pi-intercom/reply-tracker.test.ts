@@ -75,3 +75,11 @@ test("reply removes pending ask after successful reply", () => {
 
   assert.deepEqual(tracker.listPending(1001), []);
 });
+
+test("pending asks do not expire", () => {
+  const tracker = new ReplyTracker();
+  tracker.recordIncomingMessage(createSession("planner-id", "planner"), createMessage("ask-1", "Need a decision"), 1000);
+
+  assert.equal(tracker.resolveReplyTarget({}, 60 * 60 * 1000).message.id, "ask-1");
+  assert.equal(tracker.listPending(60 * 60 * 1000).length, 1);
+});

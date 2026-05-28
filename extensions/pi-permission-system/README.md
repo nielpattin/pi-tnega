@@ -15,7 +15,7 @@ Full permission evaluation engine with runtime ask/reply lifecycle and tool inte
 
 ## Configuration
 
-The extension reads its configuration from `config.json` in the extension directory. The format supports both flat actions and nested pattern rules:
+The extension reads permission rules from `~/.pi/agent/permission.jsonc` and `<project>/.pi/permission.jsonc`. The format supports both flat actions and nested pattern rules:
 
 ```json
 {
@@ -32,6 +32,21 @@ The extension reads its configuration from `config.json` in the extension direct
     }
 }
 ```
+
+### Permission Request Sound
+
+Configure the permission-required sound in `~/.pi/agent/settings.json`:
+
+```json
+{
+    "piPermissionSystem": {
+        "sound": "assets/permission-request.mp3",
+        "volume": 100
+    }
+}
+```
+
+Relative paths resolve from the settings file directory.
 
 ### Rule Evaluation
 

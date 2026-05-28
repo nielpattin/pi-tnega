@@ -4,11 +4,17 @@ Play a completion sound when Pi finishes a response (`agent_end`).
 
 ## Config
 
-Edit `index.ts`:
+Configure the done sound in `~/.pi/agent/settings.json`:
 
-- `SOUND_PATH` → MP3 file location
-- `VOLUME` → `ffplay` volume (`0-100`)
+```json
+{
+    "notification": {
+        "sound": "assets/done.mp3",
+        "volume": 100
+    }
+}
+```
 
-Current default sound:
+Relative paths resolve from the settings file directory. The default done sound is:
 
-`~/.pi/agent/assets/sounds_gow_active_reload.mp3`
+`~/.pi/agent/assets/done.mp3`

@@ -58,6 +58,7 @@
 - Pi uses `bash` from Git for Windows. Do not run `pwsh` scripts with bash tool.
 - User wants `pnpm` for package management. Do not use `npm` or `bun` commands.
 - Never use `npx` or `bunx`. Use `pnpx` for package binaries without global install.
+- Always use `uv` for Python environment management or execution. Do not use `python` or `pip` directly.
 
 # Tool Call Behavior
 
