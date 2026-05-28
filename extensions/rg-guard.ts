@@ -101,7 +101,7 @@ export default function (pi: ExtensionAPI) {
                `Blocked unsafe rg command (${reason}). ` +
                `Use rg only with a narrow path or explicit glob/type filter. ` +
                `Do not search from '.', '/', '~', or a drive root. ` +
-               `Prefer ls/find/read first, then run a scoped rg like 'rg -n "pattern" src' or 'rg -n -g "*.ts" "pattern"'.`,
+               `Prefer ls/find/read first, then run a scoped rg like 'rg -n "pattern" src' or 'rg -n -g "*.ts" "pattern"'.`
          };
       }
 

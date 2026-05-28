@@ -1,13 +1,13 @@
 {
    "providers": {
-      "codex-lb": {
+      "lb": {
          "apiKey": "LB-API-KEY",
-         "api": "openai-codex-responses",
-         "baseUrl": "http://127.0.0.1:2455/backend-api",
+         "api": "openai-responses",
+         "baseUrl": "http://127.0.0.1:2455/v1",
          "models": [
             {
                "id": "gpt-5.5",
-               "name": "gpt-5.5 (codex-lb)",
+               "name": "gpt-5.5",
                "reasoning": true,
                "thinkingLevelMap": {
                   "off": "off",
@@ -18,18 +18,18 @@
                   "xhigh": "xhigh"
                },
                "input": ["text", "image"],
-               "contextWindow": 1050000,
+               "contextWindow": 272000,
                "maxTokens": 128000,
                "cost": {
-                  "input": 0,
-                  "output": 0,
-                  "cacheRead": 0,
+                  "input": 5,
+                  "output": 30,
+                  "cacheRead": 0.5,
                   "cacheWrite": 0
                }
             },
             {
                "id": "gpt-5.3-codex",
-               "name": "gpt-5.3-codex (codex-lb)",
+               "name": "gpt-5.3-codex",
                "reasoning": true,
                "thinkingLevelMap": {
                   "off": "off",
@@ -41,12 +41,17 @@
                },
                "input": ["text", "image"],
                "contextWindow": 272000,
-               "maxTokens": 65536,
-               "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+               "maxTokens": 128000,
+               "cost": {
+                  "input": 1.75,
+                  "output": 14,
+                  "cacheRead": 0.175,
+                  "cacheWrite": 0
+               }
             },
             {
                "id": "gpt-5.4-mini",
-               "name": "gpt-5.4-mini (codex-lb)",
+               "name": "gpt-5.4-mini",
                "reasoning": true,
                "thinkingLevelMap": {
                   "off": "off",
@@ -58,8 +63,13 @@
                },
                "input": ["text", "image"],
                "contextWindow": 272000,
-               "maxTokens": 65536,
-               "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+               "maxTokens": 128000,
+               "cost": {
+                  "input": 0.75,
+                  "output": 4.5,
+                  "cacheRead": 0.075,
+                  "cacheWrite": 0
+               }
             }
          ]
       }

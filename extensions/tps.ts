@@ -75,7 +75,7 @@ export function formatDuration(totalSeconds: number): string {
       { label: "d", seconds: 24 * 60 * 60 },
       { label: "h", seconds: 60 * 60 },
       { label: "m", seconds: 60 },
-      { label: "s", seconds: 1 },
+      { label: "s", seconds: 1 }
    ];
 
    const parts: { value: number; label: string }[] = [];
@@ -185,7 +185,7 @@ export default function tpsExtension(pi: ExtensionAPI) {
          lastTokenMs: null,
          assistantMessages: [],
          totalGenerationMs: 0,
-         currentMessageStartMs: null,
+         currentMessageStartMs: null
       };
       hasSeenAssistantMessage = false;
    });

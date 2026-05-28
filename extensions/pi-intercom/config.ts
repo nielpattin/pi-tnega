@@ -29,7 +29,7 @@ const defaults: IntercomConfig = {
    brokerArgs: ["--no-install", "tsx"],
    confirmSend: false,
    enabled: true,
-   replyHint: true,
+   replyHint: true
 };
 
 export function loadConfig(): IntercomConfig {

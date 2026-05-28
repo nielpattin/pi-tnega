@@ -67,7 +67,7 @@ export function detectInteractiveGitCommand(command: string): InteractiveGitDete
          return {
             reason: "`git rebase --continue` can open an editor in agent environments.",
             suggestion:
-               "Use `GIT_EDITOR=true GIT_SEQUENCE_EDITOR=true git -c core.editor=true -c sequence.editor=true rebase --continue`.",
+               "Use `GIT_EDITOR=true GIT_SEQUENCE_EDITOR=true git -c core.editor=true -c sequence.editor=true rebase --continue`."
          };
       }
 
@@ -79,7 +79,7 @@ export function detectInteractiveGitCommand(command: string): InteractiveGitDete
       ) {
          return {
             reason: "`git commit` without `-m`/`-F` can open an editor in agent environments.",
-            suggestion: 'Use `git commit -m "type(scope): description"`.',
+            suggestion: 'Use `git commit -m "type(scope): description"`.'
          };
       }
 
@@ -90,7 +90,7 @@ export function detectInteractiveGitCommand(command: string): InteractiveGitDete
       ) {
          return {
             reason: "`git merge` without `--no-edit` or an explicit message can open an editor in agent environments.",
-            suggestion: "Use `git merge --no-edit <branch>` or provide `-m` explicitly.",
+            suggestion: "Use `git merge --no-edit <branch>` or provide `-m` explicitly."
          };
       }
 
@@ -102,7 +102,7 @@ export function detectInteractiveGitCommand(command: string): InteractiveGitDete
       ) {
          return {
             reason: "Annotated or signed `git tag` can open an editor in agent environments.",
-            suggestion: 'Use `git tag -a vX.Y.Z -m "message"`.',
+            suggestion: 'Use `git tag -a vX.Y.Z -m "message"`.'
          };
       }
    }
@@ -161,7 +161,7 @@ export default function (pi: ExtensionAPI) {
       if (detected) {
          result = {
             block: true,
-            reason: `${INTERACTIVE_GIT_WARNING_PREFIX}: ${detected.reason} ${detected.suggestion}`,
+            reason: `${INTERACTIVE_GIT_WARNING_PREFIX}: ${detected.reason} ${detected.suggestion}`
          };
       }
       return result;

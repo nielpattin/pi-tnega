@@ -3,7 +3,7 @@ import {
    calculateContextTokens,
    estimateTokens,
    getLastAssistantUsage,
-   getLatestCompactionEntry,
+   getLatestCompactionEntry
 } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
@@ -24,7 +24,7 @@ const FILTER_LABELS = {
    "no-tools": "[no-tools]",
    "user-only": "[user]",
    "labeled-only": "[labeled]",
-   all: "[all]",
+   all: "[all]"
 };
 const THEME_KEY = Symbol.for("@earendil-works/pi-coding-agent:theme");
 const SHOW_SELECTOR_PATCH = Symbol.for("pi-treex:show-selector-patch");
@@ -143,13 +143,13 @@ function getVisibleWindow(treeList) {
       0,
       Math.min(
          treeList.selectedIndex - Math.floor(treeList.maxVisibleLines / 2),
-         treeList.filteredNodes.length - treeList.maxVisibleLines,
-      ),
+         treeList.filteredNodes.length - treeList.maxVisibleLines
+      )
    );
 
    return {
       startIndex,
-      endIndex: Math.min(startIndex + treeList.maxVisibleLines, treeList.filteredNodes.length),
+      endIndex: Math.min(startIndex + treeList.maxVisibleLines, treeList.filteredNodes.length)
    };
 }
 
@@ -160,7 +160,7 @@ function getStickyLeftState(treeList) {
          startIndex,
          endIndex,
          stickyLeftShift: 0,
-         stickyLeftDepth: null,
+         stickyLeftDepth: null
       };
    }
 
@@ -176,7 +176,7 @@ function getStickyLeftState(treeList) {
       startIndex,
       endIndex,
       stickyLeftShift,
-      stickyLeftDepth: stickyLeftShift > 0 ? minVisibleDisplayIndent + 1 : null,
+      stickyLeftDepth: stickyLeftShift > 0 ? minVisibleDisplayIndent + 1 : null
    };
 }
 
@@ -234,7 +234,7 @@ function renderWithStickyLeft(treeList, width, originalRender) {
       originalNodes.push({
          flatNode,
          indent: flatNode.indent,
-         gutters: flatNode.gutters,
+         gutters: flatNode.gutters
       });
 
       flatNode.indent = treeList.multipleRoots ? shiftedIndent + 1 : shiftedIndent;
@@ -291,7 +291,7 @@ function extractDetailContent(treeList, content, options = {}) {
          parts.push(
             verboseToolCalls
                ? formatToolCallVerbose(block.name, block.arguments)
-               : treeList.formatToolCall(block.name, block.arguments),
+               : treeList.formatToolCall(block.name, block.arguments)
          );
          continue;
       }
@@ -314,7 +314,7 @@ function describeEntry(treeList, node) {
          if (message.role === "user") {
             return {
                kind: "USER",
-               full: extractDetailContent(treeList, message.content, { includeToolCalls: true }) || "(empty)",
+               full: extractDetailContent(treeList, message.content, { includeToolCalls: true }) || "(empty)"
             };
          }
 
@@ -324,14 +324,14 @@ function describeEntry(treeList, node) {
                full:
                   extractDetailContent(treeList, message.content, { includeToolCalls: true, verboseToolCalls: true }) ||
                   message.errorMessage ||
-                  (message.stopReason === "aborted" ? "(aborted)" : "(no content)"),
+                  (message.stopReason === "aborted" ? "(aborted)" : "(no content)")
             };
          }
 
          if (message.role === "toolResult") {
             return {
                kind: "TOOL RESULT",
-               toolName: message.toolName,
+               toolName: message.toolName
             };
          }
 
@@ -339,20 +339,20 @@ function describeEntry(treeList, node) {
             return {
                kind: "BASH",
                full: normalizeDetail(message.command ?? "") || "(empty)",
-               toolName: "bash",
+               toolName: "bash"
             };
          }
 
          return {
             kind: String(message.role ?? "MESSAGE").toUpperCase(),
-            full: `[${message.role ?? "message"}]`,
+            full: `[${message.role ?? "message"}]`
          };
       }
 
       case "custom_message":
          return {
             kind: entry.customType ? `${entry.customType}`.toUpperCase() : "CUSTOM MESSAGE",
-            full: extractDetailContent(treeList, entry.content, { includeToolCalls: true }) || "(empty)",
+            full: extractDetailContent(treeList, entry.content, { includeToolCalls: true }) || "(empty)"
          };
 
       case "compaction": {
@@ -360,50 +360,50 @@ function describeEntry(treeList, node) {
          const fallback = `[compaction: ${tokenCount}k tokens]`;
          return {
             kind: "COMPACTION",
-            full: normalizeDetail(entry.summary ?? fallback) || fallback,
+            full: normalizeDetail(entry.summary ?? fallback) || fallback
          };
       }
 
       case "branch_summary":
          return {
             kind: "BRANCH SUMMARY",
-            full: normalizeDetail(entry.summary ?? "") || "(empty)",
+            full: normalizeDetail(entry.summary ?? "") || "(empty)"
          };
 
       case "model_change":
          return {
             kind: "MODEL",
-            full: `[model: ${entry.modelId}]`,
+            full: `[model: ${entry.modelId}]`
          };
 
       case "thinking_level_change":
          return {
             kind: "THINKING",
-            full: `[thinking: ${entry.thinkingLevel}]`,
+            full: `[thinking: ${entry.thinkingLevel}]`
          };
 
       case "custom":
          return {
             kind: entry.customType ? `${entry.customType}`.toUpperCase() : "CUSTOM",
-            full: entry.data === undefined ? `[custom: ${entry.customType}]` : formatCustomEntryData(entry.data),
+            full: entry.data === undefined ? `[custom: ${entry.customType}]` : formatCustomEntryData(entry.data)
          };
 
       case "label":
          return {
             kind: "LABEL",
-            full: entry.label ?? "(cleared)",
+            full: entry.label ?? "(cleared)"
          };
 
       case "session_info":
          return {
             kind: "SESSION TITLE",
-            full: entry.name ?? "(empty)",
+            full: entry.name ?? "(empty)"
          };
 
       default:
          return {
             kind: "ENTRY",
-            full: "[entry]",
+            full: "[entry]"
          };
    }
 }
@@ -412,7 +412,7 @@ function getExpandedDetailLayout(tui) {
    const availableRows = Math.max(1, tui.terminal.rows - TREE_SELECTOR_CHROME_LINES);
    const treeRows = Math.min(
       EXPANDED_DETAIL_PREFERRED_TREE_ROWS,
-      Math.max(1, availableRows - EXPANDED_DETAIL_MIN_LINES),
+      Math.max(1, availableRows - EXPANDED_DETAIL_MIN_LINES)
    );
    const detailBodyRows = Math.max(1, availableRows - treeRows - EXPANDED_DETAIL_CHROME_LINES);
 
@@ -452,7 +452,7 @@ function getDetailContextUsage(session, entry) {
 
    return {
       percent: (estimateContextTokensFromMessages(sessionContext.messages) / contextWindow) * 100,
-      contextWindow,
+      contextWindow
    };
 }
 
@@ -463,7 +463,7 @@ function findLastAssistantModel(branchEntries) {
       if (!entry.message.provider || !entry.message.model) continue;
       return {
          provider: entry.message.provider,
-         modelId: entry.message.model,
+         modelId: entry.message.model
       };
    }
 
@@ -692,7 +692,7 @@ class ExpandedDetailPane {
          fitLine(theme.fg("border", "─".repeat(width)), width),
          ...Array.from({ length: bodyHeight }, () => fitLine("", width)),
          fitLine(theme.fg("muted", EXPANDED_DETAIL_COLLAPSE_HINT), width),
-         fitLine(theme.fg("border", "─".repeat(width)), width),
+         fitLine(theme.fg("border", "─".repeat(width)), width)
       ];
    }
 
@@ -716,7 +716,7 @@ class ExpandedDetailPane {
          `${percent}%`,
          "↑↓ scroll",
          "←/→ page",
-         "Home/End",
+         "Home/End"
       ];
 
       return [
@@ -724,7 +724,7 @@ class ExpandedDetailPane {
          fitLine(theme.fg("border", "─".repeat(width)), width),
          ...visibleLines.map((line) => fitLine(line, width)),
          fitLine(theme.fg("muted", footerParts.join(METADATA_SEPARATOR)), width),
-         fitLine(theme.fg("border", "─".repeat(width)), width),
+         fitLine(theme.fg("border", "─".repeat(width)), width)
       ];
    }
 }
@@ -747,7 +747,7 @@ class DetailContentRenderer {
          { showImages: false },
          this.mode.getRegisteredToolDefinition(message.toolName),
          this.tui,
-         this.mode.sessionManager.getCwd(),
+         this.mode.sessionManager.getCwd()
       );
    }
 
@@ -761,7 +761,7 @@ class DetailContentRenderer {
          entry.message,
          this.mode.hideThinkingBlock,
          this.mode.getMarkdownThemeWithSettings(),
-         this.mode.hiddenThinkingLabel,
+         this.mode.hiddenThinkingLabel
       );
    }
 
@@ -770,7 +770,7 @@ class DetailContentRenderer {
       const component = new this.components.bashExecutionComponent(
          message.command,
          this.tui,
-         message.excludeFromContext,
+         message.excludeFromContext
       );
       if (message.output) {
          component.appendOutput(message.output);
@@ -780,7 +780,7 @@ class DetailContentRenderer {
          message.exitCode,
          message.cancelled,
          message.truncated ? { truncated: true } : undefined,
-         message.fullOutputPath,
+         message.fullOutputPath
       );
       return component.render(width);
    }
@@ -804,7 +804,7 @@ class DetailContentRenderer {
       const component = new this.components.customMessageComponent(
          entry,
          renderer,
-         this.mode.getMarkdownThemeWithSettings(),
+         this.mode.getMarkdownThemeWithSettings()
       );
       component.setExpanded(true);
       return component.render(width);
@@ -922,7 +922,7 @@ class TreeXWrapper {
    renderStickyLeftLine(theme, width, stickyLeftDepth) {
       const badge = theme.bg(
          "selectedBg",
-         ` ${theme.bold(theme.fg("accent", "⇤"))} ${theme.bold(theme.fg("accent", `depth ${stickyLeftDepth}`))} `,
+         ` ${theme.bold(theme.fg("accent", "⇤"))} ${theme.bold(theme.fg("accent", `depth ${stickyLeftDepth}`))} `
       );
 
       return fitLine(`  ${badge}`, width);
@@ -939,7 +939,7 @@ class TreeXWrapper {
          theme.fg("muted", `${this.treeList.selectedIndex + 1}/${this.treeList.filteredNodes.length}`),
          ...getTreeFilterParts(this.treeList, theme),
          theme.bold(theme.fg("accent", `DEPTH ${getDisplayDepth(this.treeList, selected)}`)),
-         getCurrentPositionPart(this.treeList, selected, theme),
+         getCurrentPositionPart(this.treeList, selected, theme)
       ];
 
       const entryParts = [theme.bold(info.kind), theme.fg("muted", formatRelativeTime(entry.timestamp))];
@@ -961,7 +961,7 @@ class TreeXWrapper {
          return [
             fitLine(theme.fg("muted", "NO SELECTION"), width),
             ...Array.from({ length: DETAIL_BODY_LINES }, () => fitLine("", width)),
-            fitLine(theme.fg("border", "─".repeat(width)), width),
+            fitLine(theme.fg("border", "─".repeat(width)), width)
          ];
       }
 
@@ -972,7 +972,7 @@ class TreeXWrapper {
       return [
          fitLine(this.getDetailMetadata(theme, selected, info), width),
          ...bodyLines.map((line) => fitLine(line, width)),
-         fitLine(theme.fg("border", "─".repeat(width)), width),
+         fitLine(theme.fg("border", "─".repeat(width)), width)
       ];
    }
 
@@ -989,7 +989,7 @@ class TreeXWrapper {
          theme,
          width,
          formatFullDetailTitle(info),
-         this.detailContent.renderExpanded(entry, info, width),
+         this.detailContent.renderExpanded(entry, info, width)
       );
    }
 
@@ -1045,7 +1045,7 @@ export function installTreeXNativePatches(InteractiveMode, nativeComponents) {
    proto.showSelector = patchedShowSelector;
    proto[SHOW_SELECTOR_PATCH] = {
       original: originalShowSelector,
-      patched: patchedShowSelector,
+      patched: patchedShowSelector
    };
    return () => uninstallTreeXNativePatches(InteractiveMode);
 }

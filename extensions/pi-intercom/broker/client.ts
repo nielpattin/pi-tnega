@@ -133,7 +133,7 @@ export class IntercomClient extends EventEmitter {
          !this.disconnecting &&
          !socket.destroyed &&
          !socket.writableEnded &&
-         socket.writable,
+         socket.writable
       );
    }
 
@@ -494,8 +494,8 @@ export class IntercomClient extends EventEmitter {
          expectsReply: options.expectsReply,
          content: {
             text: options.text,
-            attachments: options.attachments,
-         },
+            attachments: options.attachments
+         }
       };
 
       return new Promise((resolve, reject) => {

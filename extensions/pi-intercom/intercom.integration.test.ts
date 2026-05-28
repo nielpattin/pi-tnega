@@ -186,7 +186,7 @@ function createExtensionHarness(sessionName = "child-worker", options: {
 }
 
 async function setupClients() {
-  const broker = spawn("npx", ["--no-install", "tsx", path.join(repoDir, "broker", "broker.ts")], {
+  const broker = spawn(process.execPath, ["--import", "tsx", path.join(repoDir, "broker", "broker.ts")], {
     cwd: repoDir,
     env: { ...process.env, HOME: sharedHomeDir, USERPROFILE: sharedHomeDir },
     stdio: ["ignore", "pipe", "pipe"],
@@ -352,6 +352,64 @@ test("contact supervisor tool renders reason and reply state", async () => {
     }, { isPartial: false }, renderTheme, { isError: false }));
     assert.match(failureText, /✗ Invalid reason/);
   });
+});
+
+test("broker delivers to unique short session IDs when names collide", { concurrency: false }, async () => {
+  const { planner, orchestrator, cleanup } = await setupClients();
+
+  try {
+    planner.updatePresence({ name: "duplicate-session" });
+    orchestrator.updatePresence({ name: "duplicate-session" });
+
+    const orchestratorId = orchestrator.sessionId!;
+    const shortId = orchestratorId.slice(0, 8);
+    const received = once(orchestrator, "message") as Promise<[SessionInfo, Message]>;
+
+    const delivered = await planner.send(shortId, {
+      messageId: "short-id-target",
+      text: "Targeted by short ID.",
+    });
+
+    assert.equal(delivered.delivered, true);
+    const [from, message] = await received;
+    assert.equal(from.id, planner.sessionId);
+    assert.equal(message.content.text, "Targeted by short ID.");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("intercom list uses only public chat handles", { concurrency: false }, async () => {
+  const { planner, orchestrator, cleanup } = await setupClients();
+  const { default: piIntercomExtension } = await import("./index.ts");
+  const harness = createExtensionHarness("list-worker", { hasUI: true });
+
+  try {
+    planner.updatePresence({ name: "duplicate-session" });
+    orchestrator.updatePresence({ name: "duplicate-session" });
+    piIntercomExtension(harness.pi as never);
+    await harness.emitLifecycle("session_start");
+    await waitForSessionByName(planner, "list-worker");
+
+    const intercomTool = harness.tools.find((tool) => tool.name === "intercom")!;
+    const listResult = await intercomTool.execute(
+      "list-1",
+      { action: "list" },
+      new AbortController().signal,
+      undefined,
+      harness.ctx
+    );
+    const text = listResult.content[0]?.text ?? "";
+
+    assert.equal(listResult.isError, false);
+    assert.doesNotMatch(text, /\bid: [0-9a-f-]{36}\b/);
+    assert.doesNotMatch(text, /subagent-chat|duplicate-session|list-worker/);
+    assert.match(text, new RegExp(`chat-${planner.sessionId!.slice(0, 8)}`));
+    assert.match(text, new RegExp(`chat-${orchestrator.sessionId!.slice(0, 8)}`));
+  } finally {
+    await harness.emitLifecycle("session_shutdown");
+    await cleanup();
+  }
 });
 
 test("sessions publish automatic lifecycle status", { concurrency: false }, async () => {

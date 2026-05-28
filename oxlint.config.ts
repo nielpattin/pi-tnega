@@ -20,6 +20,7 @@ export default defineConfig({
       "*/treepluss/**"
    ],
    rules: {
-      "eslint/no-control-regex": "off"
+      "eslint/no-control-regex": "off",
+      "eslint/no-unused-vars": "off"
    }
 });

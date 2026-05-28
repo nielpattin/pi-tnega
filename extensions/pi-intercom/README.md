@@ -95,9 +95,9 @@ intercom({
             type: "snippet",
             name: "auth.ts",
             language: "typescript",
-            content: "function validate(user: User) { ... }",
-        },
-    ],
+            content: "function validate(user: User) { ... }"
+        }
+    ]
 });
 ```
 
@@ -147,7 +147,7 @@ intercom({
     action: "send",
     to: "worker",
     message:
-        "Task-3: Add retry logic to API client. Key files: src/api/client.ts, src/api/types.ts. Ask if anything's unclear.",
+        "Task-3: Add retry logic to API client. Key files: src/api/client.ts, src/api/types.ts. Ask if anything's unclear."
 });
 ```
 
@@ -157,7 +157,7 @@ intercom({
 intercom({
     action: "ask",
     to: "planner",
-    message: "Should retry apply to all endpoints or just idempotent ones? Also, max retry count and backoff strategy?",
+    message: "Should retry apply to all endpoints or just idempotent ones? Also, max retry count and backoff strategy?"
 });
 // → Reply from planner: Only GET/PUT/DELETE — never POST. Max 3 retries, exponential backoff starting at 100ms.
 // Worker continues implementing with the answer, same turn, full context.
@@ -169,7 +169,7 @@ intercom({
 intercom({
     action: "ask",
     to: "planner",
-    message: "Found: fetchWithTimeout swallows network errors. Fixing this changes the error shape. OK to proceed?",
+    message: "Found: fetchWithTimeout swallows network errors. Fixing this changes the error shape. OK to proceed?"
 });
 // → Reply from planner: Yes, surface the error types. The current behavior is a bug.
 ```
@@ -180,7 +180,7 @@ intercom({
 intercom({
     action: "ask",
     to: "planner",
-    message: "Task-3 done. Added RetryPolicy type, applied to GET/PUT/DELETE, surfaced NetworkError, 4 tests passing.",
+    message: "Task-3 done. Added RetryPolicy type, applied to GET/PUT/DELETE, surfaced NetworkError, 4 tests passing."
 });
 // → Reply from planner: Looks good. Move on to task-4.
 ```
@@ -249,7 +249,7 @@ Do not use `contact_supervisor` for routine completion handoffs. Return the fina
 contact_supervisor({
     reason: "need_decision",
     message:
-        "The auth service returns 403 instead of 401 for expired tokens. Should I treat 403 as a re-auth trigger or a hard failure?",
+        "The auth service returns 403 instead of 401 for expired tokens. Should I treat 403 as a re-auth trigger or a hard failure?"
 });
 // → Reply from supervisor: Treat 403 as re-auth trigger. Update the token refresh logic.
 ```
@@ -267,11 +267,11 @@ contact_supervisor({
                 id: "api",
                 type: "single",
                 question: "Which API should I target?",
-                options: ["Stable API", "Experimental API"],
+                options: ["Stable API", "Experimental API"]
             },
-            { id: "constraints", type: "text", question: "What constraints should I preserve?" },
-        ],
-    },
+            { id: "constraints", type: "text", question: "What constraints should I preserve?" }
+        ]
+    }
 });
 // → Reply from supervisor: { "responses": [{ "id": "api", "value": "Stable API" }, ...] }
 ```
@@ -282,7 +282,7 @@ contact_supervisor({
 contact_supervisor({
     reason: "progress_update",
     message:
-        "Discovered the bug is in the retry wrapper, not the API client. Fixing the wrapper will also close issue #42.",
+        "Discovered the bug is in the retry wrapper, not the API client. Fixing the wrapper will also close issue #42."
 });
 // → Progress update sent to supervisor planner
 ```

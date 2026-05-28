@@ -270,7 +270,7 @@ export default function (pi: ExtensionAPI) {
             reasoning: true,
             thinkingLevelMap: {
                xhigh: "xhigh",
-               minimal: "low",
+               minimal: "low"
             },
             input: ["text", "image"],
             contextWindow: 272000,
@@ -279,8 +279,8 @@ export default function (pi: ExtensionAPI) {
                input: 5,
                output: 30,
                cacheRead: 0.5,
-               cacheWrite: 0,
-            },
+               cacheWrite: 0
+            }
          },
          {
             id: "gpt-5.4-mini",
@@ -288,7 +288,7 @@ export default function (pi: ExtensionAPI) {
             reasoning: true,
             thinkingLevelMap: {
                xhigh: "xhigh",
-               minimal: "low",
+               minimal: "low"
             },
             input: ["text", "image"],
             contextWindow: 272000,
@@ -297,10 +297,10 @@ export default function (pi: ExtensionAPI) {
                input: 0.75,
                output: 4.5,
                cacheRead: 0.075,
-               cacheWrite: 0,
-            },
-         },
-      ],
+               cacheWrite: 0
+            }
+         }
+      ]
    });
 
    pi.registerProvider("freecc", {
@@ -314,7 +314,7 @@ export default function (pi: ExtensionAPI) {
             reasoning: true,
             thinkingLevelMap: {
                xhigh: "xhigh",
-               minimal: "low",
+               minimal: "low"
             },
             input: ["text", "image"],
             contextWindow: 272000,
@@ -323,10 +323,10 @@ export default function (pi: ExtensionAPI) {
                input: 5,
                output: 30,
                cacheRead: 0.5,
-               cacheWrite: 0,
-            },
-         },
-      ],
+               cacheWrite: 0
+            }
+         }
+      ]
    });
 
    // pi.registerProvider("cmd", {

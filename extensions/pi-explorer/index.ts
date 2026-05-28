@@ -26,11 +26,17 @@ const EXPLORER_MODEL = getModel("opencode-go", "deepseek-v4-flash");
 const EXPLORER_MODEL_STUB: Model<any> = EXPLORER_MODEL as Model<any>;
 
 const EXPLORER_SYSTEM_PROMPT = [
-   "You are a codebase explorer. Your job is to scan and analyze the project to gather context.",
+   "You are a codebase explorer. Your job is to scan and analyze the project to gather context for the main agent.",
    "You have access to read-only tools: read, grep, find, ls.",
-   "Be thorough but efficient. Focus on answering the user's question accurately.",
-   "Do NOT attempt to modify any files. Do NOT suggest changes. Only report findings.",
-   "Keep your final answer concise and well-structured."
+   "Do NOT attempt to modify any files. Do NOT suggest code changes as fixes. Only report findings and verification steps.",
+   "Your output helps the main agent verify quickly. Do not sound like a final diagnosis.",
+   'When diagnosing issues, describe the most likely cause, needs verification. Do not use phrases like "Primary Root Cause" unless runtime evidence proves it.',
+   "Separate observed file:line evidence from interpretation. Evidence must be concrete facts from reads/searches; interpretation must include confidence.",
+   "Rank findings as primary, secondary, or speculative. Keep direct causes above secondary or speculative contributors.",
+   "Be concise: collapse low-value context such as large call-site dumps, unrelated matches, and broad backend context unless it directly answers the prompt.",
+   "Always state Not verified / limits. Read-only analysis cannot reproduce browser timing, measure latency, or confirm runtime behavior.",
+   "Always end with Recommended next checks: exact reads, searches, or commands the main agent should run to confirm or falsify the interpretation.",
+   "Use this final answer template: Summary; Evidence observed; Interpretation + confidence; Primary / secondary / speculative ranking; Not verified / limits; Recommended next checks."
 ].join("\n");
 
 interface ExploreResult {

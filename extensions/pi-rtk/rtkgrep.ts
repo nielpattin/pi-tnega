@@ -14,7 +14,7 @@ export function registerRtkGrep(pi: ExtensionAPI, isEnabled: () => boolean) {
          path: Type.Optional(Type.String({ description: "Directory or file to search in. Defaults to cwd." })),
          ignoreCase: Type.Optional(Type.Boolean({ description: "Case insensitive search" })),
          literal: Type.Optional(Type.Boolean({ description: "Treat pattern as literal string, not regex" })),
-         context: Type.Optional(Type.Number({ description: "Number of context lines around matches" })),
+         context: Type.Optional(Type.Number({ description: "Number of context lines around matches" }))
       }),
 
       renderCall(args, theme) {
@@ -27,7 +27,7 @@ export function registerRtkGrep(pi: ExtensionAPI, isEnabled: () => boolean) {
          if (!isEnabled()) {
             return {
                content: [{ type: "text" as const, text: "rtk_grep is disabled. Enable with /pi-rtk tools on" }],
-               details: undefined,
+               details: undefined
             };
          }
 
@@ -43,8 +43,8 @@ export function registerRtkGrep(pi: ExtensionAPI, isEnabled: () => boolean) {
          const result = await pi.exec("rtk", args, { timeout: 10_000, signal });
          return {
             content: [{ type: "text" as const, text: result.stdout.trim() || "(no matches)" }],
-            details: undefined,
+            details: undefined
          };
-      },
+      }
    });
 }

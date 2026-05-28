@@ -38,12 +38,12 @@ function ampAdapter() {
                   yield {
                      text,
                      timestamp,
-                     session: threadId,
+                     session: threadId
                   };
                }
             } catch {}
          }
-      },
+      }
    };
 }
 function extractText(content) {
@@ -87,7 +87,7 @@ function claudeAdapter() {
                yield* parseClaudeJsonl(filePath, {
                   session,
                   project: projectDir,
-                  since: options?.since,
+                  since: options?.since
                });
             }
             const subdirs = entries.filter((f) => !f.includes("."));
@@ -100,19 +100,19 @@ function claudeAdapter() {
                      yield* parseClaudeJsonl(join2(subagentsDir, file), {
                         session: `${subdir}/${file.replace(".jsonl", "")}`,
                         project: projectDir,
-                        since: options?.since,
+                        since: options?.since
                      });
                   }
                } catch {}
             }
          }
-      },
+      }
    };
 }
 async function* parseClaudeJsonl(filePath, context) {
    const rl = createInterface({
       input: createReadStream(filePath, { encoding: "utf-8" }),
-      crlfDelay: Infinity,
+      crlfDelay: Infinity
    });
    for await (const line of rl) {
       if (!line.trim()) continue;
@@ -129,7 +129,7 @@ async function* parseClaudeJsonl(filePath, context) {
             text,
             timestamp: timestamp ?? void 0,
             session: context.session,
-            project: context.project,
+            project: context.project
          };
       } catch {}
    }
@@ -189,21 +189,21 @@ function getVSCodeGlobalStoragePaths() {
       paths.push(
          join3(homedir3(), "Library", "Application Support", "Code", "User", "globalStorage"),
          join3(homedir3(), "Library", "Application Support", "Code - Insiders", "User", "globalStorage"),
-         join3(homedir3(), "Library", "Application Support", "Cursor", "User", "globalStorage"),
+         join3(homedir3(), "Library", "Application Support", "Cursor", "User", "globalStorage")
       );
    } else if (process.platform === "linux") {
       const configBase = process.env["XDG_CONFIG_HOME"] ?? join3(homedir3(), ".config");
       paths.push(
          join3(configBase, "Code", "User", "globalStorage"),
          join3(configBase, "Code - Insiders", "User", "globalStorage"),
-         join3(configBase, "Cursor", "User", "globalStorage"),
+         join3(configBase, "Cursor", "User", "globalStorage")
       );
    } else {
       const appData = process.env["APPDATA"] ?? join3(homedir3(), "AppData", "Roaming");
       paths.push(
          join3(appData, "Code", "User", "globalStorage"),
          join3(appData, "Code - Insiders", "User", "globalStorage"),
-         join3(appData, "Cursor", "User", "globalStorage"),
+         join3(appData, "Cursor", "User", "globalStorage")
       );
    }
    return paths;
@@ -240,13 +240,13 @@ function clineAdapter() {
                      }
                      yield {
                         text,
-                        session: taskId,
+                        session: taskId
                      };
                   }
                } catch {}
             }
          }
-      },
+      }
    };
 }
 function extractText2(content) {
@@ -272,7 +272,7 @@ function codexAdapter() {
       name: "codex",
       async *messages(options) {
          yield* walkCodexSessions(CODEX_SESSIONS_DIR, options);
-      },
+      }
    };
 }
 async function* walkCodexSessions(dir, options) {
@@ -296,7 +296,7 @@ async function* walkCodexSessions(dir, options) {
 async function* parseCodexJsonl(filePath, context) {
    const rl = createInterface2({
       input: createReadStream2(filePath, { encoding: "utf-8" }),
-      crlfDelay: Infinity,
+      crlfDelay: Infinity
    });
    for await (const line of rl) {
       if (!line.trim()) continue;
@@ -316,7 +316,7 @@ async function* parseCodexJsonl(filePath, context) {
          yield {
             text,
             timestamp: entry.timestamp,
-            session: context.session,
+            session: context.session
          };
       } catch {}
    }
@@ -337,7 +337,7 @@ function getOpencodeDatabasePath() {
    const xdgPath = join5(
       process.env["XDG_DATA_HOME"] ?? join5(homedir5(), ".local", "share"),
       "opencode",
-      "opencode.db",
+      "opencode.db"
    );
    if (existsSync2(xdgPath)) return xdgPath;
    if (process.platform === "darwin") {
@@ -366,7 +366,7 @@ function opencodeAdapter() {
          } finally {
             db.close();
          }
-      },
+      }
    };
 }
 function* queryUserMessages(db, options) {
@@ -391,7 +391,7 @@ function* queryUserMessages(db, options) {
       yield {
          text: row.text,
          timestamp: new Date(row.time_created).toISOString(),
-         session: row.session_id,
+         session: row.session_id
       };
    }
 }
@@ -406,13 +406,13 @@ function getZedPaths() {
       const base2 = join6(homedir6(), "Library", "Application Support", "Zed");
       return {
          conversations: join6(base2, "conversations"),
-         db: join6(base2, "db"),
+         db: join6(base2, "db")
       };
    }
    const base = join6(process.env["XDG_DATA_HOME"] ?? join6(homedir6(), ".local", "share"), "zed");
    return {
       conversations: join6(base, "conversations"),
-      db: join6(base, "db"),
+      db: join6(base, "db")
    };
 }
 function zedAdapter() {
@@ -422,7 +422,7 @@ function zedAdapter() {
          const paths = getZedPaths();
          yield* parseTextThreads(paths.conversations, options);
          yield* parseAgentThreads(paths.db, options);
-      },
+      }
    };
 }
 async function* parseTextThreads(dir, _options) {
@@ -447,7 +447,7 @@ async function* parseTextThreads(dir, _options) {
             if (!text) continue;
             yield {
                text,
-               session,
+               session
             };
          }
       } catch {}
@@ -514,7 +514,7 @@ function piAdapter() {
       name: "pi",
       async *messages(options) {
          yield* walkPiSessions(PI_SESSIONS_DIR, options);
-      },
+      }
    };
 }
 async function* walkPiSessions(dir, options, project) {
@@ -539,7 +539,7 @@ async function* walkPiSessions(dir, options, project) {
 async function* parsePiJsonl(filePath, context) {
    const rl = createInterface({
       input: createReadStream(filePath, { encoding: "utf-8" }),
-      crlfDelay: Infinity,
+      crlfDelay: Infinity
    });
    let project = context.project;
    for await (const line of rl) {
@@ -569,7 +569,7 @@ async function* parsePiJsonl(filePath, context) {
             text,
             timestamp,
             session: context.session,
-            project,
+            project
          };
       } catch {}
    }
@@ -593,7 +593,7 @@ var ADAPTERS = {
    amp: ampAdapter,
    cline: clineAdapter,
    zed: zedAdapter,
-   pi: piAdapter,
+   pi: piAdapter
 };
 function createAdapter(name) {
    const factory = ADAPTERS[name];
@@ -716,7 +716,7 @@ var WORDLIST = [
    { word: "lmao", severity: "mild", group: "lmao" },
    // === CUNT (strong) ===
    { word: "cunt", severity: "strong", group: "cunt" },
-   { word: "cunts", severity: "strong", group: "cunt" },
+   { word: "cunts", severity: "strong", group: "cunt" }
 ];
 function collapseRepeats(text) {
    return text.replace(/(.)\1+/g, "$1");
@@ -751,7 +751,7 @@ function runPattern(_originalText, searchText, matches, seen) {
          word,
          index: match.index,
          severity: entry.severity,
-         group: entry.group,
+         group: entry.group
       });
    }
 }
@@ -768,7 +768,7 @@ var c = {
    magenta: "\x1B[35m",
    cyan: "\x1B[36m",
    white: "\x1B[37m",
-   gray: "\x1B[90m",
+   gray: "\x1B[90m"
 };
 var SPINNER_MESSAGES = [
    "Tallying the damage",
@@ -780,7 +780,7 @@ var SPINNER_MESSAGES = [
    "Assessing the verbal carnage",
    "Quantifying your displeasure",
    "Auditing your language",
-   "Tabulating regrets",
+   "Tabulating regrets"
 ];
 function createSpinner() {
    let messageIdx = 0;
@@ -805,7 +805,7 @@ function createSpinner() {
             timer = null;
          }
          process.stdout.write("\r" + " ".repeat(60) + "\r");
-      },
+      }
    };
 }
 function parseArgs(args) {
@@ -880,7 +880,7 @@ async function scan(args) {
       for (const [name, stats] of activeAgents) {
          const rate = ((stats.swears / stats.messages) * 100).toFixed(1);
          console.log(
-            `    ${c.cyan}${name.padEnd(10)}${c.reset} ${c.bold}${String(stats.swears).padStart(4)}${c.reset} ${c.dim}in ${stats.messages} messages (${rate}%)${c.reset}`,
+            `    ${c.cyan}${name.padEnd(10)}${c.reset} ${c.bold}${String(stats.swears).padStart(4)}${c.reset} ${c.dim}in ${stats.messages} messages (${rate}%)${c.reset}`
          );
       }
    }
@@ -898,7 +898,7 @@ async function scan(args) {
             .join(`${c.dim},${c.reset} `);
          const suffix = variantList ? ` ${c.dim}(${c.reset}${variantList}${c.dim})${c.reset}` : "";
          console.log(
-            `    ${c.yellow}${group.padEnd(12)}${c.reset} ${c.bold}${String(count).padStart(4)}${c.reset}${suffix}`,
+            `    ${c.yellow}${group.padEnd(12)}${c.reset} ${c.bold}${String(count).padStart(4)}${c.reset}${suffix}`
          );
       }
    }
@@ -911,7 +911,7 @@ async function scan(args) {
 
 // src/cli.ts
 var COMMANDS = {
-   scan,
+   scan
 };
 function usage() {
    console.log(`devrage \u2014 count how many times you swear at your coding agents

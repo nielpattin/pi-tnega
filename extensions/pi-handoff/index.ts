@@ -9,7 +9,7 @@ const HANDOFF_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦",
 
 export function shouldShowHandoffWidget(
    usage: { tokens: number | null } | undefined,
-   threshold = TOKEN_THRESHOLD,
+   threshold = TOKEN_THRESHOLD
 ): boolean {
    return typeof usage?.tokens === "number" && usage.tokens >= threshold;
 }
@@ -120,7 +120,7 @@ async function createHandoff(ctx: ExtensionCommandContext, pi: ExtensionAPI): Pr
          signal,
          buildHandoffInstructions(ctx.cwd, ctx.sessionManager.getSessionFile()),
          undefined,
-         pi.getThinkingLevel(),
+         pi.getThinkingLevel()
       );
    } catch (error) {
       if (signal.aborted) {
@@ -160,9 +160,9 @@ async function createHandoff(ctx: ExtensionCommandContext, pi: ExtensionAPI): Pr
             sessionManager.appendMessage({
                role: "user",
                content: buildNewSessionPrompt(finalHandoff),
-               timestamp: Date.now(),
+               timestamp: Date.now()
             });
-         },
+         }
       });
    } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -183,6 +183,6 @@ export default function (pi: ExtensionAPI) {
       description: "Generate an out-of-band handoff for a fresh session",
       handler: async (_args, ctx) => {
          await createHandoff(ctx, pi);
-      },
+      }
    });
 }

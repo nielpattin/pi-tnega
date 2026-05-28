@@ -75,7 +75,7 @@ export default function (pi: ExtensionAPI) {
                   fileMap.set(path, {
                      path,
                      operations: new Set([name]),
-                     lastTimestamp: timestamp,
+                     lastTimestamp: timestamp
                   });
                }
             }
@@ -118,7 +118,7 @@ export default function (pi: ExtensionAPI) {
                const opsLabel = ops.join("");
                return {
                   value: f.path,
-                  label: `${opsLabel} ${f.path}`,
+                  label: `${opsLabel} ${f.path}`
                };
             });
 
@@ -130,7 +130,7 @@ export default function (pi: ExtensionAPI) {
                selectedText: (t) => t, // Keep existing colors
                description: (t) => theme.fg("muted", t),
                scrollInfo: (t) => theme.fg("dim", t),
-               noMatch: (t) => theme.fg("warning", t),
+               noMatch: (t) => theme.fg("warning", t)
             });
             selectList.onSelect = (item) => {
                const selected = fileByPath.get(item.value);
@@ -166,9 +166,9 @@ export default function (pi: ExtensionAPI) {
                      selectList.handleInput(data);
                   }
                   tui.requestRender();
-               },
+               }
             };
          });
-      },
+      }
    });
 }

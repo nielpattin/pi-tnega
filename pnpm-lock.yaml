@@ -75,18 +75,19 @@ importers:
 
   extensions/pi-intercom:
     dependencies:
-      '@earendil-works/pi-coding-agent':
-        specifier: '*'
-        version: 0.75.4(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.20.1)(zod@4.4.3)
-      '@earendil-works/pi-tui':
-        specifier: '*'
-        version: 0.75.4
       tsx:
         specifier: ^4.20.0
         version: 4.22.1
       typebox:
         specifier: ^1.1.24
         version: 1.1.38
+    devDependencies:
+      '@earendil-works/pi-coding-agent':
+        specifier: ^0.75.5
+        version: 0.75.5(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.20.1)(zod@4.4.3)
+      '@earendil-works/pi-tui':
+        specifier: ^0.75.5
+        version: 0.75.5
 
   extensions/pi-mcp-adapter:
     dependencies:
@@ -296,10 +297,6 @@ packages:
   '@earendil-works/pi-tui@0.74.2':
     resolution: {integrity: sha512-valQPz74qbdydRqII6t9rJ46YANMOOJeDhKm25a1ZrWvWwdjAaAEu6s3ur/LWz84Wkkwcbub2ZkVjzCZi8gFGA==}
     engines: {node: '>=20.0.0'}
-
-  '@earendil-works/pi-tui@0.75.4':
-    resolution: {integrity: sha512-PDhKU7u6fmEcvHUFHzrRwGc/Ytokj/hO+X4RPf+MWKEGpvg3B1vHv88Ee+Dy33004tYkQF5YeXV4btJZcp5x1g==}
-    engines: {node: '>=22.19.0'}
 
   '@earendil-works/pi-tui@0.75.5':
     resolution: {integrity: sha512-LkXUM1/49pvzzeI39Y5wjBMlgafcCf67HCLhB9Z7yuXHy4XgT+VqxWcZVW5hBdhQsHZd0znjJotfGH1BzxMfiA==}
@@ -3070,13 +3067,6 @@ snapshots:
       - zod
 
   '@earendil-works/pi-tui@0.74.2':
-    dependencies:
-      get-east-asian-width: 1.6.0
-      marked: 15.0.12
-    optionalDependencies:
-      koffi: 2.16.2
-
-  '@earendil-works/pi-tui@0.75.4':
     dependencies:
       get-east-asian-width: 1.6.0
       marked: 15.0.12

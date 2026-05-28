@@ -115,7 +115,7 @@ export function aggregateUsageEntries(entries: UsageEntry[]): DailyUsageRow[] {
             total: 0,
             cost: 0,
             provider,
-            model,
+            model
          };
          byDate.set(key, row);
       }
@@ -130,7 +130,7 @@ export function aggregateUsageEntries(entries: UsageEntry[]): DailyUsageRow[] {
    }
 
    return Array.from(byDate.values()).sort(
-      (a, b) => b.date.localeCompare(a.date) || a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model),
+      (a, b) => b.date.localeCompare(a.date) || a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model)
    );
 }
 
@@ -199,7 +199,7 @@ async function loadUsageDataset(): Promise<UsageDataset> {
       filesSkipped,
       linesSkipped,
       providers: Array.from(providers).sort(),
-      models: Array.from(models).sort(),
+      models: Array.from(models).sort()
    };
 }
 
@@ -222,7 +222,7 @@ function filterUsage(dataset: UsageDataset, filters: UsageFilters = {}): UsageSc
       linesSkipped: dataset.linesSkipped,
       providers: dataset.providers,
       models: Array.from(models).sort(),
-      filters,
+      filters
    };
 }
 
@@ -249,7 +249,7 @@ function frame(lines: string[], width: number): string[] {
    return [
       `╭${"─".repeat(innerWidth + 2)}╮`,
       ...lines.map((line) => `│ ${fit(line, innerWidth)} │`),
-      `╰${"─".repeat(innerWidth + 2)}╯`,
+      `╰${"─".repeat(innerWidth + 2)}╯`
    ];
 }
 
@@ -269,7 +269,7 @@ class MultiSelectModal implements Component {
       private readonly options: string[],
       initialSelected: string[],
       private readonly done: (value: string[] | undefined) => void,
-      private readonly theme: { bold: (text: string) => string; fg: (name: "accent", text: string) => string },
+      private readonly theme: { bold: (text: string) => string; fg: (name: "accent", text: string) => string }
    ) {
       this.selected = new Set(initialSelected);
    }
@@ -294,7 +294,7 @@ class MultiSelectModal implements Component {
          fit(help, boxWidth - 4, "center"),
          `selected ${this.selected.size}/${this.options.length}`,
          "─".repeat(boxWidth - 4),
-         ...body,
+         ...body
       ];
       return frame(lines, boxWidth).map((line) => line.slice(0, width));
    }
@@ -345,9 +345,9 @@ async function pickMany(ctx: ExtensionCommandContext, title: string, options: st
             minWidth: 60,
             maxHeight: "80%",
             anchor: "center",
-            margin: 2,
-         },
-      },
+            margin: 2
+         }
+      }
    );
 }
 
@@ -357,7 +357,7 @@ class StatsModal implements Component {
    constructor(
       private readonly result: UsageScanResult,
       private readonly done: () => void,
-      private readonly theme: { bold: (text: string) => string; fg: (name: "accent", text: string) => string },
+      private readonly theme: { bold: (text: string) => string; fg: (name: "accent", text: string) => string }
    ) {}
 
    render(width: number): string[] {
@@ -365,7 +365,7 @@ class StatsModal implements Component {
       const rows = this.result.rows;
       const filterLabel = [
          formatFilter("providers", this.result.filters.providers),
-         formatFilter("models", this.result.filters.models),
+         formatFilter("models", this.result.filters.models)
       ].join(" · ");
       const title = this.theme.fg("accent", this.theme.bold("Daily token usage"));
       const subtitle = `${rows.length} days · ${this.result.filesRead} files · ${filterLabel}`;
@@ -384,7 +384,7 @@ class StatsModal implements Component {
          total: "total",
          cost: "cost",
          provider: "provider",
-         model: "model",
+         model: "model"
       });
       const visibleRows = rows.slice(this.scroll, this.scroll + 30).map((row) =>
          this.renderRow({
@@ -397,8 +397,8 @@ class StatsModal implements Component {
             total: formatInt(row.total),
             cost: formatCost(row.cost),
             provider: row.provider,
-            model: row.model,
-         }),
+            model: row.model
+         })
       );
 
       const lines = [
@@ -409,7 +409,7 @@ class StatsModal implements Component {
          "─".repeat(Math.min(tableWidth - 4, header.length)),
          header,
          "─".repeat(Math.min(tableWidth - 4, header.length)),
-         ...(visibleRows.length > 0 ? visibleRows : ["No Pi usage entries found."]),
+         ...(visibleRows.length > 0 ? visibleRows : ["No Pi usage entries found."])
       ];
       return frame(lines, tableWidth).map((line) => line.slice(0, width));
    }
@@ -439,7 +439,7 @@ class StatsModal implements Component {
          fit(row.total, 11, "right"),
          fit(row.cost, 10, "right"),
          fit(row.provider, 16),
-         fit(row.model, 24),
+         fit(row.model, 24)
       ].join(" ");
    }
 }
@@ -469,9 +469,9 @@ export default function statsExtension(pi: ExtensionAPI) {
                minWidth: 100,
                maxHeight: "92%",
                anchor: "center",
-               margin: 2,
-            },
+               margin: 2
+            }
          });
-      },
+      }
    });
 }

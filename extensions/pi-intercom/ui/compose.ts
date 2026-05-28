@@ -29,7 +29,7 @@ export class ComposeOverlay implements Component {
       target: SessionInfo,
       targetLabel: string,
       client: IntercomClient,
-      done: (result: ComposeResult) => void,
+      done: (result: ComposeResult) => void
    ) {
       this.tui = tui;
       this.theme = theme;
@@ -82,7 +82,7 @@ export class ComposeOverlay implements Component {
 
       try {
          const result = await this.client.send(this.target.id, {
-            text: this.inputBuffer.trim(),
+            text: this.inputBuffer.trim()
          });
 
          if (!result.delivered) {
@@ -95,7 +95,7 @@ export class ComposeOverlay implements Component {
          this.done({
             sent: true,
             messageId: result.id,
-            text: this.inputBuffer.trim(),
+            text: this.inputBuffer.trim()
          });
       } catch (error) {
          this.error = error instanceof Error ? error.message : String(error);

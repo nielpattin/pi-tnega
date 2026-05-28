@@ -34,12 +34,12 @@ export default function commandCodeProviderExtension(pi: ExtensionAPI): void {
          api: COMMAND_CODE_API,
          headers: { ...config.headers },
          models: config.models.map((model) => ({ ...model })),
-         streamSimple,
+         streamSimple
       });
       logger.debug("runtime_provider_registration_emitted", {
          providerId: config.providerId,
          api: COMMAND_CODE_API,
-         modelCount: config.models.length,
+         modelCount: config.models.length
       });
    };
 
@@ -63,7 +63,7 @@ export default function commandCodeProviderExtension(pi: ExtensionAPI): void {
       api: COMMAND_CODE_API,
       streamSimple,
       headers: config.headers,
-      models: config.models,
+      models: config.models
    });
    emitRuntimeProviderRegistration();
 
@@ -71,6 +71,6 @@ export default function commandCodeProviderExtension(pi: ExtensionAPI): void {
       providerId: config.providerId,
       api: COMMAND_CODE_API,
       upstreamUrl: config.upstreamUrl,
-      modelCount: config.models.length,
+      modelCount: config.models.length
    });
 }

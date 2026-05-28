@@ -2,6 +2,7 @@ import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
 import type { SessionInfo } from "../types.js";
+import { publicSessionTarget } from "../broker/target-resolution.js";
 
 function middleTruncate(text: string, maxWidth: number): string {
    if (visibleWidth(text) <= maxWidth) {
@@ -29,17 +30,12 @@ function middleTruncate(text: string, maxWidth: number): string {
    return truncateToWidth(`${left}…${right}`, maxWidth, "");
 }
 
-function shortSessionId(sessionId: string): string {
-   return sessionId.slice(0, 8);
-}
-
 function sessionTitle(session: SessionInfo, options?: { self?: boolean; sameCwd?: boolean }): string {
-   const name = session.name || "Unnamed session";
    const tags = [options?.self ? "self" : undefined, options?.sameCwd ? "same cwd" : undefined].filter(
       (tag): tag is string => Boolean(tag)
    );
    const suffix = tags.length ? ` [${tags.join(", ")}]` : "";
-   return `${name} (${shortSessionId(session.id)})${suffix}`;
+   return `${publicSessionTarget(session)}${suffix}`;
 }
 
 export class SessionListOverlay implements Component {
@@ -81,7 +77,7 @@ export class SessionListOverlay implements Component {
       if (data.toLowerCase() === "c") {
          const selectedSession = this.selectedIndex === -1 ? this.currentSession : this.sessions[this.selectedIndex];
          if (selectedSession) {
-            this.onCopyCurrentSession?.(selectedSession.name || "Unnamed session");
+            this.onCopyCurrentSession?.(publicSessionTarget(selectedSession));
          }
          return;
       }

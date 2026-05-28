@@ -23,17 +23,17 @@ export default function batchReadExtension(pi: ExtensionAPI) {
          "Prefer batch_read over multiple sequential read calls whenever you need to read more than one file range.",
          "If you are about to call read with offset/limit multiple times, stop and use one batch_read call with multiple entries instead.",
          "Use batch_read to incrementally read a large file in chunks in one round trip, for example index.ts offset 1 limit 500, index.ts offset 501 limit 500, index.ts offset 1001 limit 500.",
-         "Offsets are 1-indexed line numbers. Each file entry has its own offset and limit, so one batch can read different files, different ranges, or repeated ranges from the same file.",
+         "Offsets are 1-indexed line numbers. Each file entry has its own offset and limit, so one batch can read different files, different ranges, or repeated ranges from the same file."
       ],
       parameters: Type.Object({
          files: Type.Array(
             Type.Object({
                path: Type.String({ description: "File path to read" }),
                offset: Type.Optional(Type.Number({ description: "Start line (1-indexed)" })),
-               limit: Type.Optional(Type.Number({ description: "Max lines" })),
+               limit: Type.Optional(Type.Number({ description: "Max lines" }))
             }),
-            { description: "Files to read with optional per-file offset/limit" },
-         ),
+            { description: "Files to read with optional per-file offset/limit" }
+         )
       }),
 
       renderCall(_args, theme) {
@@ -47,7 +47,7 @@ export default function batchReadExtension(pi: ExtensionAPI) {
             const range = hasRange
                ? theme.fg(
                     "muted",
-                    `:${f.offset ?? 1}${f.limit !== undefined ? "-" + ((f.offset ?? 1) + f.limit - 1) : ""}`,
+                    `:${f.offset ?? 1}${f.limit !== undefined ? "-" + ((f.offset ?? 1) + f.limit - 1) : ""}`
                  )
                : "";
             return `  ${theme.fg("accent", f.path)}${range}`;
@@ -90,8 +90,8 @@ export default function batchReadExtension(pi: ExtensionAPI) {
 
          return {
             content: [{ type: "text" as const, text: sections.join("\n\n") }],
-            details: undefined,
+            details: undefined
          };
-      },
+      }
    });
 }

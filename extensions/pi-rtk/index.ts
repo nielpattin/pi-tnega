@@ -26,7 +26,7 @@ export default function piRtkExtension(pi: ExtensionAPI) {
          const query = prefix.trim().toLowerCase();
          const matches = SUBCOMMANDS.filter((cmd) => !query || cmd.startsWith(query)).map((cmd) => ({
             value: cmd,
-            label: cmd,
+            label: cmd
          }));
          return matches.length > 0 ? matches : null;
       },
@@ -41,7 +41,7 @@ export default function piRtkExtension(pi: ExtensionAPI) {
                await refreshAvailability(ctx, true);
                ctx.ui.notify(
                   buildStatusMessage(sessionEnabled, verbose, showStatus, rtkAvailable, toolsEnabled),
-                  "info",
+                  "info"
                );
                return;
             }
@@ -51,7 +51,7 @@ export default function piRtkExtension(pi: ExtensionAPI) {
                updateStatus(ctx);
                ctx.ui.notify(
                   buildStatusMessage(sessionEnabled, verbose, showStatus, rtkAvailable, toolsEnabled),
-                  "info",
+                  "info"
                );
                return;
             }
@@ -60,7 +60,7 @@ export default function piRtkExtension(pi: ExtensionAPI) {
                updateStatus(ctx);
                ctx.ui.notify(
                   buildStatusMessage(sessionEnabled, verbose, showStatus, rtkAvailable, toolsEnabled),
-                  "info",
+                  "info"
                );
                return;
             }
@@ -69,7 +69,7 @@ export default function piRtkExtension(pi: ExtensionAPI) {
                updateStatus(ctx);
                ctx.ui.notify(
                   buildStatusMessage(sessionEnabled, verbose, showStatus, rtkAvailable, toolsEnabled),
-                  "info",
+                  "info"
                );
                return;
             }
@@ -103,7 +103,7 @@ export default function piRtkExtension(pi: ExtensionAPI) {
                } else {
                   ctx.ui.notify(
                      `Verbose is currently ${verbose ? "on" : "off"}. Usage: /pi-rtk verbose [on|off]`,
-                     "info",
+                     "info"
                   );
                }
                return;
@@ -121,7 +121,7 @@ export default function piRtkExtension(pi: ExtensionAPI) {
                } else {
                   ctx.ui.notify(
                      `Status bar is currently ${showStatus ? "on" : "off"}. Usage: /pi-rtk statusbar [on|off]`,
-                     "info",
+                     "info"
                   );
                }
                return;
@@ -137,7 +137,7 @@ export default function piRtkExtension(pi: ExtensionAPI) {
                } else {
                   ctx.ui.notify(
                      `RTK tools are currently ${toolsEnabled ? "on" : "off"}. Usage: /pi-rtk tools [on|off]`,
-                     "info",
+                     "info"
                   );
                }
                return;
@@ -160,9 +160,9 @@ export default function piRtkExtension(pi: ExtensionAPI) {
                      "Notes:",
                      "  - Rewrites only pi bash tool calls.",
                      "  - pi read/edit/write tools do not go through RTK.",
-                     "  - RTK tools are disabled by default. Enable with /pi-rtk tools on",
+                     "  - RTK tools are disabled by default. Enable with /pi-rtk tools on"
                   ].join("\n"),
-                  "info",
+                  "info"
                );
                return;
             }
@@ -171,7 +171,7 @@ export default function piRtkExtension(pi: ExtensionAPI) {
                return;
             }
          }
-      },
+      }
    });
 
    pi.on("session_start", async (_event, ctx) => {
@@ -217,7 +217,7 @@ export default function piRtkExtension(pi: ExtensionAPI) {
       try {
          const result = await pi.exec("rtk", ["rewrite", "git status"], {
             timeout: TIMEOUT_MS,
-            signal: ctx.signal,
+            signal: ctx.signal
          });
          const stdout = result.stdout.trim();
          const ok = stdout.length > 0 && stdout.startsWith("rtk ");
@@ -233,7 +233,7 @@ export default function piRtkExtension(pi: ExtensionAPI) {
       try {
          const result = await pi.exec("rtk", ["rewrite", command], {
             timeout: TIMEOUT_MS,
-            signal: ctx.signal,
+            signal: ctx.signal
          });
          const stdout = result.stdout.trim();
          return stdout && stdout !== command ? stdout : null;
@@ -261,7 +261,7 @@ function buildStatusMessage(
    verbose: boolean,
    showStatus: boolean,
    rtkAvailable: boolean | null,
-   toolsEnabled: boolean,
+   toolsEnabled: boolean
 ): string {
    const availability = rtkAvailable === null ? "checking" : rtkAvailable ? "available" : "missing";
    return [
@@ -269,7 +269,7 @@ function buildStatusMessage(
       `RTK binary: ${availability}`,
       `Verbose: ${verbose ? "on" : "off"}`,
       `Status bar: ${showStatus ? "on" : "off"}`,
-      `RTK tools: ${toolsEnabled ? "on" : "off"}`,
+      `RTK tools: ${toolsEnabled ? "on" : "off"}`
    ].join("\n");
 }
 

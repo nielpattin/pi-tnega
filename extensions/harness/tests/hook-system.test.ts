@@ -77,7 +77,14 @@ class AuditLogger {
 		try {
 			if (!existsSync(this.logPath)) return [];
 			const raw = readFileSync(this.logPath, "utf-8");
-			return raw.trim().split("\n").filter(Boolean).reverse().slice(0, limit).map((l) => JSON.parse(l));
+			return raw
+				.trim()
+				.split("\n")
+				.filter(Boolean)
+				.map((l) => JSON.parse(l))
+				.filter((record) => !toolName || record.toolName === toolName)
+				.reverse()
+				.slice(0, limit);
 		} catch { return []; }
 	}
 }

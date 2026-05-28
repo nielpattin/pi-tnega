@@ -5,6 +5,7 @@ import { homedir } from "os";
 import { randomUUID } from "crypto";
 import { writeMessage, createMessageReader } from "./framing.js";
 import { getBrokerSocketPath } from "./paths.js";
+import { formatTargetCandidates, resolveTarget } from "./target-resolution.js";
 import type { SessionInfo, Message, Attachment, BrokerMessage } from "../types.js";
 
 const INTERCOM_DIR = join(homedir(), ".pi/agent/intercom");
@@ -129,7 +130,7 @@ class IntercomBroker {
          },
          (error) => {
             socket.destroy(error);
-         },
+         }
       );
 
       socket.on("data", reader);
@@ -164,7 +165,7 @@ class IntercomBroker {
       socket: net.Socket,
       msg: unknown,
       currentId: string | null,
-      setId: (id: string | null) => void,
+      setId: (id: string | null) => void
    ): void {
       if (typeof msg !== "object" || msg === null || !("type" in msg) || typeof msg.type !== "string") {
          throw new Error("Invalid client message");
@@ -227,36 +228,40 @@ class IntercomBroker {
                writeMessage(socket, {
                   type: "delivery_failed",
                   messageId,
-                  reason: "Invalid message format",
+                  reason: "Invalid message format"
                });
                break;
             }
 
-            const targets = this.findSessions(clientMessage.to);
-            if (targets.length === 1) {
+            const targetResolution = resolveTarget(
+               Array.from(this.sessions.values()).map((session) => session.info),
+               clientMessage.to
+            );
+            if (targetResolution.kind === "found") {
                const fromSession = this.sessions.get(currentId!);
-               if (!fromSession) {
+               const targetSession = this.sessions.get(targetResolution.session.id);
+               if (!fromSession || !targetSession) {
                   writeMessage(socket, {
                      type: "delivery_failed",
                      messageId: message.id,
-                     reason: "Sender session not found",
+                     reason: !fromSession ? "Sender session not found" : "Target session not found"
                   });
                   break;
                }
-               writeMessage(targets[0].socket, {
+               writeMessage(targetSession.socket, {
                   type: "message",
                   from: fromSession.info,
-                  message,
+                  message
                });
                writeMessage(socket, { type: "delivered", messageId: message.id });
                break;
             }
 
-            if (targets.length > 1) {
+            if (targetResolution.kind === "ambiguous") {
                writeMessage(socket, {
                   type: "delivery_failed",
                   messageId: message.id,
-                  reason: `Multiple sessions named "${clientMessage.to}" are connected. Use the session ID instead.`,
+                  reason: `Ambiguous session target "${clientMessage.to}". Use one of: ${formatTargetCandidates(targetResolution.candidates)}.`
                });
                break;
             }
@@ -264,7 +269,7 @@ class IntercomBroker {
             writeMessage(socket, {
                type: "delivery_failed",
                messageId: message.id,
-               reason: "Session not found",
+               reason: "Session not found"
             });
             break;
          }
@@ -299,16 +304,6 @@ class IntercomBroker {
          default:
             throw new Error(`Unknown client message type: ${clientMessage.type}`);
       }
-   }
-
-   private findSessions(nameOrId: string): ConnectedSession[] {
-      const byId = this.sessions.get(nameOrId);
-      if (byId) {
-         return [byId];
-      }
-
-      const lowerName = nameOrId.toLowerCase();
-      return Array.from(this.sessions.values()).filter((session) => session.info.name?.toLowerCase() === lowerName);
    }
 
    private broadcast(msg: BrokerMessage, exclude?: string): void {

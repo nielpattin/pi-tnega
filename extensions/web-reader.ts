@@ -9,7 +9,7 @@ import {
    formatSize,
    keyHint,
    truncateHead,
-   withFileMutationQueue,
+   withFileMutationQueue
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
@@ -63,8 +63,8 @@ function postToJina(apiKey: string, params: WebReaderParams, signal?: AbortSigna
                "Content-Type": "application/json",
                "X-Base": params.base ?? "final",
                "X-Token-Budget": String(params.tokenBudget ?? 50000),
-               "X-With-Images-Summary": params.withImagesSummary ?? "all",
-            },
+               "X-With-Images-Summary": params.withImagesSummary ?? "all"
+            }
          },
          (res) => {
             let responseData = "";
@@ -79,7 +79,7 @@ function postToJina(apiKey: string, params: WebReaderParams, signal?: AbortSigna
                   statusCode: res.statusCode ?? 0,
                   statusMessage: res.statusMessage,
                   headers: res.headers,
-                  body: responseData,
+                  body: responseData
                });
             });
 
@@ -87,7 +87,7 @@ function postToJina(apiKey: string, params: WebReaderParams, signal?: AbortSigna
                cleanup();
                reject(err);
             });
-         },
+         }
       );
 
       const onAbort = () => {
@@ -127,7 +127,7 @@ export default function (pi: ExtensionAPI) {
          url: Type.String({ description: "Public URL to read" }),
          base: Type.Optional(Type.String({ description: "X-Base header. Default: final" })),
          tokenBudget: Type.Optional(Type.Number({ description: "X-Token-Budget header. Default: 20000" })),
-         withImagesSummary: Type.Optional(Type.String({ description: "X-With-Images-Summary header. Default: all" })),
+         withImagesSummary: Type.Optional(Type.String({ description: "X-With-Images-Summary header. Default: all" }))
       }),
 
       async execute(_toolCallId, params, signal) {
@@ -144,7 +144,7 @@ export default function (pi: ExtensionAPI) {
 
          const truncation = truncateHead(result.body, {
             maxLines: DEFAULT_MAX_LINES,
-            maxBytes: DEFAULT_MAX_BYTES,
+            maxBytes: DEFAULT_MAX_BYTES
          });
 
          let text = truncation.content;
@@ -170,8 +170,8 @@ export default function (pi: ExtensionAPI) {
                tokenBudget: params.tokenBudget ?? 20000,
                withImagesSummary: params.withImagesSummary ?? "all",
                truncated: truncation.truncated,
-               fullOutputPath,
-            } satisfies WebReaderDetails,
+               fullOutputPath
+            } satisfies WebReaderDetails
          };
       },
 
@@ -202,8 +202,8 @@ export default function (pi: ExtensionAPI) {
             lines.push(
                theme.fg(
                   "dim",
-                  `base=${details.base} tokenBudget=${details.tokenBudget} images=${details.withImagesSummary}`,
-               ),
+                  `base=${details.base} tokenBudget=${details.tokenBudget} images=${details.withImagesSummary}`
+               )
             );
          }
 
@@ -217,6 +217,6 @@ export default function (pi: ExtensionAPI) {
          }
 
          return new Text(lines.join("\n"), 0, 0);
-      },
+      }
    });
 }

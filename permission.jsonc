@@ -5,12 +5,30 @@
    "yoloMode": false,
    "permission": {
       "*": "ask",
+      "edit": "ask",
       "bash": {
-         "*": "ask"
+         "*": "allow",
+         "git push *": "ask",
+         "git restore *": "ask",
+         "git merge *": "ask",
+         "git rebase *": "ask",
+         "git reset *": "ask",
+         "git rm *": "ask",
+         "git mv *": "ask",
+         "git tag *": "ask",
+         "git clean *": "ask",
+         "rm *": "ask",
+         "kill *": "ask",
+         "killall *": "ask",
+         "pkill *": "ask",
+         "* install *": "ask",
+         "* i *": "ask",
+         "* ci*": "ask",
+         "chmod +x *": "ask",
+         "yay -S *": "ask",
+         "sudo *": "ask",
+         "gh *": "ask"
       },
-      "skill": {
-         "*": "allow"
-      },
-      "external_directory": "ask"
+      "external_directory": "allow"
    }
 }

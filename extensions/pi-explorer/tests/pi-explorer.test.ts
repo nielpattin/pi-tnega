@@ -24,7 +24,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
    SessionManager: { inMemory: vi.fn().mockReturnValue({}) },
 }));
 
-import { createAgentSession } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, DefaultResourceLoader } from "@earendil-works/pi-coding-agent";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -381,23 +381,51 @@ describe("explore_codebase tool registration", () => {
 });
 
 describe("system prompt", () => {
-   const EXPLORER_SYSTEM_PROMPT = [
-      "You are a codebase explorer. Your job is to scan and analyze the project to gather context.",
-      "You have access to read-only tools: read, grep, find, ls.",
-      "Be thorough but efficient. Focus on answering the user's question accurately.",
-      "Do NOT attempt to modify any files. Do NOT suggest changes. Only report findings.",
-      "Keep your final answer concise and well-structured.",
-   ].join("\n");
+   const cwd = "/mock/project";
 
-   it("mentions read-only tools", () => {
-      expect(EXPLORER_SYSTEM_PROMPT).toContain("read, grep, find, ls");
+   async function loadedSystemPrompt() {
+      const session = mockSession({ model: {} });
+      vi.mocked(createAgentSession).mockResolvedValue({ session } as any);
+
+      await runExplorer("Investigate UI timing", cwd, {});
+
+      const loaderOptions = vi.mocked(DefaultResourceLoader).mock.calls.at(-1)?.[0] as
+         | { systemPrompt?: string }
+         | undefined;
+      return loaderOptions?.systemPrompt ?? "";
+   }
+
+   it("mentions read-only tools", async () => {
+      const prompt = await loadedSystemPrompt();
+      expect(prompt).toContain("read, grep, find, ls");
    });
 
-   it("instructs not to modify files", () => {
-      expect(EXPLORER_SYSTEM_PROMPT).toContain("Do NOT attempt to modify any files");
+   it("instructs not to modify files", async () => {
+      const prompt = await loadedSystemPrompt();
+      expect(prompt).toContain("Do NOT attempt to modify any files");
    });
 
-   it("spans 5 lines", () => {
-      expect(EXPLORER_SYSTEM_PROMPT.split("\n")).toHaveLength(5);
+   it("requires verification-oriented findings instead of final diagnoses", async () => {
+      const prompt = await loadedSystemPrompt();
+
+      expect(prompt).toContain("most likely cause, needs verification");
+      expect(prompt).toContain("Do not use phrases like \"Primary Root Cause\"");
+      expect(prompt).toContain("Separate observed file:line evidence from interpretation");
+      expect(prompt).toContain("Rank findings as primary, secondary, or speculative");
+      expect(prompt).toContain("collapse low-value context");
+      expect(prompt).toContain("Recommended next checks");
+      expect(prompt).toContain("Not verified / limits");
+      expect(prompt).toContain("cannot reproduce browser timing, measure latency, or confirm runtime behavior");
+   });
+
+   it("defines the required final answer template", async () => {
+      const prompt = await loadedSystemPrompt();
+
+      expect(prompt).toContain("Summary");
+      expect(prompt).toContain("Evidence observed");
+      expect(prompt).toContain("Interpretation + confidence");
+      expect(prompt).toContain("Primary / secondary / speculative ranking");
+      expect(prompt).toContain("Not verified / limits");
+      expect(prompt).toContain("Recommended next checks");
    });
 });

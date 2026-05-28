@@ -11,7 +11,7 @@ export function registerRtkFind(pi: ExtensionAPI, isEnabled: () => boolean) {
       promptSnippet: "Token-optimized file search via RTK",
       parameters: Type.Object({
          pattern: Type.String({ description: "File name or glob pattern to search for" }),
-         path: Type.Optional(Type.String({ description: "Directory to search in. Defaults to cwd." })),
+         path: Type.Optional(Type.String({ description: "Directory to search in. Defaults to cwd." }))
       }),
 
       renderCall(args, theme) {
@@ -24,7 +24,7 @@ export function registerRtkFind(pi: ExtensionAPI, isEnabled: () => boolean) {
          if (!isEnabled()) {
             return {
                content: [{ type: "text" as const, text: "rtk_find is disabled. Enable with /pi-rtk tools on" }],
-               details: undefined,
+               details: undefined
             };
          }
 
@@ -33,8 +33,8 @@ export function registerRtkFind(pi: ExtensionAPI, isEnabled: () => boolean) {
          const result = await pi.exec("rtk", args, { timeout: 10_000, signal });
          return {
             content: [{ type: "text" as const, text: result.stdout.trim() || "(no matches)" }],
-            details: undefined,
+            details: undefined
          };
-      },
+      }
    });
 }

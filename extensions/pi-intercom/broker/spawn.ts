@@ -51,7 +51,7 @@ function usesDefaultBrokerCommand(brokerCommand: string, brokerArgs: string[]): 
 function resolveWindowsBrokerCommand(
    brokerCommand: string,
    nodePath: string,
-   fileExists: (path: string) => boolean,
+   fileExists: (path: string) => boolean
 ): string {
    if (brokerCommand !== "npx") {
       return brokerCommand;
@@ -67,7 +67,7 @@ export function getWindowsBrokerCommandLine(
    nodePath: string = process.execPath,
    brokerCommand = "npx",
    brokerArgs: string[] = ["--no-install", "tsx"],
-   fileExists: (path: string) => boolean = existsSync,
+   fileExists: (path: string) => boolean = existsSync
 ): string {
    const tsxCliPath = getTsxCliPath(extensionDir);
    if (usesDefaultBrokerCommand(brokerCommand, brokerArgs) && fileExists(tsxCliPath)) {
@@ -78,7 +78,7 @@ export function getWindowsBrokerCommandLine(
    return [
       quoteWindowsArg(resolvedBrokerCommand),
       ...brokerArgs.map(quoteWindowsArg),
-      quoteWindowsArg(brokerPath),
+      quoteWindowsArg(brokerPath)
    ].join(" ");
 }
 
@@ -87,13 +87,13 @@ export function getWindowsHiddenLauncherScript(commandLine: string): string {
       'Set WshShell = CreateObject("WScript.Shell")',
       `WshShell.Run "${commandLine.replace(/"/g, '""')}", 0, False`,
       "Set WshShell = Nothing",
-      "",
+      ""
    ].join("\r\n");
 }
 
 function writeWindowsHiddenLauncher(
    commandLine: string,
-   launcherPath: string = getWindowsHiddenLauncherPath(),
+   launcherPath: string = getWindowsHiddenLauncherPath()
 ): string {
    mkdirSync(dirname(launcherPath), { recursive: true });
    writeFileSync(launcherPath, getWindowsHiddenLauncherScript(commandLine), "utf-8");
@@ -108,7 +108,7 @@ export function getBrokerLaunchSpec(
    platform: NodeJS.Platform = process.platform,
    intercomDir: string = INTERCOM_DIR,
    nodePath: string = process.execPath,
-   fileExists: (path: string) => boolean = existsSync,
+   fileExists: (path: string) => boolean = existsSync
 ): BrokerLaunchSpec {
    if (platform === "win32") {
       const launcherPath = getWindowsHiddenLauncherPath(intercomDir);
@@ -123,15 +123,15 @@ export function getBrokerLaunchSpec(
             nodePath,
             brokerCommand,
             brokerArgs,
-            fileExists,
-         ),
+            fileExists
+         )
       };
    }
 
    return {
       kind: "direct",
       command: brokerCommand,
-      args: [...brokerArgs, brokerPath],
+      args: [...brokerArgs, brokerPath]
    };
 }
 
@@ -147,7 +147,7 @@ export function getBrokerSpawnOptions(extensionDir: string = EXTENSION_DIR): {
       stdio: "ignore",
       cwd: extensionDir,
       env: { ...process.env, NODE_NO_WARNINGS: "1" },
-      windowsHide: true,
+      windowsHide: true
    };
 }
 
@@ -214,7 +214,7 @@ export async function spawnBrokerIfNeeded(brokerCommand: string, brokerArgs: str
             (error) => {
                cleanup();
                reject(toError(error));
-            },
+            }
          );
       });
    } finally {

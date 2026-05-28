@@ -15,7 +15,7 @@ function getHostModuleUrl(relativePath) {
 export default async function treeXExtension(pi) {
    const [{ InteractiveMode }, components] = await Promise.all([
       import(getHostModuleUrl("index.js")),
-      import(getHostModuleUrl("modes/interactive/components/index.js")),
+      import(getHostModuleUrl("modes/interactive/components/index.js"))
    ]);
 
    const unpatch = installTreeXNativePatches(InteractiveMode, {
@@ -25,7 +25,7 @@ export default async function treeXExtension(pi) {
       compactionSummaryMessageComponent: components.CompactionSummaryMessageComponent,
       customMessageComponent: components.CustomMessageComponent,
       toolExecutionComponent: components.ToolExecutionComponent,
-      userMessageComponent: components.UserMessageComponent,
+      userMessageComponent: components.UserMessageComponent
    });
 
    pi.on("session_shutdown", unpatch);

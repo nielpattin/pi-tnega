@@ -23,7 +23,7 @@ import {
    createGrepTool,
    createLsTool,
    createReadTool,
-   createWriteTool,
+   createWriteTool
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { homedir } from "os";
@@ -63,7 +63,7 @@ function createBuiltInTools(cwd: string) {
       find: createFindTool(cwd),
       grep: createGrepTool(cwd),
       ls: createLsTool(cwd),
-      read: createReadTool(cwd),
+      read: createReadTool(cwd)
    };
 }
 
@@ -84,7 +84,7 @@ const badges: Record<string, string> = {
    edit: "🔧",
    find: "🔍",
    grep: "🔎",
-   ls: "📂",
+   ls: "📂"
 };
 
 // Playful collapsed-mode status lines
@@ -95,7 +95,7 @@ const resultSuffixes: Record<string, string> = {
    edit: "snipped!",
    find: "found some!",
    grep: "spotted!",
-   ls: "peeked!",
+   ls: "peeked!"
 };
 
 // ---------------------------------------------------------------------------
@@ -147,12 +147,12 @@ export default async function (pi: ExtensionAPI) {
          try {
             const resolution = await runtime.resolvePath(params.path, {
                allowDirectory: false,
-               limit: 8,
+               limit: 8
             });
             return resolution.match({
                err: async () => original.execute(toolCallId, params, signal, onUpdate),
                ok: async (resolved: any) =>
-                  original.execute(toolCallId, { ...params, path: resolved.absolutePath }, signal, onUpdate),
+                  original.execute(toolCallId, { ...params, path: resolved.absolutePath }, signal, onUpdate)
             });
          } catch {
             return original.execute(toolCallId, params, signal, onUpdate);
@@ -185,7 +185,7 @@ export default async function (pi: ExtensionAPI) {
          const lines = textContent.text.split("\n");
          const output = lines.map((line) => theme.fg("toolOutput", line)).join("\n");
          return new Text(`\n${output}`, 0, 0);
-      },
+      }
    });
 
    // =====================================================================
@@ -228,7 +228,7 @@ export default async function (pi: ExtensionAPI) {
 
          if (!output) return new Text("", 0, 0);
          return new Text(`\n${output}`, 0, 0);
-      },
+      }
    });
 
    // =====================================================================
@@ -254,7 +254,7 @@ export default async function (pi: ExtensionAPI) {
          return new Text(
             `${theme.fg("toolTitle", theme.bold(`${badges.write} write`))} ${pathDisplay}${lineInfo}`,
             0,
-            0,
+            0
          );
       },
 
@@ -271,7 +271,7 @@ export default async function (pi: ExtensionAPI) {
          }
 
          return new Text("", 0, 0);
-      },
+      }
    });
 
    // =====================================================================
@@ -311,7 +311,7 @@ export default async function (pi: ExtensionAPI) {
          }
 
          return new Text(`\n${theme.fg("toolOutput", text)}`, 0, 0);
-      },
+      }
    });
 
    // =====================================================================
@@ -365,7 +365,7 @@ export default async function (pi: ExtensionAPI) {
          }
 
          return new Text("", 0, 0);
-      },
+      }
    });
 
    // =====================================================================
@@ -390,15 +390,15 @@ export default async function (pi: ExtensionAPI) {
                pathQuery: params.path,
                glob: params.glob,
                context: params.context,
-               limit: params.limit,
+               limit: params.limit
             });
 
             return result.match({
                err: async () => original.execute(toolCallId, params, signal, onUpdate),
                ok: async (value: any) => ({
                   content: [{ type: "text" as const, text: value.formatted }],
-                  details: { fff: true },
-               }),
+                  details: { fff: true }
+               })
             });
          } catch {
             return original.execute(toolCallId, params, signal, onUpdate);
@@ -442,7 +442,7 @@ export default async function (pi: ExtensionAPI) {
          }
 
          return new Text("", 0, 0);
-      },
+      }
    });
 
    // =====================================================================
@@ -494,6 +494,6 @@ export default async function (pi: ExtensionAPI) {
          }
 
          return new Text("", 0, 0);
-      },
+      }
    });
 }

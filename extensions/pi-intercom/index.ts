@@ -4,6 +4,7 @@ import { Type } from "typebox";
 import { Text } from "@earendil-works/pi-tui";
 import { IntercomClient } from "./broker/client.ts";
 import { spawnBrokerIfNeeded } from "./broker/spawn.ts";
+import { formatTargetCandidates, publicSessionTarget, resolveTarget } from "./broker/target-resolution.ts";
 import { SessionListOverlay } from "./ui/session-list.ts";
 import { ComposeOverlay, type ComposeResult } from "./ui/compose.ts";
 import { InlineMessageComponent } from "./ui/inline-message.ts";
@@ -387,17 +388,6 @@ function parseStructuredSupervisorReply(
       return { error: getErrorMessage(error) };
    }
 }
-function duplicateSessionNames(sessions: SessionInfo[]): Set<string> {
-   return new Set(
-      sessions
-         .map((s) => s.name?.toLowerCase())
-         .filter((name): name is string => Boolean(name))
-         .filter((name, index, names) => names.indexOf(name) !== index)
-   );
-}
-function shortSessionId(sessionId: string): string {
-   return sessionId.slice(0, 8);
-}
 function parseSubagentIntercomPayload(payload: unknown): { to: string; message: string; requestId?: string } | null {
    if (typeof payload !== "object" || payload === null) {
       return null;
@@ -422,19 +412,15 @@ function buildPresenceIdentity(pi: ExtensionAPI, sessionId: string): { name: str
       name: resolveIntercomPresenceName(pi.getSessionName(), sessionId)
    };
 }
-function formatSessionLabel(session: SessionInfo, duplicates: Set<string>): string {
-   if (!session.name) {
-      return session.id;
-   }
-   return duplicates.has(session.name.toLowerCase()) ? `${session.name} (${shortSessionId(session.id)})` : session.name;
+function formatSessionLabel(session: SessionInfo): string {
+   return publicSessionTarget(session);
 }
 function formatSessionListRow(session: SessionInfo, currentCwd: string, isSelf: boolean): string {
-   const name = session.name || "Unnamed session";
    const tags = [isSelf ? "self" : session.cwd === currentCwd ? "same cwd" : undefined, session.status].filter(
       (tag): tag is string => Boolean(tag)
    );
    const suffix = tags.length ? ` [${tags.join(", ")}]` : "";
-   return `• ${name} (${shortSessionId(session.id)}) — ${session.cwd} (${session.model})${suffix}`;
+   return `• ${publicSessionTarget(session)} — ${session.cwd} (${session.model})${suffix}`;
 }
 function previewText(value: unknown, maxLength = 72): string | undefined {
    if (typeof value !== "string") {
@@ -646,7 +632,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       if (delivery !== "followUp") {
          replyTracker.queueTurnContext({ from: entry.from, message: entry.message, receivedAt: Date.now() });
       }
-      const senderDisplay = entry.from.name || entry.from.id.slice(0, 8);
+      const senderDisplay = publicSessionTarget(entry.from);
       const replyInstruction = entry.replyCommand ? `\n\nTo reply, use the intercom tool: ${entry.replyCommand}` : "";
       pi.sendMessage(
          {
@@ -846,16 +832,16 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
    }
    async function resolveSessionTarget(activeClient: IntercomClient, nameOrId: string): Promise<string | null> {
       const sessions = await activeClient.listSessions();
-      const byId = sessions.find((s) => s.id === nameOrId);
-      if (byId) {
-         return byId.id;
+      const resolution = resolveTarget(sessions, nameOrId);
+      if (resolution.kind === "found") {
+         return resolution.session.id;
       }
-      const lowerName = nameOrId.toLowerCase();
-      const byName = sessions.filter((s) => s.name?.toLowerCase() === lowerName);
-      if (byName.length > 1) {
-         throw new Error(`Multiple sessions named "${nameOrId}" are connected. Use the session ID instead.`);
+      if (resolution.kind === "ambiguous") {
+         throw new Error(
+            `Ambiguous session target "${nameOrId}". Use one of: ${formatTargetCandidates(resolution.candidates)}.`
+         );
       }
-      return byName[0]?.id ?? null;
+      return null;
    }
    function deliverLocalSubagentRelayMessage(
       sender: "subagent-control" | "subagent-result",
@@ -1805,7 +1791,7 @@ Usage:
                      content: [
                         {
                            type: "text",
-                           text: `**Intercom Status:**\nConnected: Yes\nSession ID: ${mySessionId}\nActive sessions: ${sessions.length}`
+                           text: `**Intercom Status:**\nConnected: Yes\nHandle: ${mySessionId ? publicSessionTarget(mySessionId) : "unknown"}\nActive sessions: ${sessions.length}`
                         }
                      ],
                      isError: false
@@ -1883,7 +1869,6 @@ Usage:
 
       let currentSession: SessionInfo;
       let sessions: SessionInfo[];
-      let duplicates: Set<string>;
       try {
          const mySessionId = overlayClient.sessionId;
          const allSessions = await overlayClient.listSessions();
@@ -1894,7 +1879,6 @@ Usage:
             return;
          }
          currentSession = foundCurrentSession;
-         duplicates = duplicateSessionNames(allSessions);
          sessions = allSessions.filter((s) => s.id !== mySessionId);
       } catch (error) {
          notifyIfLive(ctx, `Failed to list sessions: ${getErrorMessage(error)}`, "error", overlayGeneration);
@@ -1930,7 +1914,7 @@ Usage:
       }
       if (!getLiveContext(ctx, overlayGeneration)) return;
 
-      const targetLabel = formatSessionLabel(selectedSession, duplicates);
+      const targetLabel = formatSessionLabel(selectedSession);
 
       const result = await ctx.ui
          .custom<ComposeResult>(

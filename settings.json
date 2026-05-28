@@ -4,15 +4,12 @@
     "enabled": true
   },
   "defaultModel": "gpt-5.5",
-  "defaultProvider": "codex-lb",
-  "defaultThinkingLevel": "low",
+  "defaultProvider": "lb",
+  "defaultThinkingLevel": "high",
   "doubleEscapeAction": "none",
   "editorPaddingX": 0,
   "enableSkillCommands": true,
   "enabledModels": [
-    "openai-codex/gpt-5.4",
-    "openai-codex/gpt-5.4-mini",
-    "openai-codex/gpt-5.5",
     "github-copilot/gpt-5.4-mini",
     "github-copilot/claude-haiku-4.5",
     "github-copilot/gemini-3-flash-preview",
@@ -30,9 +27,9 @@
     "opencode-go/glm-5.1",
     "opencode-go/deepseek-v4-pro",
     "opencode-go/qwen3.6-plus",
-    "codex-lb/gpt-5.5",
-    "codex-lb/gpt-5.4-mini",
-    "codex-lb/gpt-5.3-codex"
+    "lb/gpt-5.5",
+    "lb/gpt-5.4-mini",
+    "lb/gpt-5.3-codex"
   ],
   "extensions": [
     "-extensions\\web-reader.ts",
@@ -50,15 +47,15 @@
     "-extensions\\kinda\\index.ts",
     "-extensions\\git-guard.ts",
     "+extensions\\pi-explorer\\index.ts",
-    "-extensions\\harness\\index.ts",
-    "-extensions\\pi-permission-system\\index.ts"
+    "-extensions\\pi-permission-system\\index.ts",
+    "-extensions\\harness\\index.ts"
   ],
   "followUpMode": "all",
   "hideThinkingBlock": true,
   "images": {
     "autoResize": true
   },
-  "lastChangelogVersion": "0.75.5",
+  "lastChangelogVersion": "0.76.0",
   "packages": [
     {
       "source": "git:github.com/raunovillberg/im-pi-eccable",
