@@ -34,6 +34,18 @@
 - Mention unrelated dead code/issues separately, do not change.
 - Every changed line traces to user request.
 
+## Code Understanding
+
+- Read files in full before broad changes, audits, refactors, or edits to files you have not already inspected.
+- Do not rely on search snippets for wide changes.
+- Check installed dependency types/docs before using external APIs. Do not guess signatures.
+- Always ask before removing functionality or code that appears intentional.
+
+## Shell Discipline
+
+- For ad-hoc multi-line scripts, write a temp file, run it, then remove it.
+- Do not embed complex multi-line scripts directly in shell commands.
+
 ## Goal-Driven Execution
 
 - Define success criteria before non-trivial changes.
@@ -52,6 +64,7 @@
 - No paragraph intros like "The punchline:", "The kicker:", "Here's the thing:", "Bottom line:". LLM slop.
 - Direct, technical. Enough context for clarity, no extra detail.
 - Active voice, concise language. No passive or filler.
+- When responding to user feedback or critique, explicitly say whether you agree or disagree before explaining changes.
 
 ## Environment: User is on Windows
 
@@ -82,6 +95,15 @@
 # Git Behavior
 
 - Read `skill:git-workflow` for git operations.
-- Avoid mutating Git unless explicitly asked. (e.g. "commit this change", "create branch for this feature", "revert last commit")
-- Don't push, pull, or interact with remotes unless explicitly asked. (e.g. "push this branch to origin", "pull latest changes from main")
-- Commit only when user says commit. Don't commit automatically after changes, small or trivial. Wait for explicit instruction.
+- Avoid mutating Git unless explicitly asked.
+- Do not push, pull, or interact with remotes unless explicitly asked.
+- Commit only when user says commit.
+- Multiple pi sessions may share one cwd. Never stage, reset, stash, clean, checkout, or commit files outside this session's own changes.
+- Stage explicit paths only. Never use `git add -A` or `git add .`.
+- Before committing, run `git status` and verify only this session's files are staged.
+- Never run `git reset --hard`, `git checkout .`, `git clean -fd`, `git stash`, or `git commit --no-verify`.
+- If rebase or merge conflicts occur, resolve only files you modified. If conflict touches other files, abort and ask.
+
+# User Override
+
+If the user's instructions conflict with any rule in this document, ask for explicit confirmation before overriding. Only then execute their instructions.

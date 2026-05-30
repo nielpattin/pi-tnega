@@ -27,6 +27,7 @@ export default function toolsExtension(pi: ExtensionAPI) {
    let enabledTools: Set<string> = new Set();
    let allTools: ToolInfo[] = [];
    const defaultBuiltInTools = ["read", "bash", "edit", "write"];
+   let hasSavedToolsConfig = false;
 
    function withDefaultBuiltins(tools: string[], allToolNames: string[]): string[] {
       const next = new Set(tools.filter((tool) => allToolNames.includes(tool)));
@@ -36,6 +37,50 @@ export default function toolsExtension(pi: ExtensionAPI) {
          }
       }
       return Array.from(next);
+   }
+
+   function isDefaultDisabledBuiltInTool(toolName: string): boolean {
+      const tool = allTools.find((tool) => tool.name === toolName);
+      return tool?.sourceInfo.source === "builtin" && !defaultBuiltInTools.includes(toolName);
+   }
+
+   function hasPromptGuidelines(toolName: string): boolean {
+      const tool = allTools.find((tool) => tool.name === toolName) as
+         | (ToolInfo & { promptGuidelines?: string[] })
+         | undefined;
+      return tool?.promptGuidelines?.some((guideline: string) => guideline.trim().length > 0) ?? false;
+   }
+
+   function hasPromptSnippet(toolName: string, toolSnippets: Record<string, string> | undefined): boolean {
+      return typeof toolSnippets?.[toolName] === "string" && toolSnippets[toolName].trim().length > 0;
+   }
+
+   function sameTools(left: string[], right: string[]): boolean {
+      return left.length === right.length && left.every((tool, index) => tool === right[index]);
+   }
+
+   function pruneAutoActiveUnguidedTools(toolSnippets: Record<string, string> | undefined) {
+      if (hasSavedToolsConfig) {
+         return;
+      }
+
+      allTools = pi.getAllTools();
+      const allToolNames = allTools.map((t) => t.name);
+      const baseTools = pi
+         .getActiveTools()
+         .filter(
+            (tool: string) =>
+               allToolNames.includes(tool) &&
+               !isDefaultDisabledBuiltInTool(tool) &&
+               (defaultBuiltInTools.includes(tool) || hasPromptSnippet(tool, toolSnippets) || hasPromptGuidelines(tool))
+         );
+      const nextTools = withDefaultBuiltins(baseTools, allToolNames);
+      if (sameTools(Array.from(enabledTools), nextTools)) {
+         return;
+      }
+
+      enabledTools = new Set(nextTools);
+      applyTools();
    }
 
    // Persist current state
@@ -68,7 +113,13 @@ export default function toolsExtension(pi: ExtensionAPI) {
          }
       }
 
-      const baseTools = (savedTools ?? pi.getActiveTools()).filter((tool: string) => allToolNames.includes(tool));
+      hasSavedToolsConfig = savedTools !== undefined;
+
+      const restoredTools = savedTools ?? pi.getActiveTools();
+      const baseTools = restoredTools.filter(
+         (tool: string) =>
+            allToolNames.includes(tool) && (savedTools !== undefined || !isDefaultDisabledBuiltInTool(tool))
+      );
       enabledTools = new Set(withDefaultBuiltins(baseTools, allToolNames));
       applyTools();
    }
@@ -112,6 +163,7 @@ export default function toolsExtension(pi: ExtensionAPI) {
                   }
                   applyTools();
                   persistState();
+                  hasSavedToolsConfig = true;
                },
                () => {
                   // Close dialog
@@ -142,6 +194,10 @@ export default function toolsExtension(pi: ExtensionAPI) {
    // Restore state on session start
    pi.on("session_start", async (_event, ctx) => {
       restoreFromBranch(ctx);
+   });
+
+   pi.on("before_agent_start", async (event) => {
+      pruneAutoActiveUnguidedTools(event.systemPromptOptions.toolSnippets);
    });
 
    // Restore state when navigating the session tree

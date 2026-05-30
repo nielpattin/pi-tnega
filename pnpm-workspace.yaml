@@ -6,6 +6,7 @@ minimumReleaseAgeExclude:
   - "@nielpattin/*"
   - "@mariozechner/*"
   - "pi-hermes-memory"
+  - pi-dynamic-workflows@1.0.0
 allowBuilds:
   "@google/genai": true
   esbuild: true
@@ -13,9 +14,9 @@ allowBuilds:
   protobufjs: true
   better-sqlite3: true
   tree-sitter-bash: true
-  
+
 # Supply chain security
-minimumReleaseAge: 7200          # 5 days (or 1440 for 1 day)
+minimumReleaseAge: 7200 # 5 days (or 1440 for 1 day)
 blockExoticSubdeps: true
 
 # Extra hardening (recommended in v11)

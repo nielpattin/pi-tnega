@@ -3,8 +3,8 @@
   "compaction": {
     "enabled": true
   },
-  "defaultModel": "mimo-v2.5-pro",
-  "defaultProvider": "xiaomi-token-plan-sgp",
+  "defaultModel": "gpt-5.5",
+  "defaultProvider": "lb",
   "defaultThinkingLevel": "high",
   "doubleEscapeAction": "none",
   "editorPaddingX": 0,
@@ -41,44 +41,89 @@
     "+extensions\\pi-command-code-provider\\index.ts",
     "+extensions\\pi-intercom\\index.ts",
     "-extensions\\pi-rtk\\index.ts",
-    "+extensions\\tool-selector\\index.ts",
     "+extensions\\tps.ts",
     "+extensions\\notification\\index.ts",
     "-extensions\\kinda\\index.ts",
     "-extensions\\git-guard.ts",
-    "+extensions\\pi-explorer\\index.ts",
     "-extensions\\harness\\index.ts",
-    "+extensions\\pi-permission-system\\index.ts"
+    "-extensions\\goal.ts",
+    "-extensions\\pi-explorer\\index.ts",
+    "-extensions\\pi-omni\\index.ts",
+    "-extensions\\pi-handoff\\index.ts",
+    "-extensions\\pi-permission-system\\index.ts",
+    "+extensions\\tool-selector\\index.ts"
   ],
   "followUpMode": "all",
   "hideThinkingBlock": true,
   "images": {
     "autoResize": true
   },
-  "lastChangelogVersion": "0.76.0",
+  "lastChangelogVersion": "0.78.0",
   "packages": [
     {
       "source": "git:github.com/raunovillberg/im-pi-eccable",
       "extensions": [
         "+index.ts"
+      ],
+      "skills": [
+        "+skills\\frontend-design\\SKILL.md"
       ]
     },
     {
       "source": "git:github.com/Jon-Vii/pi-imagegen",
       "extensions": [
-        "+imagegen.ts"
+        "-imagegen.ts"
       ]
     },
     {
-      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-caveman"
+      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-caveman",
+      "extensions": [
+        "-index.ts"
+      ],
+      "skills": [
+        "-skills\\caveman\\SKILL.md",
+        "-skills\\caveman-commit\\SKILL.md",
+        "-skills\\caveman-review\\SKILL.md",
+        "-skills\\compress\\SKILL.md"
+      ]
     },
     {
-      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-simplify"
+      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-simplify",
+      "extensions": [
+        "+src\\index.ts"
+      ]
     },
     {
-      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-station"
+      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-station",
+      "extensions": [
+        "+index.ts"
+      ]
     },
-    "npm:@ygncode/pi-insights"
+    {
+      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-permission-system",
+      "extensions": [
+        "+src\\index.ts"
+      ]
+    },
+    {
+      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-subagents",
+      "extensions": [
+        "+src\\index.ts"
+      ]
+    },
+    "npm:pi-hashline-edit",
+    {
+      "source": "npm:pi-cache-graph",
+      "extensions": [
+        "+index.ts"
+      ]
+    },
+    {
+      "source": "npm:pi-context-usage",
+      "extensions": [
+        "+src\\index.ts"
+      ]
+    }
   ],
   "prompts": [
     "+prompts\\commit.md"
@@ -130,7 +175,7 @@
   },
   "piPermissionSystem": {
     "sound": "assets/permission-request.mp3",
-    "volume": 100
+    "volume": 150
   },
   "npmCommand": [
     "pnpm.cmd"

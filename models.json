@@ -1,7 +1,7 @@
 {
    "providers": {
       "lb": {
-         "apiKey": "LB-API-KEY",
+         "apiKey": "$LB_API_KEY",
          "api": "openai-responses",
          "baseUrl": "http://127.0.0.1:2455/v1",
          "models": [

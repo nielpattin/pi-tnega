@@ -1,11 +1,31 @@
 {
+   "$schema": "https://raw.githubusercontent.com/nielpattin/pi-packages/main/packages/pi-permission-system/schemas/permissions.schema.json",
    "debugLog": true,
    "permissionReviewLog": true,
-   "yoloMode": true,
+   "yoloMode": false,
    "permission": {
       "*": "ask",
-      "edit": "ask",
+      "edit": {
+         "*": "allow",
+         "*.env": "ask",
+         "*.env.*": "ask",
+         "*.env.example": "allow",
+         "permission.jsonc": "ask",
+         "*.md": "ask"
+      },
+      "grep": "allow",
+      "write": "allow",
+      "ls": "allow",
+      "find": "allow",
       "read": "allow",
+      "path": {
+         "*": "allow",
+         "*.env": "ask",
+         "*.env.*": "ask",
+         "*.env.example": "allow"
+      },
+      "mcp": { "mcp_status": "allow" },
+      "skill": { "*": "allow" },
       "bash": {
          "*": "ask",
          "* git push *": "ask",
@@ -18,6 +38,8 @@
          "* git tag *": "ask",
          "* git clean *": "ask",
          "git diff *": "allow",
+         "*git status*": "allow",
+         "* git log *": "allow",
          "* rm *": "ask",
          "* kill *": "ask",
          "* killall *": "ask",
@@ -34,14 +56,23 @@
          "* gh *": "ask",
          "gh run view *": "allow",
          "gh run list *": "allow",
-         "find *": "allow",
+         "find*": "allow",
          "pnpm check*": "allow",
          "pnpm test *": "allow",
          "pnpm lint*": "allow",
          "pnpm fmt*": "allow",
          "pnpm coverage*": "allow",
          "pnpm build*": "allow",
-         "bash * --path-only": "allow"
+         "pnpm exec oxfmt*": "allow",
+         "pnpm --dir * --dry-run": "allow",
+         "pnpm --dir * test": "allow",
+         "grep *": "allow",
+         "bash * --path-only": "allow",
+         "taskkill *": "ask",
+         "pwd": "allow",
+         "wc *": "allow",
+         "test -f *": "allow",
+         "* openspec *": "allow"
       },
       "external_directory": "allow"
    }

@@ -455,7 +455,7 @@ export function loadConfig(extensionRoot: string): ConfigLoadResult {
          providerId,
          displayName: stringOr(raw.displayName, "CommandCode"),
          upstreamUrl: stringOr(raw.upstreamUrl, "https://api.commandcode.ai"),
-         apiKey: stringOr(raw.apiKey, "COMMAND_CODE_TOKEN"),
+         apiKey: stringOr(raw.apiKey, "$COMMAND_CODE_TOKEN"),
          commandCodeVersion: stringOr(raw.commandCodeVersion, "0.26.25"),
          commandCodeProvider: stringOr(raw.commandCodeProvider, "command-code"),
          requestTimeoutMs: numberOr(raw.requestTimeoutMs, 300_000),
