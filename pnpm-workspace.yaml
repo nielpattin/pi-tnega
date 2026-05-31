@@ -5,8 +5,7 @@ minimumReleaseAgeExclude:
   - "@earendil-works/*"
   - "@nielpattin/*"
   - "@mariozechner/*"
-  - "pi-hermes-memory"
-  - pi-dynamic-workflows@1.0.0
+  - pi-codex-goal@0.1.18
 allowBuilds:
   "@google/genai": true
   esbuild: true

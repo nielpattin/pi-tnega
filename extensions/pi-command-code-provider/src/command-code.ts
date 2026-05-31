@@ -14,8 +14,16 @@ import {
    type Usage
 } from "@earendil-works/pi-ai";
 
-import type { ExtensionConfig } from "./config";
 import type { DebugLogger } from "./debug-logger";
+
+export interface CommandCodeProviderSettings {
+   upstreamUrl: string;
+   apiKey: string;
+   commandCodeVersion: string;
+   requestTimeoutMs: number;
+   memory: string;
+   headers: Record<string, string>;
+}
 
 interface CommandCodeRuntimeState {
    cwd?: string;
@@ -101,6 +109,12 @@ function optionalString(value: unknown): string | undefined {
 
 function nowDate(): string {
    return new Date().toISOString().slice(0, 10);
+}
+
+function commandCodeCliEnvironment(): string {
+   if (process.argv.includes("--local")) return "local";
+   if (process.argv.includes("--staging")) return "staging";
+   return "production";
 }
 
 function buildCommandConfig(runtime: CommandCodeRuntimeState): Record<string, unknown> {
@@ -200,7 +214,7 @@ function buildTools(tools: Tool[] | undefined): CommandCodeTool[] | undefined {
    }));
 }
 
-function buildSystemPrompt(config: ExtensionConfig, context: Context): string | undefined {
+function buildSystemPrompt(config: CommandCodeProviderSettings, context: Context): string | undefined {
    const prompt = [config.memory, context.systemPrompt]
       .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
       .join("\n\n")
@@ -222,7 +236,7 @@ function resolveReasoningEffort(model: Model<Api>, options?: SimpleStreamOptions
 function buildRequest(
    model: Model<Api>,
    context: Context,
-   config: ExtensionConfig,
+   config: CommandCodeProviderSettings,
    runtime: CommandCodeRuntimeState,
    options?: SimpleStreamOptions
 ): CommandCodeRequest {
@@ -246,18 +260,32 @@ function buildRequest(
    };
 }
 
-function resolveApiKey(config: ExtensionConfig, options?: SimpleStreamOptions): string {
+function normalizePayloadTemperature(payload: CommandCodeRequest): CommandCodeRequest {
+   if (!Object.hasOwn(payload, "temperature")) return payload;
+   const temperature = (payload as CommandCodeRequest & { temperature?: unknown }).temperature;
+   if (typeof temperature !== "number" || !Number.isFinite(temperature)) return payload;
+   const { temperature: _temperature, ...rest } = payload as CommandCodeRequest & { temperature: number };
+   return {
+      ...rest,
+      params: {
+         ...payload.params,
+         temperature
+      }
+   };
+}
+
+function resolveApiKey(config: CommandCodeProviderSettings, options?: SimpleStreamOptions): string {
    const apiKey = options?.apiKey;
    if (!apiKey || (apiKey === config.apiKey && ENV_VAR_PATTERN.test(config.apiKey) && !process.env[config.apiKey])) {
       throw new Error(
-         `No CommandCode API token configured. Set ${config.apiKey} or update pi-command-code-provider/config.json.`
+         `No CommandCode API token configured. Set COMMAND_CODE_TOKEN before using the Command Code provider.`
       );
    }
    return apiKey;
 }
 
 function buildHeaders(
-   config: ExtensionConfig,
+   config: CommandCodeProviderSettings,
    apiKey: string,
    options?: SimpleStreamOptions,
    runtime?: CommandCodeRuntimeState
@@ -268,7 +296,9 @@ function buildHeaders(
       "Content-Type": "application/json",
       Accept: "text/event-stream, application/json",
       "x-command-code-version": config.commandCodeVersion,
-      "x-cli-environment": `${process.platform}-${process.arch}, Node.js ${process.version}`
+      "x-cli-environment": commandCodeCliEnvironment(),
+      "x-taste-learning": "false",
+      "x-co-flag": "false"
    };
    if (runtime?.sessionId) {
       headers["x-session-id"] = runtime.sessionId;
@@ -280,6 +310,9 @@ function buildHeaders(
    const ossPrimary = process.env.OSS_PRIMARY_PROVIDER;
    if (ossPrimary) {
       headers["x-oss-primary-provider"] = ossPrimary;
+   }
+   if (process.env.CMD_ZDR === "1") {
+      headers["x-cmd-zdr"] = "1";
    }
    if (!headers.Authorization && !headers.authorization) {
       headers.Authorization = `Bearer ${apiKey}`;
@@ -813,6 +846,7 @@ async function consumeEventStream(
    const handleEvent = (event: unknown): void => {
       if (!isRecord(event)) return;
       const type = optionalString(event.type);
+      logger.trace("provider_sse_event", { model: model.id, event });
       if (!type || type === "start" || type === "start-step" || type === "provider-metadata") return;
 
       if (type === "text-start") {
@@ -948,10 +982,12 @@ async function consumeEventStream(
    output.stopReason = finalStopReason;
    output.errorMessage = finalError;
    if (finalStopReason === "error") {
+      logger.trace("agent_response", { model: model.id, message: output });
       stream.push({ type: "error", reason: "error", error: output });
       stream.end(output);
       return;
    }
+   logger.trace("agent_response", { model: model.id, message: output });
    stream.push({ type: "done", reason: finalStopReason, message: output });
    stream.end(output);
 }
@@ -961,7 +997,7 @@ async function executeCommandCodeRequest(
    output: AssistantMessage,
    model: Model<Api>,
    context: Context,
-   config: ExtensionConfig,
+   config: CommandCodeProviderSettings,
    runtime: CommandCodeRuntimeState,
    logger: DebugLogger,
    options?: SimpleStreamOptions
@@ -970,12 +1006,21 @@ async function executeCommandCodeRequest(
    const signal = createRequestSignal(options, options?.timeoutMs ?? config.requestTimeoutMs);
    try {
       const request = buildRequest(model, context, config, runtime, options);
-      const payload = options?.onPayload ? ((await options.onPayload(request, model)) ?? request) : request;
-      const response = await fetch(`${config.upstreamUrl.replace(/\/+$/, "")}/alpha/generate`, {
+      const rawPayload = options?.onPayload ? ((await options.onPayload(request, model)) ?? request) : request;
+      const payload = normalizePayloadTemperature(rawPayload as CommandCodeRequest);
+      const url = `${config.upstreamUrl.replace(/\/+$/, "")}/alpha/generate`;
+      const headers = buildHeaders(config, apiKey, options, runtime);
+      logger.trace("provider_request", { model: model.id, method: "POST", url, headers, body: payload });
+      const response = await fetch(url, {
          method: "POST",
-         headers: buildHeaders(config, apiKey, options, runtime),
+         headers,
          body: JSON.stringify(payload),
          signal: signal.signal
+      });
+      logger.trace("provider_response_headers", {
+         model: model.id,
+         status: response.status,
+         headers: responseHeadersToRecord(response.headers)
       });
 
       await options?.onResponse?.(
@@ -985,6 +1030,7 @@ async function executeCommandCodeRequest(
 
       if (!response.ok) {
          const errorPayload = await readJsonResponse(response);
+         logger.trace("provider_response_body", { model: model.id, status: response.status, body: errorPayload });
          const errorMessage = extractErrorMessage(errorPayload, response.status);
          logger.error("http_error", {
             model: model.id,
@@ -1002,7 +1048,9 @@ async function executeCommandCodeRequest(
       }
 
       const payloadResponse = await readJsonResponse(response);
+      logger.trace("provider_response_body", { model: model.id, status: response.status, body: payloadResponse });
       emitResponse(stream, output, payloadResponse, model, context);
+      logger.trace("agent_response", { model: model.id, message: output });
    } catch (error) {
       const aborted = signal.signal.aborted || (error instanceof DOMException && error.name === "AbortError");
       output.stopReason = aborted ? "aborted" : "error";
@@ -1012,6 +1060,7 @@ async function executeCommandCodeRequest(
          stopReason: output.stopReason,
          error: output.errorMessage
       });
+      logger.trace("agent_response", { model: model.id, message: output });
       stream.push({ type: "error", reason: output.stopReason, error: output });
       stream.end(output);
    } finally {
@@ -1020,7 +1069,7 @@ async function executeCommandCodeRequest(
 }
 
 export function createCommandCodeStream(
-   config: ExtensionConfig,
+   config: CommandCodeProviderSettings,
    runtime: CommandCodeRuntimeState,
    logger: DebugLogger
 ) {

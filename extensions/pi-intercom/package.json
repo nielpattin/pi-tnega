@@ -20,12 +20,12 @@
       "test": "tsx --test broker/paths.test.ts broker/spawn.test.ts broker/target-resolution.test.ts reply-tracker.test.ts intercom.integration.test.ts test/inline-message.test.ts"
    },
    "dependencies": {
-      "tsx": "^4.20.0",
-      "typebox": "^1.1.24"
+      "tsx": "^4.22.3",
+      "typebox": "^1.1.38"
    },
    "devDependencies": {
-      "@earendil-works/pi-coding-agent": "^0.75.5",
-      "@earendil-works/pi-tui": "^0.75.5"
+      "@earendil-works/pi-coding-agent": "^0.78.0",
+      "@earendil-works/pi-tui": "^0.78.0"
    },
    "peerDependencies": {
       "@earendil-works/pi-coding-agent": "*",

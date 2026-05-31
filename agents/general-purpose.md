@@ -3,6 +3,6 @@ description: General-purpose agent for complex, multi-step tasks
 display_name: Agent
 tools: all
 prompt_mode: append
-model: cmd/deepseek/deepseek-v4-flash
-thinking: medium
+model: lb/gpt-5.5
+thinking: low
 ---

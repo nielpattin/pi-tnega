@@ -5,41 +5,36 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { createCommandCodeStream } from "./command-code";
-import { COMMAND_CODE_API, loadConfig } from "./config";
+import { COMMAND_CODE_API, COMMAND_CODE_DEFAULTS, COMMAND_CODE_MODELS } from "./models";
 import { DebugLogger } from "./debug-logger";
 
 const EXTENSION_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const RUNTIME_PROVIDER_REGISTRATION_EVENT = "pi-multi-auth:runtime-provider-registration";
 
 export default function commandCodeProviderExtension(pi: ExtensionAPI): void {
-   const { config, warnings } = loadConfig(EXTENSION_ROOT);
-   const logger = new DebugLogger({ extensionRoot: EXTENSION_ROOT, debug: config.debug });
-   for (const warning of warnings) {
-      logger.warn("config_warning", { warning });
-   }
-
-   if (!config.enabled) {
-      logger.debug("extension_disabled", { providerId: config.providerId });
-      return;
-   }
+   const logger = new DebugLogger({ extensionRoot: EXTENSION_ROOT, debug: false });
+   const provider = {
+      ...COMMAND_CODE_DEFAULTS,
+      models: COMMAND_CODE_MODELS
+   };
 
    const runtime: { cwd?: string; sessionId?: string } = {};
    runtime.sessionId = randomUUID();
-   const streamSimple = createCommandCodeStream(config, runtime, logger);
+   const streamSimple = createCommandCodeStream(provider, runtime, logger);
    const emitRuntimeProviderRegistration = (): void => {
       pi.events?.emit(RUNTIME_PROVIDER_REGISTRATION_EVENT, {
-         provider: config.providerId,
-         displayName: config.displayName,
-         baseUrl: config.upstreamUrl,
+         provider: provider.providerId,
+         displayName: provider.displayName,
+         baseUrl: provider.upstreamUrl,
          api: COMMAND_CODE_API,
-         headers: { ...config.headers },
-         models: config.models.map((model) => ({ ...model })),
+         headers: { ...provider.headers },
+         models: provider.models.map((model) => ({ ...model })),
          streamSimple
       });
       logger.debug("runtime_provider_registration_emitted", {
-         providerId: config.providerId,
+         providerId: provider.providerId,
          api: COMMAND_CODE_API,
-         modelCount: config.models.length
+         modelCount: provider.models.length
       });
    };
 
@@ -56,21 +51,21 @@ export default function commandCodeProviderExtension(pi: ExtensionAPI): void {
       return {};
    });
 
-   pi.registerProvider(config.providerId, {
-      name: config.displayName,
-      baseUrl: config.upstreamUrl,
-      apiKey: config.apiKey,
+   pi.registerProvider(provider.providerId, {
+      name: provider.displayName,
+      baseUrl: provider.upstreamUrl,
+      apiKey: provider.apiKey,
       api: COMMAND_CODE_API,
       streamSimple,
-      headers: config.headers,
-      models: config.models
+      headers: provider.headers,
+      models: provider.models
    });
    emitRuntimeProviderRegistration();
 
    logger.debug("provider_registered", {
-      providerId: config.providerId,
+      providerId: provider.providerId,
       api: COMMAND_CODE_API,
-      upstreamUrl: config.upstreamUrl,
-      modelCount: config.models.length
+      upstreamUrl: provider.upstreamUrl,
+      modelCount: provider.models.length
    });
 }

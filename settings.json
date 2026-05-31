@@ -29,7 +29,8 @@
     "opencode-go/qwen3.6-plus",
     "lb/gpt-5.5",
     "lb/gpt-5.4-mini",
-    "lb/gpt-5.3-codex"
+    "lb/gpt-5.3-codex",
+    "command-code/stepfun/Step-3.7-Flash"
   ],
   "extensions": [
     "-extensions\\web-reader.ts",
@@ -47,11 +48,11 @@
     "-extensions\\git-guard.ts",
     "-extensions\\harness\\index.ts",
     "-extensions\\goal.ts",
-    "-extensions\\pi-explorer\\index.ts",
     "-extensions\\pi-omni\\index.ts",
     "-extensions\\pi-handoff\\index.ts",
     "-extensions\\pi-permission-system\\index.ts",
-    "+extensions\\tool-selector\\index.ts"
+    "+extensions\\tool-selector\\index.ts",
+    "-extensions\\pi-explorer\\index.ts"
   ],
   "followUpMode": "all",
   "hideThinkingBlock": true,
@@ -112,18 +113,7 @@
       ]
     },
     "npm:pi-hashline-edit",
-    {
-      "source": "npm:pi-cache-graph",
-      "extensions": [
-        "+index.ts"
-      ]
-    },
-    {
-      "source": "npm:pi-context-usage",
-      "extensions": [
-        "+src\\index.ts"
-      ]
-    }
+    "npm:pi-codex-goal@0.1.18"
   ],
   "prompts": [
     "+prompts\\commit.md"
