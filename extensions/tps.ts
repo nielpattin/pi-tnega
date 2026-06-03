@@ -157,24 +157,22 @@ export default function tpsExtension(pi: ExtensionAPI) {
 
    // Restore notification on session resume if we have saved stats
    pi.on("session_start", (event, ctx) => {
-      setTimeout(() => {
-         if (!ctx.hasUI) return;
-         // Only restore for existing sessions (resume, fork, switch), not new ones
-         if (event.reason === "startup" || event.reason === "reload") return;
+      if (!ctx.hasUI) return;
+      // Only restore for existing sessions (resume, fork, switch), not new ones
+      if (event.reason === "startup" || event.reason === "reload") return;
 
-         const entries = ctx.sessionManager.getEntries();
-         // Find the most recent TPS entry
-         for (let i = entries.length - 1; i >= 0; i--) {
-            const entry = entries[i];
-            if (isTpsEntry(entry)) {
-               const data = entry.data;
-               if (data?.message) {
-                  ctx.ui.notify(data.message, "info");
-               }
-               break;
+      const entries = ctx.sessionManager.getEntries();
+      // Find the most recent TPS entry
+      for (let i = entries.length - 1; i >= 0; i--) {
+         const entry = entries[i];
+         if (isTpsEntry(entry)) {
+            const data = entry.data;
+            if (data?.message) {
+               ctx.ui.notify(data.message, "info");
             }
+            break;
          }
-      }, 0);
+      }
    });
 
    // Track when a turn starts (request sent to LLM)
@@ -230,22 +228,20 @@ export default function tpsExtension(pi: ExtensionAPI) {
 
    // Calculate and display stats when agent loop ends
    pi.on("agent_end", (event: AgentEndEvent, ctx: ExtensionContext) => {
-      setTimeout(() => {
-         if (!ctx.hasUI) return;
-         if (!currentTiming) return;
+      if (!ctx.hasUI) return;
+      if (!currentTiming) return;
 
-         const timing = currentTiming;
-         currentTiming = null;
-         hasSeenAssistantMessage = false;
+      const timing = currentTiming;
+      currentTiming = null;
+      hasSeenAssistantMessage = false;
 
-         const message = calculateStats(event, timing);
-         if (!message) return;
+      const message = calculateStats(event, timing);
+      if (!message) return;
 
-         // Show notification immediately
-         ctx.ui.notify(message, "info");
+      // Show notification immediately
+      ctx.ui.notify(message, "info");
 
-         // Save to session for restoration on resume
-         pi.appendEntry("tps", { message, timestamp: Date.now() });
-      }, 0);
+      // Save to session for restoration on resume
+      pi.appendEntry("tps", { message, timestamp: Date.now() });
    });
 }

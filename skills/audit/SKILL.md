@@ -1,6 +1,6 @@
 ---
-name: quality
-description: "Run systematic technical quality checks. Covers accessibility, performance, theming, responsive design, anti-patterns. Use when user wants to review, evaluate, audit, or critique an interface."
+name: audit
+description: "Run systematic technical quality checks and generate a comprehensive report. Covers accessibility, performance, theming, responsive design, and anti-patterns."
 ---
 
 Run systematic **technical** quality checks and generate a comprehensive report. Don't fix issues; document them for other commands to address.

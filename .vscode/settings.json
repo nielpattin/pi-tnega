@@ -14,5 +14,8 @@
    "oxc.tsConfigPath": "tsconfig.json",
    "[json]": {
       "editor.defaultFormatter": "oxc.oxc-vscode"
+   },
+   "[jsonc]": {
+      "editor.defaultFormatter": "vscode.json-language-features"
    }
 }

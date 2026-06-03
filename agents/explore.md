@@ -5,6 +5,7 @@ tools: read, bash, rtk_grep, rtk_find
 model: opencode-go/deepseek-v4-flash
 thinking: high
 prompt_mode: replace
+guidance: Use this agent for read-only codebase exploration, searches, evidence gathering, and understanding existing implementation before planning or editing.
 ---
 
 # CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS

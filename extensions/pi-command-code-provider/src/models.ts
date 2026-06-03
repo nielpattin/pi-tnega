@@ -168,7 +168,7 @@ const RAW_MODELS = [
       id: "zai-org/GLM-5.1",
       name: "GLM 5.1",
       description: "long-horizon autonomous coding agent",
-      reasoning: false,
+      reasoning: true,
       contextWindow: 200000,
       maxTokens: 131072,
       cost: { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 }
@@ -177,7 +177,7 @@ const RAW_MODELS = [
       id: "zai-org/GLM-5",
       name: "GLM 5",
       description: "multi-mode thinking & long-range planning",
-      reasoning: false,
+      reasoning: true,
       contextWindow: 200000,
       maxTokens: 131072,
       cost: { input: 0.95, output: 3.15, cacheRead: 0, cacheWrite: 0 }
@@ -187,6 +187,16 @@ const RAW_MODELS = [
       name: "MiniMax M2.7",
       description: "end-to-end software engineering agent",
       reasoning: false,
+      contextWindow: 1000000,
+      maxTokens: 131072,
+      cost: { input: 0.5, output: 2, cacheRead: 0, cacheWrite: 0 }
+   },
+   {
+      id: "MiniMaxAI/MiniMax-M3",
+      name: "MiniMax M3",
+      description: "frontier reasoning with long-horizon agent execution",
+      reasoning: true,
+      thinkingLevelMap: COMMAND_CODE_AUTO_REASONING_MAP,
       contextWindow: 1000000,
       maxTokens: 131072,
       cost: { input: 0.5, output: 2, cacheRead: 0, cacheWrite: 0 }
@@ -251,6 +261,26 @@ const RAW_MODELS = [
       cost: { input: 0.5, output: 3, cacheRead: 0.1, cacheWrite: 0 }
    },
    {
+      id: "Qwen/Qwen3.7-Max-Free",
+      name: "Qwen 3.7 Max",
+      description: "frontier coding & long-horizon agent execution (free)",
+      reasoning: true,
+      thinkingLevelMap: COMMAND_CODE_AUTO_REASONING_MAP,
+      contextWindow: 1000000,
+      maxTokens: 65536,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+   },
+   {
+      id: "Qwen/Qwen3.7-Plus",
+      name: "Qwen 3.7 Plus",
+      description: "frontier coding & long-horizon agent execution",
+      reasoning: true,
+      thinkingLevelMap: COMMAND_CODE_AUTO_REASONING_MAP,
+      contextWindow: 1000000,
+      maxTokens: 65536,
+      cost: { input: 0.5, output: 3, cacheRead: 0.1, cacheWrite: 0 }
+   },
+   {
       id: "stepfun/Step-3.7-Flash",
       name: "Step 3.7 Flash",
       description: "multimodal sparse-MoE reasoning",
@@ -274,7 +304,7 @@ const RAW_MODELS = [
       id: "xiaomi/mimo-v2.5-pro",
       name: "MiMo V2.5 Pro",
       description: "high-capability long-context agentic coding",
-      reasoning: false,
+      reasoning: true,
       contextWindow: 1000000,
       maxTokens: 131072,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
@@ -283,7 +313,7 @@ const RAW_MODELS = [
       id: "xiaomi/mimo-v2.5",
       name: "MiMo V2.5",
       description: "efficient long-context agentic coding",
-      reasoning: false,
+      reasoning: true,
       contextWindow: 1000000,
       maxTokens: 131072,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
@@ -315,7 +345,7 @@ export const COMMAND_CODE_DEFAULTS = {
    displayName: "CommandCode",
    upstreamUrl: "https://api.commandcode.ai",
    apiKey: "$COMMAND_CODE_TOKEN",
-   commandCodeVersion: "0.30.1",
+   commandCodeVersion: "0.31.2",
    requestTimeoutMs: 300_000,
    memory: "",
    headers: {} as Record<string, string>

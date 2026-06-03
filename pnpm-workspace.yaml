@@ -6,6 +6,7 @@ minimumReleaseAgeExclude:
   - "@nielpattin/*"
   - "@mariozechner/*"
   - pi-codex-goal@0.1.18
+  - '@observal/pi-insights@1.2.3'
 allowBuilds:
   "@google/genai": true
   esbuild: true

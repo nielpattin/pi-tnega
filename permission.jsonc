@@ -29,6 +29,8 @@
     "skill": {
       "*": "allow"
     },
+    "ctx_reduce": "allow",
+    "todowrite": "allow",
     "subagent": "allow",
     "get_subagent_result": "allow",
     "bash": {
@@ -82,7 +84,8 @@
       "pwd": "allow",
       "wc *": "allow",
       "test -f *": "allow",
-      "*openspec *": "allow"
+      "*openspec *": "allow",
+      "tail*": "allow"
     },
     "external_directory": "allow"
   }

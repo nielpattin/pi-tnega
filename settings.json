@@ -1,10 +1,10 @@
 {
   "collapseChangelog": true,
   "compaction": {
-    "enabled": true
+    "enabled": false
   },
-  "defaultModel": "gpt-5.5",
-  "defaultProvider": "lb",
+  "defaultModel": "mimo-v2.5-pro",
+  "defaultProvider": "xiaomi-token-plan-sgp",
   "defaultThinkingLevel": "high",
   "doubleEscapeAction": "none",
   "editorPaddingX": 0,
@@ -40,7 +40,6 @@
     "-extensions\\rg-guard.ts",
     "-extensions\\batch-read.ts",
     "+extensions\\pi-command-code-provider\\index.ts",
-    "+extensions\\pi-intercom\\index.ts",
     "-extensions\\pi-rtk\\index.ts",
     "+extensions\\tps.ts",
     "+extensions\\notification\\index.ts",
@@ -51,8 +50,11 @@
     "-extensions\\pi-omni\\index.ts",
     "-extensions\\pi-handoff\\index.ts",
     "-extensions\\pi-permission-system\\index.ts",
-    "+extensions\\tool-selector\\index.ts",
-    "-extensions\\pi-explorer\\index.ts"
+    "-extensions\\pi-explorer\\index.ts",
+    "-extensions\\pi-event-monitor\\index.ts",
+    "+extensions\\pi-intercom\\index.ts",
+    "+extensions\\temperature.ts",
+    "-extensions\\tool-selector\\index.ts"
   ],
   "followUpMode": "all",
   "hideThinkingBlock": true,
@@ -61,15 +63,6 @@
   },
   "lastChangelogVersion": "0.78.0",
   "packages": [
-    {
-      "source": "git:github.com/raunovillberg/im-pi-eccable",
-      "extensions": [
-        "+index.ts"
-      ],
-      "skills": [
-        "+skills\\frontend-design\\SKILL.md"
-      ]
-    },
     {
       "source": "git:github.com/Jon-Vii/pi-imagegen",
       "extensions": [
@@ -112,8 +105,21 @@
         "+src\\index.ts"
       ]
     },
-    "npm:pi-hashline-edit",
-    "npm:pi-codex-goal@0.1.18"
+    {
+      "source": "npm:pi-codex-goal@0.1.18",
+      "extensions": [
+        "+src\\index.ts"
+      ]
+    },
+    {
+      "source": "npm:@observal/pi-insights@1.2.3",
+      "extensions": [
+        "-"
+      ]
+    },
+    {
+      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-magic-context"
+    }
   ],
   "prompts": [
     "+prompts\\commit.md"
@@ -131,7 +137,10 @@
     "-skills\\drawio-diagrams-enhanced\\SKILL.md",
     "-skills\\drawio-skill\\SKILL.md",
     "+skills\\extract\\SKILL.md",
-    "+skills\\librarian\\SKILL.md"
+    "+skills\\librarian\\SKILL.md",
+    "-skills\\grill-me\\SKILL.md",
+    "+skills\\to-prd\\SKILL.md",
+    "+skills\\zoom-out\\SKILL.md"
   ],
   "steeringMode": "all",
   "terminal": {
@@ -179,6 +188,9 @@
       "bashMode": "ctrl+b",
       "stash": "alt+s",
       "stashHistory": "alt+h"
-    }
-  }
+    },
+    "readStyle": true,
+    "hashline": true
+  },
+  "httpIdleTimeoutMs": 0
 }

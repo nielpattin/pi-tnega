@@ -39,6 +39,14 @@
         "--agent",
         "openCodeCLI"
       ]
+    },
+    "documine": {
+      "command": "npx",
+      "args": [
+        "tsx",
+        "D:\\repo\\documine\\mcp-server\\src\\index.ts",
+        "--data=D:\\repo\\documine\\data"
+      ]
     }
   },
   "imports": [

@@ -1,6 +1,6 @@
 ---
-name: robustness
-description: "Strengthen interfaces against edge cases, errors, internationalization issues, and unclear copy. Makes interfaces production-ready with resilient error handling."
+name: harden
+description: "Harden interfaces against edge cases, errors, internationalization issues, and unclear copy. Makes interfaces production-ready."
 ---
 
 Designs that only work with perfect data aren't production-ready. Harden the interface against the inputs, errors, languages, and network conditions that real users will throw at it.

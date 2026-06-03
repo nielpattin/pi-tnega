@@ -1,6 +1,6 @@
 ---
-name: performance
-description: "Diagnose and fix UI performance. Loading speed, rendering, animations, images, bundle size, Core Web Vitals. Use when user mentions slow, laggy, janky, bundle size, load time."
+name: optimize
+description: "Diagnose and fix UI performance. Loading speed, rendering, animations, images, bundle size, Core Web Vitals."
 ---
 
 Performance is a feature. Identify the actual bottleneck for THIS interface, fix it, then measure. Don't optimize what isn't slow.

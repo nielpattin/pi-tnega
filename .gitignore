@@ -151,3 +151,4 @@ cache/
 auth.json
 *.jsonl
 git
+pi-magic-context/

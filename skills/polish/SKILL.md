@@ -1,6 +1,6 @@
 ---
-name: visual-polish
-description: "Perfect the visual details - layout, spacing, design system alignment, typography, micro-detail principles, and final quality passes before shipping."
+name: polish
+description: "Perform meticulous final pass catching all small details that separate good work from great. The difference between shipped and polished."
 ---
 
 > **Additional context needed**: quality bar (MVP vs flagship).

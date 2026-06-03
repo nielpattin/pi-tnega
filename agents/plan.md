@@ -5,6 +5,7 @@ tools: read, bash, grep, find, ls
 model: lb/gpt-5.5
 thinking: high
 prompt_mode: replace
+guidance: Use this agent for read-only architecture analysis and implementation planning before making non-trivial code changes.
 ---
 
 # CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS

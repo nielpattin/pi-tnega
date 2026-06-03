@@ -1,0 +1,17 @@
+{
+   "$schema": "file:///C:/Users/niel/.pi/agent/packages/packages/pi-magic-context/assets/magic-context.schema.json",
+   "enabled": true,
+   "historian": {
+      "model": "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+   },
+   "embedding": {
+      "provider": "local",
+      "model": "Xenova/all-MiniLM-L6-v2"
+   },
+   "dreamer": {
+      "model": "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+   },
+   "sidekick": {
+      "model": "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+   }
+}
