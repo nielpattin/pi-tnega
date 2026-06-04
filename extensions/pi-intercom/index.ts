@@ -777,7 +777,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
       if (disposed || shuttingDown) {
          throw new Error("Intercom shutting down");
       }
-      if (client?.isConnected()) {
+      if (client && client.isConnected()) {
          return client;
       }
       const contextAtStart = getLiveContext();
@@ -1386,10 +1386,10 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
                reason
             );
             if (typeof interview?.title === "string" && interview.title.trim()) {
-               text += ` ${theme.fg("accent", interview.title.trim())}`;
+               text += " " + theme.fg("accent", interview.title.trim());
             }
             if (messagePreview) {
-               text += `\n  ${theme.fg("dim", messagePreview)}`;
+               text += "\n  " + theme.fg("dim", messagePreview);
             }
             return new Text(text, 0, 0);
          },
@@ -1416,7 +1416,7 @@ export default function piIntercomExtension(pi: ExtensionAPI) {
                  : theme.fg("success", "✓ ");
             text += theme.fg(failed ? "error" : "text", textContent);
             if (parseWarning) {
-               text += `\n${theme.fg("warning", `Structured reply parse issue: ${details.structuredReplyParseError}`)}`;
+               text += "\n" + theme.fg("warning", `Structured reply parse issue: ${details.structuredReplyParseError}`);
             }
             return new Text(text, 0, 0);
          }
@@ -1814,13 +1814,13 @@ Usage:
          let text = theme.fg("toolTitle", theme.bold("intercom "));
          text += theme.fg(action === "ask" ? "warning" : action === "reply" ? "success" : "accent", action);
          if (target) {
-            text += ` ${theme.fg("muted", "→")} ${theme.fg("accent", target)}`;
+            text += " " + theme.fg("muted", "→") + " " + theme.fg("accent", target);
          }
          if (attachmentCount > 0) {
-            text += ` ${theme.fg("dim", `(${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"})`)}`;
+            text += " " + theme.fg("dim", `(${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"})`);
          }
          if (messagePreview) {
-            text += `\n  ${theme.fg("dim", messagePreview)}`;
+            text += "\n  " + theme.fg("dim", messagePreview);
          }
          return new Text(text, 0, 0);
       },
@@ -1838,7 +1838,7 @@ Usage:
             text += theme.fg("dim", ` (${details.messageId.slice(0, 8)})`);
          }
          if (details?.reason && context.expanded) {
-            text += `\n${theme.fg("dim", `Reason: ${details.reason}`)}`;
+            text += "\n" + theme.fg("dim", `Reason: ${details.reason}`);
          }
          return new Text(text, 0, 0);
       }

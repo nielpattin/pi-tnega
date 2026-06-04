@@ -74,7 +74,7 @@
          "pnpm fmt*": "allow",
          "pnpm coverage*": "allow",
          "pnpm build*": "allow",
-         "pnpm exec biome*": "allow",
+         "pnpm exec oxfmt*": "allow",
          "pnpm --dir * --dry-run": "allow",
          "pnpm --dir * test": "allow",
          "pnpm --dir * check": "allow",

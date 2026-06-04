@@ -47,7 +47,7 @@ export default function batchReadExtension(pi: ExtensionAPI) {
             const range = hasRange
                ? theme.fg(
                     "muted",
-                    `:${f.offset ?? 1}${f.limit !== undefined ? `-${(f.offset ?? 1) + f.limit - 1}` : ""}`
+                    `:${f.offset ?? 1}${f.limit !== undefined ? "-" + ((f.offset ?? 1) + f.limit - 1) : ""}`
                  )
                : "";
             return `  ${theme.fg("accent", f.path)}${range}`;

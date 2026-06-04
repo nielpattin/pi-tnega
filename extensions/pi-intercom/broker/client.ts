@@ -129,11 +129,11 @@ export class IntercomClient extends EventEmitter {
       const socket = this.socket;
       return Boolean(
          socket &&
-            this._sessionId &&
-            !this.disconnecting &&
-            !socket.destroyed &&
-            !socket.writableEnded &&
-            socket.writable
+         this._sessionId &&
+         !this.disconnecting &&
+         !socket.destroyed &&
+         !socket.writableEnded &&
+         socket.writable
       );
    }
 

@@ -17,8 +17,8 @@ You are going to do a guided review such that we can understand small, ordered c
 
 ## Principles
 
-- **100x less text than you think.** If you can't explain it simply, perhaps the PR is overly complex when a simpler solution is *actually* the smarter option. Code that looks stupidly easy is incredibly difficult to write.
-- **Context before code.** The reviewer must know *why* before they see *what*. A diff without context is noise.
+- **100x less text than you think.** If you can't explain it simply, perhaps the PR is overly complex when a simpler solution is _actually_ the smarter option. Code that looks stupidly easy is incredibly difficult to write.
+- **Context before code.** The reviewer must know _why_ before they see _what_. A diff without context is noise.
 - **Visuals over walls of text.** ASCII trees, call-site diagrams, small sketches. One diagram replaces 10 paragraphs.
 - **Prefer reduced branching.** Slightly more complex-looking code is preferred (given 2 options with the same input/output) if there is one less branch. Less branching = less cognitive load.
 - **Pit of success.** Strongly typed IDs, compiler/typechecker should yell at you if you accidentally pass `ProductID` when the parameter expects `CartItemID`. Call out these patterns.
@@ -29,7 +29,7 @@ You are going to do a guided review such that we can understand small, ordered c
 ### 1. Set the scene (first message)
 
 - **Why does this change exist?** Business reason, bug report, architecture pain — whatever drove the work. Code is an unfortunate means to an end; if the reviewer doesn't know the end, the guided review failed.
-- **Baseline.** What does the codebase look like *before* this change?
+- **Baseline.** What does the codebase look like _before_ this change?
 - **Total diff stats:** `+X -Y` across N files.
 - **Options considered** (if architectural): show A, B, C briefly. State which was picked and why. The reviewer might disagree — give them the chance.
 - Show a small ASCII diagram of the affected area if it helps (call sites, module boundaries, data flow).

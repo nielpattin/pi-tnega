@@ -7,7 +7,6 @@ minimumReleaseAgeExclude:
   - "@mariozechner/*"
   - pi-codex-goal@0.1.18
   - '@observal/pi-insights@1.2.3'
-  - "@biomejs/*"
 allowBuilds:
   "@google/genai": true
   esbuild: true
