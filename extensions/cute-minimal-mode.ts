@@ -178,7 +178,7 @@ export default async function (pi: ExtensionAPI) {
          }
 
          const textContent = result.content.find((c) => c.type === "text");
-         if (!textContent || textContent.type !== "text") {
+         if (textContent?.type !== "text") {
             return new Text("", 0, 0);
          }
 
@@ -216,7 +216,7 @@ export default async function (pi: ExtensionAPI) {
          }
 
          const textContent = result.content.find((c) => c.type === "text");
-         if (!textContent || textContent.type !== "text") {
+         if (textContent?.type !== "text") {
             return new Text("", 0, 0);
          }
 
@@ -301,7 +301,7 @@ export default async function (pi: ExtensionAPI) {
          }
 
          const textContent = result.content.find((c) => c.type === "text");
-         if (!textContent || textContent.type !== "text") {
+         if (textContent?.type !== "text") {
             return new Text("", 0, 0);
          }
 

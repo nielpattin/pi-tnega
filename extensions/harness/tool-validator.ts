@@ -79,7 +79,7 @@ function autoRepairField(field: string, expectedType: string, input: Record<stri
    // Number field got string: parse it
    if (expectedType === "number" && actualType === "string") {
       const parsed = Number(value as string);
-      if (!isNaN(parsed)) {
+      if (!Number.isNaN(parsed)) {
          input[field] = parsed;
          return `${field}: parsed string → number`;
       }

@@ -910,7 +910,7 @@ export default function piMonitorExtension(pi: ExtensionAPI) {
       handler: async (args, ctx) => {
          latestCtx = ctx;
          const raw = args.trim();
-         if (!raw || !raw.includes("::")) {
+         if (!raw?.includes("::")) {
             ctx.ui.notify("Usage: /monitor <description> :: <command>", "warning");
             return;
          }

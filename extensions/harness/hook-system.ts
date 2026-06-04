@@ -128,7 +128,7 @@ class AuditLogger {
       try {
          const dir = join(this.logPath, "..");
          if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-         appendFileSync(this.logPath, JSON.stringify(record) + "\n", "utf-8");
+         appendFileSync(this.logPath, `${JSON.stringify(record)}\n`, "utf-8");
       } catch {
          // best-effort
       }
@@ -456,7 +456,7 @@ export default function (pi: ExtensionAPI) {
          }
          const lines = records.map(
             (r) =>
-               `  [${new Date(r.timestamp).toISOString().slice(11, 19)}] ${r.event} → ${r.toolName}: ${r.outcome}${r.reason ? " (" + r.reason + ")" : ""}`
+               `  [${new Date(r.timestamp).toISOString().slice(11, 19)}] ${r.event} → ${r.toolName}: ${r.outcome}${r.reason ? ` (${r.reason})` : ""}`
          );
          ctx.ui.notify(`Recent audit (${records.length}):\n${lines.join("\n")}`, "info");
       }

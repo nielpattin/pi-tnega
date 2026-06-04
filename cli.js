@@ -5,7 +5,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 function getAmpThreadsDir() {
-   return join(process.env["XDG_DATA_HOME"] ?? join(homedir(), ".local", "share"), "amp", "threads");
+   return join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "amp", "threads");
 }
 function ampAdapter() {
    return {
@@ -135,18 +135,18 @@ async function* parseClaudeJsonl(filePath, context) {
    }
 }
 function extractUserText(entry) {
-   if (entry["type"] === "user") {
-      const message = entry["message"];
+   if (entry.type === "user") {
+      const message = entry.message;
       if (!message) return null;
-      return contentToString(message["content"]);
+      return contentToString(message.content);
    }
-   if (entry["type"] === "human") {
-      const message = entry["message"];
+   if (entry.type === "human") {
+      const message = entry.message;
       if (!message) return null;
-      return contentToString(message["content"]);
+      return contentToString(message.content);
    }
-   if (entry["role"] === "user") {
-      return contentToString(entry["content"]);
+   if (entry.role === "user") {
+      return contentToString(entry.content);
    }
    return null;
 }
@@ -159,8 +159,8 @@ function contentToString(content) {
    return null;
 }
 function extractTimestamp(entry) {
-   if (typeof entry["timestamp"] === "string") return entry["timestamp"];
-   if (typeof entry["createdAt"] === "string") return entry["createdAt"];
+   if (typeof entry.timestamp === "string") return entry.timestamp;
+   if (typeof entry.createdAt === "string") return entry.createdAt;
    return null;
 }
 
@@ -192,14 +192,14 @@ function getVSCodeGlobalStoragePaths() {
          join3(homedir3(), "Library", "Application Support", "Cursor", "User", "globalStorage")
       );
    } else if (process.platform === "linux") {
-      const configBase = process.env["XDG_CONFIG_HOME"] ?? join3(homedir3(), ".config");
+      const configBase = process.env.XDG_CONFIG_HOME ?? join3(homedir3(), ".config");
       paths.push(
          join3(configBase, "Code", "User", "globalStorage"),
          join3(configBase, "Code - Insiders", "User", "globalStorage"),
          join3(configBase, "Cursor", "User", "globalStorage")
       );
    } else {
-      const appData = process.env["APPDATA"] ?? join3(homedir3(), "AppData", "Roaming");
+      const appData = process.env.APPDATA ?? join3(homedir3(), "AppData", "Roaming");
       paths.push(
          join3(appData, "Code", "User", "globalStorage"),
          join3(appData, "Code - Insiders", "User", "globalStorage"),
@@ -304,7 +304,7 @@ async function* parseCodexJsonl(filePath, context) {
          const entry = JSON.parse(line);
          if (entry.type !== "response_item") continue;
          const payload = entry.payload;
-         if (!payload || payload.role !== "user") continue;
+         if (payload?.role !== "user") continue;
          const text = extractText3(payload.content);
          if (!text) continue;
          if (text.startsWith("<environment_context>")) continue;
@@ -334,11 +334,7 @@ import { existsSync as existsSync2 } from "node:fs";
 import { homedir as homedir5 } from "node:os";
 import { join as join5 } from "node:path";
 function getOpencodeDatabasePath() {
-   const xdgPath = join5(
-      process.env["XDG_DATA_HOME"] ?? join5(homedir5(), ".local", "share"),
-      "opencode",
-      "opencode.db"
-   );
+   const xdgPath = join5(process.env.XDG_DATA_HOME ?? join5(homedir5(), ".local", "share"), "opencode", "opencode.db");
    if (existsSync2(xdgPath)) return xdgPath;
    if (process.platform === "darwin") {
       const macPath = join5(homedir5(), "Library", "Application Support", "opencode", "opencode.db");
@@ -387,7 +383,7 @@ function* queryUserMessages(db, options) {
    query += ` ORDER BY m.time_created ASC`;
    const rows = db.prepare(query).all();
    for (const row of rows) {
-      if (!row.text || !row.text.trim()) continue;
+      if (!row.text?.trim()) continue;
       yield {
          text: row.text,
          timestamp: new Date(row.time_created).toISOString(),
@@ -409,7 +405,7 @@ function getZedPaths() {
          db: join6(base2, "db")
       };
    }
-   const base = join6(process.env["XDG_DATA_HOME"] ?? join6(homedir6(), ".local", "share"), "zed");
+   const base = join6(process.env.XDG_DATA_HOME ?? join6(homedir6(), ".local", "share"), "zed");
    return {
       conversations: join6(base, "conversations"),
       db: join6(base, "db")
@@ -494,7 +490,7 @@ async function* parseAgentThreads(dbDir, _options) {
             continue;
          }
          const contentCol = colNames.includes("content") ? "content" : colNames.includes("body") ? "body" : "text";
-         let query = `SELECT "${contentCol}" as text FROM "${msgTable}" WHERE role = 'user'`;
+         const query = `SELECT "${contentCol}" as text FROM "${msgTable}" WHERE role = 'user'`;
          const rows = db.prepare(query).all();
          for (const row of rows) {
             if (!row.text?.trim()) continue;
@@ -552,7 +548,7 @@ async function* parsePiJsonl(filePath, context) {
          }
          if (entry.type !== "message") continue;
          const message = entry.message;
-         if (!message || message.role !== "user") continue;
+         if (message?.role !== "user") continue;
          const text = piContentToString(message.content);
          if (!text) continue;
          const timestamp =
@@ -804,7 +800,7 @@ function createSpinner() {
             clearInterval(timer);
             timer = null;
          }
-         process.stdout.write("\r" + " ".repeat(60) + "\r");
+         process.stdout.write(`\r${" ".repeat(60)}\r`);
       }
    };
 }
@@ -818,7 +814,7 @@ function parseArgs(args) {
          const val = args[++i];
          if (val) {
             options.since = new Date(val);
-            if (isNaN(options.since.getTime())) {
+            if (Number.isNaN(options.since.getTime())) {
                console.error(`invalid date: ${val}`);
                process.exit(1);
             }

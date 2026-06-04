@@ -1,21 +1,16 @@
 {
    "js/ts.tsdk.path": "node_modules/typescript/lib",
-   "oxc.path.tsgolint": "node_modules/.bin/tsgolint.cmd",
-   "editor.defaultFormatter": "oxc.oxc-vscode",
+   "editor.defaultFormatter": "biomejs.biome",
    "editor.formatOnSave": true,
    "editor.formatOnSaveMode": "file",
-   "oxc.fmt.configPath": "oxfmt.config.ts",
-   "oxc.configPath": "oxlint.config.ts",
    "editor.codeActionsOnSave": {
-      "source.format.oxc": "always"
+      "source.fixAll.biome": "explicit"
    },
-   "oxc.requireConfig": true,
-   "oxc.typeAware": true,
-   "oxc.tsConfigPath": "tsconfig.json",
+   "biome.requireConfiguration": true,
    "[json]": {
-      "editor.defaultFormatter": "oxc.oxc-vscode"
+      "editor.defaultFormatter": "biomejs.biome"
    },
    "[jsonc]": {
-      "editor.defaultFormatter": "vscode.json-language-features"
+      "editor.defaultFormatter": "biomejs.biome"
    }
 }

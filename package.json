@@ -1,13 +1,10 @@
 {
    "type": "module",
    "scripts": {
-      "check": "pnpm run fmt:check && pnpm run lint && pnpm run test",
+      "check": "biome check . && pnpm run test",
+      "check:fix": "biome check --write .",
       "test": "vitest run",
       "test:watch": "vitest",
-      "lint": "oxlint -c oxlint.config.ts --no-error-on-unmatched-pattern",
-      "lint:fix": "oxlint -c oxlint.config.ts --fix --no-error-on-unmatched-pattern",
-      "fmt": "oxfmt -c oxfmt.config.ts",
-      "fmt:check": "oxfmt -c oxfmt.config.ts --check",
       "prepare": "husky"
    },
    "dependencies": {
@@ -20,20 +17,17 @@
       "typebox": "^1.1.38"
    },
    "devDependencies": {
+      "@biomejs/biome": "^2.4.16",
       "@types/node": "^25.9.1",
       "husky": "^9.1.7",
       "lint-staged": "^17.0.5",
-      "oxfmt": "^0.51.0",
-      "oxlint": "^1.66.0",
-      "oxlint-tsgolint": "^0.23.0",
       "typescript": "^6.0.3",
       "vitest": "^4.1.7",
       "yoctocolors": "2.1.2"
    },
    "lint-staged": {
-      "*.{js,jsx,ts,tsx,mjs,cjs}": [
-         "pnpm run lint:fix",
-         "pnpm run fmt"
+      "*.{js,jsx,ts,tsx,mjs,cjs,json,jsonc}": [
+         "biome check --write"
       ]
    },
    "packageManager": "pnpm@11.5.0+sha512.dbfcc4f81cf48597afd4bc391ffdf12c11f1a9fb83a395bfa6b0a2d9cc2fd8ffebafdb1ccbd529632153f793904c2615b7f09fe1a345473fd1c35845172a8eb1"

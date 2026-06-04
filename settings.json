@@ -3,9 +3,9 @@
   "compaction": {
     "enabled": false
   },
-  "defaultModel": "mimo-v2.5-pro",
-  "defaultProvider": "xiaomi-token-plan-sgp",
-  "defaultThinkingLevel": "high",
+  "defaultModel": "gpt-5.5",
+  "defaultProvider": "lb",
+  "defaultThinkingLevel": "medium",
   "doubleEscapeAction": "none",
   "editorPaddingX": 0,
   "enableSkillCommands": true,

@@ -234,7 +234,7 @@ function formatCost(value: number): string {
    return `$${value.toFixed(4)}`;
 }
 
-function fit(value: string, width: number, align: "left" | "right" | "center" = "left"): string {
+function fitText(value: string, width: number, align: "left" | "right" | "center" = "left"): string {
    const plain = value.length > width ? `${value.slice(0, Math.max(0, width - 1))}…` : value;
    if (align === "right") return plain.padStart(width);
    if (align === "center") {
@@ -248,7 +248,7 @@ function frame(lines: string[], width: number): string[] {
    const innerWidth = Math.max(20, width - 4);
    return [
       `╭${"─".repeat(innerWidth + 2)}╮`,
-      ...lines.map((line) => `│ ${fit(line, innerWidth)} │`),
+      ...lines.map((line) => `│ ${fitText(line, innerWidth)} │`),
       `╰${"─".repeat(innerWidth + 2)}╯`
    ];
 }
@@ -290,8 +290,8 @@ class MultiSelectModal implements Component {
               })
             : ["No options found."];
       const lines = [
-         fit(title, boxWidth - 4, "center"),
-         fit(help, boxWidth - 4, "center"),
+         fitText(title, boxWidth - 4, "center"),
+         fitText(help, boxWidth - 4, "center"),
          `selected ${this.selected.size}/${this.options.length}`,
          "─".repeat(boxWidth - 4),
          ...body
@@ -402,10 +402,10 @@ class StatsModal implements Component {
       );
 
       const lines = [
-         fit(title, tableWidth - 4, "center"),
-         fit(subtitle, tableWidth - 4, "center"),
-         fit(help, tableWidth - 4, "center"),
-         ...(warnings.length > 0 ? [fit(warnings.join(" · "), tableWidth - 4, "center")] : []),
+         fitText(title, tableWidth - 4, "center"),
+         fitText(subtitle, tableWidth - 4, "center"),
+         fitText(help, tableWidth - 4, "center"),
+         ...(warnings.length > 0 ? [fitText(warnings.join(" · "), tableWidth - 4, "center")] : []),
          "─".repeat(Math.min(tableWidth - 4, header.length)),
          header,
          "─".repeat(Math.min(tableWidth - 4, header.length)),
@@ -430,16 +430,16 @@ class StatsModal implements Component {
 
    private renderRow(row: RenderRow): string {
       return [
-         fit(row.date, 10),
-         fit(row.msgs, 6, "right"),
-         fit(row.input, 11, "right"),
-         fit(row.output, 10, "right"),
-         fit(row.cacheRead, 10, "right"),
-         fit(row.cacheWrite, 12, "right"),
-         fit(row.total, 11, "right"),
-         fit(row.cost, 10, "right"),
-         fit(row.provider, 16),
-         fit(row.model, 24)
+         fitText(row.date, 10),
+         fitText(row.msgs, 6, "right"),
+         fitText(row.input, 11, "right"),
+         fitText(row.output, 10, "right"),
+         fitText(row.cacheRead, 10, "right"),
+         fitText(row.cacheWrite, 12, "right"),
+         fitText(row.total, 11, "right"),
+         fitText(row.cost, 10, "right"),
+         fitText(row.provider, 16),
+         fitText(row.model, 24)
       ].join(" ");
    }
 }
