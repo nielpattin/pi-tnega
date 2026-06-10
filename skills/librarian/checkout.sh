@@ -190,28 +190,60 @@ cache_root="${LIBRARIAN_CACHE_ROOT:-$HOME/.cache/checkouts}"
 checkout_path="$cache_root/$host/$org/$repo"
 origin_url="https://$host/$org/$repo.git"
 
+git_path_arg() {
+  local path="$1"
+  if command -v cygpath >/dev/null 2>&1; then
+    case "$path" in
+      /*) cygpath -w "$path" ;;
+      *) printf '%s' "$path" ;;
+    esac
+  else
+    printf '%s' "$path"
+  fi
+}
+
+git_checkout_path="$(git_path_arg "$checkout_path")"
+
 mkdir -p "$(dirname "$checkout_path")"
 
 if [[ ! -d "$checkout_path/.git" ]]; then
-  git clone --filter=blob:none "$origin_url" "$checkout_path" >/dev/null
+  had_checkout_path=0
+  if [[ -e "$checkout_path" ]]; then
+    had_checkout_path=1
+    if [[ -d "$checkout_path" && -z "$(find "$checkout_path" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+      rmdir "$checkout_path"
+      had_checkout_path=0
+    else
+      echo "error: checkout path exists but is not a git repository: $checkout_path" >&2
+      exit 3
+    fi
+  fi
+
+  if ! git clone --filter=blob:none "$origin_url" "$git_checkout_path" >/dev/null; then
+    if [[ "$had_checkout_path" -eq 0 && -e "$checkout_path" && ! -d "$checkout_path/.git" ]]; then
+      rm -rf "$checkout_path"
+    fi
+    echo "error: failed to clone $origin_url into $checkout_path" >&2
+    exit 3
+  fi
   clone_state="cloned"
 else
   clone_state="existing"
 fi
 
-if [[ ! -d "$checkout_path/.git" ]]; then
+if ! git -C "$git_checkout_path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "error: checkout path is not a git repository: $checkout_path" >&2
   exit 3
 fi
 
-if ! git -C "$checkout_path" remote get-url origin >/dev/null 2>&1; then
-  git -C "$checkout_path" remote add origin "$origin_url"
+if ! git -C "$git_checkout_path" remote get-url origin >/dev/null 2>&1; then
+  git -C "$git_checkout_path" remote add origin "$origin_url"
 fi
 
 # If remote URL changed (e.g. host shorthand), normalize to canonical HTTPS URL.
-current_origin="$(git -C "$checkout_path" remote get-url origin 2>/dev/null || true)"
+current_origin="$(git -C "$git_checkout_path" remote get-url origin 2>/dev/null || true)"
 if [[ "$current_origin" != "$origin_url" ]]; then
-  git -C "$checkout_path" remote set-url origin "$origin_url"
+  git -C "$git_checkout_path" remote set-url origin "$origin_url"
 fi
 
 last_fetch_file="$checkout_path/.git/librarian-last-fetch"
@@ -232,16 +264,16 @@ update_state="skipped"
 ff_state="not-attempted"
 
 if (( needs_update == 1 )); then
-  git -C "$checkout_path" fetch --prune --tags origin >/dev/null
+  git -C "$git_checkout_path" fetch --prune --tags origin >/dev/null
   echo "$now_epoch" > "$last_fetch_file"
   update_state="fetched"
 
-  branch="$(git -C "$checkout_path" symbolic-ref --short -q HEAD 2>/dev/null || true)"
-  upstream="$(git -C "$checkout_path" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
-  dirty="$(git -C "$checkout_path" status --porcelain --untracked-files=no)"
+  branch="$(git -C "$git_checkout_path" symbolic-ref --short -q HEAD 2>/dev/null || true)"
+  upstream="$(git -C "$git_checkout_path" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+  dirty="$(git -C "$git_checkout_path" status --porcelain --untracked-files=no)"
 
   if [[ -n "$branch" && -n "$upstream" && -z "$dirty" ]]; then
-    if git -C "$checkout_path" merge --ff-only "$upstream" >/dev/null 2>&1; then
+    if git -C "$git_checkout_path" merge --ff-only "$upstream" >/dev/null 2>&1; then
       ff_state="fast-forwarded"
     else
       ff_state="skipped-non-ff"

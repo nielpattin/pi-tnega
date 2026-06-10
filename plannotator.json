@@ -1,0 +1,22 @@
+{
+   "defaults": {
+      "model": { "provider": "opencode-go", "id": "deepseek-v4-flash" },
+      "thinking": "xhigh"
+   },
+   "phases": {
+      "planning": {
+         "model": { "provider": "lb", "id": "gpt-5.5" },
+         "thinking": "xhigh",
+         "activeTools": ["grep", "find", "ls", "plannotator_submit_plan"],
+         "statusLabel": "⏸ plan"
+      },
+      "executing": {
+         "model": { "provider": "lb", "id": "gpt-5.5" },
+         "thinking": "xhigh",
+         "statusLabel": "▶ exec"
+      },
+      "reviewing": {
+         "statusLabel": "🔍 review"
+      }
+   }
+}

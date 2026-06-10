@@ -174,3 +174,6 @@ docs/
 .pi/file-history/
 
 openspec/
+trust.json
+pi-agent.code-workspace
+exa-mcp-cache

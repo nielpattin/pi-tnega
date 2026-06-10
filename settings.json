@@ -6,31 +6,16 @@
   "defaultModel": "mimo-v2.5-pro",
   "defaultProvider": "xiaomi-token-plan-sgp",
   "defaultThinkingLevel": "high",
-  "doubleEscapeAction": "none",
+  "doubleEscapeAction": "tree",
   "editorPaddingX": 0,
   "enableSkillCommands": true,
   "enabledModels": [
-    "github-copilot/gpt-5.4-mini",
-    "github-copilot/claude-haiku-4.5",
-    "github-copilot/gemini-3-flash-preview",
-    "github-copilot/gemini-3.1-pro-preview",
     "xiaomi-token-plan-sgp/mimo-v2.5-pro",
     "xiaomi-token-plan-sgp/mimo-v2.5",
     "deepseek/deepseek-v4-flash",
-    "deepseek/deepseek-v4-pro",
     "opencode-go/deepseek-v4-flash",
-    "command-code/moonshotai/Kimi-K2.6",
-    "command-code/deepseek/deepseek-v4-pro",
-    "command-code/Qwen/Qwen3.6-Max-Preview",
-    "command-code/deepseek/deepseek-v4-flash",
     "opencode-go/kimi-k2.6",
-    "opencode-go/glm-5.1",
-    "opencode-go/deepseek-v4-pro",
-    "opencode-go/qwen3.6-plus",
-    "lb/gpt-5.5",
-    "lb/gpt-5.4-mini",
-    "lb/gpt-5.3-codex",
-    "command-code/stepfun/Step-3.7-Flash"
+    "lb/codex/gpt-5.5"
   ],
   "extensions": [
     "-extensions\\web-reader.ts",
@@ -39,7 +24,6 @@
     "-extensions\\stats.ts",
     "-extensions\\rg-guard.ts",
     "-extensions\\batch-read.ts",
-    "+extensions\\pi-command-code-provider\\index.ts",
     "-extensions\\pi-rtk\\index.ts",
     "+extensions\\tps.ts",
     "+extensions\\notification\\index.ts",
@@ -52,16 +36,18 @@
     "-extensions\\pi-permission-system\\index.ts",
     "-extensions\\pi-explorer\\index.ts",
     "-extensions\\pi-event-monitor\\index.ts",
-    "+extensions\\pi-intercom\\index.ts",
-    "+extensions\\temperature.ts",
-    "-extensions\\tool-selector\\index.ts"
+    "+extensions\\pi-exa\\src\\index.ts",
+    "-extensions\\tool-selector\\index.ts",
+    "-extensions\\temperature.ts",
+    "-extensions\\pi-intercom\\index.ts",
+    "-extensions\\pi-command-code-provider\\index.ts"
   ],
   "followUpMode": "all",
   "hideThinkingBlock": true,
   "images": {
     "autoResize": true
   },
-  "lastChangelogVersion": "0.78.0",
+  "lastChangelogVersion": "0.79.1",
   "packages": [
     {
       "source": "git:github.com/Jon-Vii/pi-imagegen",
@@ -119,7 +105,14 @@
     },
     {
       "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-magic-context"
-    }
+    },
+    {
+      "source": "npm:@alexanderfortin/pi-token-usage",
+      "extensions": [
+        "+dist\\index.js"
+      ]
+    },
+    "npm:@plannotator/pi-extension"
   ],
   "prompts": [
     "+prompts\\commit.md"
@@ -163,7 +156,7 @@
     "-themes\\nord.json"
   ],
   "transport": "auto",
-  "treeFilterMode": "no-tools",
+  "treeFilterMode": "default",
   "retry": {
     "enabled": true,
     "maxRetries": 8
@@ -192,5 +185,8 @@
     "readStyle": true,
     "hashline": true
   },
-  "httpIdleTimeoutMs": 0
+  "httpIdleTimeoutMs": 0,
+  "showHardwareCursor": true,
+  "autocompleteMaxVisible": 20,
+  "defaultProjectTrust": "always"
 }

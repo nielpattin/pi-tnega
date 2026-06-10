@@ -34,7 +34,7 @@ bash "C:/Users/niel/.pi/agent/skills/librarian/checkout.sh" github.com/niel/pi-t
 bash "C:/Users/niel/.pi/agent/skills/librarian/checkout.sh" https://github.com/niel/pi-tnega --path-only
 ```
 
-> **Note**: Use POSIX-style path (forward slashes) for Git for Windows bash. Do not rely on `cd` to the skill directory — the script self-locates via `BASH_SOURCE[0]`.
+> **Note**: Use POSIX-style path (forward slashes) when invoking the script from Git Bash. The script self-locates via `BASH_SOURCE[0]` and converts cache paths internally for native Git for Windows, so `MSYS_NO_PATHCONV=1` does not need to be changed by the user.
 
 The script will:
 1. Parse the repo reference into host/org/repo.

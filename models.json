@@ -1,13 +1,13 @@
 {
    "providers": {
       "lb": {
-         "apiKey": "$LB_API_KEY",
+         "apiKey": "$LLM_PROXY_API_KEY",
          "api": "openai-responses",
-         "baseUrl": "http://127.0.0.1:2455/v1",
+         "baseUrl": "http://localhost:8000/v1",
          "models": [
             {
-               "id": "gpt-5.5",
-               "name": "gpt-5.5",
+               "id": "codex/gpt-5.5",
+               "name": "Codex GPT-5.5",
                "reasoning": true,
                "thinkingLevelMap": {
                   "off": "off",
@@ -28,8 +28,8 @@
                }
             },
             {
-               "id": "gpt-5.3-codex",
-               "name": "gpt-5.3-codex",
+               "id": "codex/gpt-5.3-codex",
+               "name": "Codex GPT-5.3",
                "reasoning": true,
                "thinkingLevelMap": {
                   "off": "off",
@@ -50,8 +50,8 @@
                }
             },
             {
-               "id": "gpt-5.4-mini",
-               "name": "gpt-5.4-mini",
+               "id": "codex/gpt-5.4-mini",
+               "name": "Codex GPT-5.4 Mini",
                "reasoning": true,
                "thinkingLevelMap": {
                   "off": "off",
