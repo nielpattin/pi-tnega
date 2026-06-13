@@ -6,16 +6,18 @@
    "phases": {
       "planning": {
          "model": { "provider": "lb", "id": "gpt-5.5" },
-         "thinking": "xhigh",
+         "thinking": "high",
          "activeTools": ["grep", "find", "ls", "plannotator_submit_plan"],
          "statusLabel": "⏸ plan"
       },
       "executing": {
          "model": { "provider": "lb", "id": "gpt-5.5" },
-         "thinking": "xhigh",
+         "thinking": "high",
          "statusLabel": "▶ exec"
       },
       "reviewing": {
+         "model": { "provider": "opencode-go", "id": "deepseek-v4-flash" },
+         "thinking": "xhigh",
          "statusLabel": "🔍 review"
       }
    }

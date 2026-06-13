@@ -71,6 +71,8 @@ web_modules/
 .env.*
 !.env.example
 
+.google-workspace/
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache
@@ -177,3 +179,5 @@ openspec/
 trust.json
 pi-agent.code-workspace
 exa-mcp-cache
+plans/
+__pycache__/
