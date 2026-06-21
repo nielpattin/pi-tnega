@@ -70,11 +70,21 @@ const RAW_MODELS = [
       id: "claude-sonnet-4-6",
       name: "Claude Sonnet 4.6",
       description: "best combo of speed & intelligence (recommended)",
-      reasoning: true,
+      reasoning: false,
       thinkingLevelMap: ANTHROPIC_REASONING_MAP,
       contextWindow: 1000000,
       maxTokens: 64000,
       cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }
+   },
+   {
+      id: "claude-fable-5",
+      name: "Claude Fable 5",
+      description: "newest frontier model for agents and coding",
+      reasoning: true,
+      thinkingLevelMap: ANTHROPIC_OPUS_4_7_REASONING_MAP,
+      contextWindow: 1000000,
+      maxTokens: 128000,
+      cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 }
    },
    {
       id: "claude-opus-4-8",
@@ -156,6 +166,15 @@ const RAW_MODELS = [
       cost: { input: 0.95, output: 4, cacheRead: 0.16, cacheWrite: 0 }
    },
    {
+      id: "moonshotai/Kimi-K2.7-Code",
+      name: "Kimi K2.7 Code",
+      description: "code-specialized long-horizon reasoning",
+      reasoning: true,
+      contextWindow: 256000,
+      maxTokens: 262144,
+      cost: { input: 0.95, output: 4, cacheRead: 0.16, cacheWrite: 0 }
+   },
+   {
       id: "moonshotai/Kimi-K2.5",
       name: "Kimi K2.5",
       description: "multimodal frontend coding",
@@ -168,7 +187,7 @@ const RAW_MODELS = [
       id: "zai-org/GLM-5.1",
       name: "GLM 5.1",
       description: "long-horizon autonomous coding agent",
-      reasoning: true,
+      reasoning: false,
       contextWindow: 200000,
       maxTokens: 131072,
       cost: { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 }
@@ -261,16 +280,6 @@ const RAW_MODELS = [
       cost: { input: 0.5, output: 3, cacheRead: 0.1, cacheWrite: 0 }
    },
    {
-      id: "Qwen/Qwen3.7-Max-Free",
-      name: "Qwen 3.7 Max",
-      description: "frontier coding & long-horizon agent execution (free)",
-      reasoning: true,
-      thinkingLevelMap: COMMAND_CODE_AUTO_REASONING_MAP,
-      contextWindow: 1000000,
-      maxTokens: 65536,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
-   },
-   {
       id: "Qwen/Qwen3.7-Plus",
       name: "Qwen 3.7 Plus",
       description: "frontier coding & long-horizon agent execution",
@@ -337,6 +346,16 @@ const RAW_MODELS = [
       contextWindow: 1000000,
       maxTokens: 131072,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+   },
+   {
+      id: "nvidia/nemotron-3-ultra-550b-a55b",
+      name: "Nemotron 3 Ultra",
+      description: "frontier reasoning model",
+      reasoning: true,
+      thinkingLevelMap: COMMAND_CODE_AUTO_REASONING_MAP,
+      contextWindow: 1000000,
+      maxTokens: 131072,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
    }
 ] satisfies Array<Omit<CommandCodeProviderModelConfig, "api" | "input">>;
 
@@ -345,7 +364,7 @@ export const COMMAND_CODE_DEFAULTS = {
    displayName: "CommandCode",
    upstreamUrl: "https://api.commandcode.ai",
    apiKey: "$COMMAND_CODE_TOKEN",
-   commandCodeVersion: "0.31.2",
+   commandCodeVersion: "0.37.2",
    requestTimeoutMs: 300_000,
    memory: "",
    headers: {} as Record<string, string>

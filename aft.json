@@ -1,0 +1,12 @@
+{
+   "$schema": "https://raw.githubusercontent.com/cortexkit/aft/main/assets/aft.schema.json",
+   "search_index": true,
+   "semantic_search": true,
+   "bash": {
+      "compress": true,
+      "background": true
+   },
+   "inspect": {
+      "enabled": true
+   }
+}

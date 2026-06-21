@@ -3,9 +3,6 @@
   "compaction": {
     "enabled": false
   },
-  "defaultModel": "deepseek-v4-pro",
-  "defaultProvider": "opencode-go",
-  "defaultThinkingLevel": "xhigh",
   "doubleEscapeAction": "tree",
   "editorPaddingX": 0,
   "enableSkillCommands": true,
@@ -13,10 +10,7 @@
     "xiaomi-token-plan-sgp/mimo-v2.5-pro",
     "xiaomi-token-plan-sgp/mimo-v2.5",
     "deepseek/deepseek-v4-flash",
-    "opencode-go/deepseek-v4-flash",
-    "opencode-go/kimi-k2.6",
-    "opencode-go/deepseek-v4-pro",
-    "lb/gpt-5.5"
+    "opencode/deepseek-v4-flash-free"
   ],
   "extensions": [
     "-extensions\\web-reader.ts",
@@ -27,8 +21,6 @@
     "-extensions\\batch-read.ts",
     "-extensions\\pi-rtk\\index.ts",
     "+extensions\\tps.ts",
-    "+extensions\\notification\\index.ts",
-    "-extensions\\kinda\\index.ts",
     "-extensions\\git-guard.ts",
     "-extensions\\harness\\index.ts",
     "-extensions\\goal.ts",
@@ -37,47 +29,34 @@
     "-extensions\\pi-permission-system\\index.ts",
     "-extensions\\pi-explorer\\index.ts",
     "-extensions\\pi-event-monitor\\index.ts",
-    "+extensions\\pi-exa\\src\\index.ts",
     "-extensions\\tool-selector\\index.ts",
     "-extensions\\temperature.ts",
     "-extensions\\pi-intercom\\index.ts",
-    "-extensions\\pi-command-code-provider\\index.ts"
+    "-extensions\\pi-command-code-provider\\index.ts",
+    "-extensions\\kinda\\index.ts",
+    "-extensions\\pi-exa\\src\\index.ts",
+    "-extensions\\startup-timer.ts",
+    "-extensions\\treepluss\\index.ts",
+    "-extensions\\pi-mcp-adapter\\index.ts",
+    "+extensions\\notification\\index.ts"
   ],
   "followUpMode": "all",
   "hideThinkingBlock": true,
   "images": {
     "autoResize": true
   },
-  "lastChangelogVersion": "0.79.2",
+  "lastChangelogVersion": "0.79.9",
   "packages": [
-    {
-      "source": "git:github.com/Jon-Vii/pi-imagegen",
-      "extensions": [
-        "-imagegen.ts"
-      ]
-    },
-    {
-      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-caveman",
-      "extensions": [
-        "-index.ts"
-      ],
-      "skills": [
-        "-skills\\caveman\\SKILL.md",
-        "-skills\\caveman-commit\\SKILL.md",
-        "-skills\\caveman-review\\SKILL.md",
-        "-skills\\compress\\SKILL.md"
-      ]
-    },
     {
       "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-simplify",
       "extensions": [
-        "+src\\index.ts"
+        "-src\\index.ts"
       ]
     },
     {
       "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-station",
       "extensions": [
-        "+index.ts"
+        "-index.ts"
       ]
     },
     {
@@ -89,53 +68,31 @@
     {
       "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-subagents",
       "extensions": [
-        "+src\\index.ts"
-      ]
-    },
-    {
-      "source": "npm:pi-codex-goal@0.1.18",
-      "extensions": [
-        "-src\\index.ts"
-      ]
-    },
-    {
-      "source": "npm:@observal/pi-insights@1.2.3",
-      "extensions": [
-        "-"
-      ]
-    },
-    {
-      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-magic-context"
-    },
-    {
-      "source": "npm:@alexanderfortin/pi-token-usage",
-      "extensions": [
+        "+dist\\src\\index.js",
         "-dist\\index.js"
       ]
     },
-    "npm:@plannotator/pi-extension"
+    {
+      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-magic-context",
+      "extensions": [
+        "-dist\\src\\index.js"
+      ]
+    },
+    {
+      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-multi-auth",
+      "extensions": [
+        "+index.ts"
+      ]
+    },
+    "npm:@plannotator/pi-extension",
+    "npm:@cortexkit/pi-magic-context@latest",
+    "npm:@cortexkit/aft-pi"
   ],
   "prompts": [
-    "+prompts\\commit.md"
+    "-prompts\\commit.md"
   ],
   "quietStartup": false,
-  "skills": [
-    "-skills\\writing-git-commits\\SKILL.md",
-    "-skills\\update-pi\\SKILL.md",
-    "-skills\\figma-use\\SKILL.md",
-    "+skills\\agent-browser\\SKILL.md",
-    "-skills\\playwriter\\SKILL.md",
-    "-skills\\brainstorming\\SKILL.md",
-    "-skills\\using-superpowers\\SKILL.md",
-    "+skills\\distill\\SKILL.md",
-    "-skills\\drawio-diagrams-enhanced\\SKILL.md",
-    "-skills\\drawio-skill\\SKILL.md",
-    "+skills\\extract\\SKILL.md",
-    "+skills\\librarian\\SKILL.md",
-    "-skills\\grill-me\\SKILL.md",
-    "+skills\\to-prd\\SKILL.md",
-    "+skills\\zoom-out\\SKILL.md"
-  ],
+  "skills": [],
   "steeringMode": "all",
   "terminal": {
     "clearOnShrink": false,
@@ -189,5 +146,7 @@
   "httpIdleTimeoutMs": 0,
   "showHardwareCursor": true,
   "autocompleteMaxVisible": 20,
-  "defaultProjectTrust": "always"
+  "defaultProjectTrust": "always",
+  "defaultProvider": "opencode",
+  "defaultModel": "deepseek-v4-flash-free"
 }

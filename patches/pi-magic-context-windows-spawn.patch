@@ -1,0 +1,3488 @@
+diff --git a/node_modules/.pnpm/@cortexkit+pi-magic-context@0.24.1/node_modules/@cortexkit/pi-magic-context/dist/index.js b/npm/node_modules/@cortexkit/pi-magic-context/dist/index.js
+index 11337d0..050b868 100644
+--- a/node_modules/.pnpm/@cortexkit+pi-magic-context@0.24.1/node_modules/@cortexkit/pi-magic-context/dist/index.js
++++ b/npm/node_modules/@cortexkit/pi-magic-context/dist/index.js
+@@ -8275,6 +8275,14 @@ function buildNodeSqliteDatabaseClass(DatabaseSync) {
+       }
+       super(typeof filename === "string" ? filename : ":memory:", translated);
+     }
++    prepare(sql) {
++      const stmt = super.prepare(sql);
++      for (const method of ["run", "get", "all"]) {
++        const original = stmt[method].bind(stmt);
++        stmt[method] = (...args) => args.length === 1 && Array.isArray(args[0]) ? original(...args[0]) : original(...args);
++      }
++      return stmt;
++    }
+     transaction(fn) {
+       const self = this;
+       const wrapped = function(...args) {
+@@ -141059,6 +141067,8 @@ function readRawSessionTailFromDb(db, sessionId, baseOrdinal, anchorMessageId) {
+ var encoder = new TextEncoder;
+ var TAG_PREFIX_REGEX = /^(?:§\d+§\s*)+/;
+ var MALFORMED_TAG_PREFIX_REGEX = /^(?:§\d+">§(?:\d+§)?\s*)+/;
++var DANGLING_TAG_GLOBAL_REGEX = /\u00a7\d+(?!\.\d)[^\s\u00a7\w.]?/g;
++var DANGLING_TAG_PREFIX_REGEX = /^(?:\u00a7\d+(?!\.\d)[^\s\u00a7\w.]?\s*)+/;
+ var COMPLETE_TAG_PAIR_GLOBAL_REGEX = /\u00a7\d+\u00a7/g;
+ var MALFORMED_TAG_GLOBAL_REGEX = /\u00a7\d+">(?:\u00a7(?:\d+\u00a7)?)?/g;
+ var STRAY_SECTION_CHAR_REGEX = /\u00a7/g;
+@@ -141071,6 +141081,9 @@ function stripCompleteTagPairsGlobally(value) {
+ function stripMalformedTagNotationGlobally(value) {
+   return value.replace(MALFORMED_TAG_GLOBAL_REGEX, "");
+ }
++function stripDanglingTagNotationGlobally(value) {
++  return value.replace(DANGLING_TAG_GLOBAL_REGEX, "");
++}
+ function stripTagSectionCharacters(value) {
+   return value.replace(STRAY_SECTION_CHAR_REGEX, "");
+ }
+@@ -141078,6 +141091,7 @@ function stripPersistedAssistantText(value) {
+   let text = stripWellFormedLeadingTagPrefix(value);
+   text = stripCompleteTagPairsGlobally(text);
+   text = stripMalformedTagNotationGlobally(text);
++  text = stripDanglingTagNotationGlobally(text);
+   text = stripTagSectionCharacters(text);
+   return text.trim();
+ }
+@@ -141090,6 +141104,7 @@ function stripTagPrefix(value) {
+     const prev = stripped;
+     stripped = stripped.replace(MALFORMED_TAG_PREFIX_REGEX, "");
+     stripped = stripped.replace(TAG_PREFIX_REGEX, "");
++    stripped = stripped.replace(DANGLING_TAG_PREFIX_REGEX, "");
+     if (stripped === prev)
+       break;
+   }
+@@ -141197,6 +141212,24 @@ class ToolMutationBatch {
+ }
+ 
+ // ../plugin/src/hooks/magic-context/read-session-chunk.ts
++var BLOCK_TOKEN_MEMO_MAX = 2048;
++var blockTokenMemo = new Map;
++function estimateBlockTokens(blockText) {
++  const cached = blockTokenMemo.get(blockText);
++  if (cached !== undefined) {
++    blockTokenMemo.delete(blockText);
++    blockTokenMemo.set(blockText, cached);
++    return cached;
++  }
++  const count = estimateTokens(blockText);
++  if (blockTokenMemo.size >= BLOCK_TOKEN_MEMO_MAX) {
++    const oldest = blockTokenMemo.keys().next().value;
++    if (oldest !== undefined)
++      blockTokenMemo.delete(oldest);
++  }
++  blockTokenMemo.set(blockText, count);
++  return count;
++}
+ var activeRawMessageCache = null;
+ var activeAbsoluteCountCache = null;
+ var sessionProviders = new Map;
+@@ -141379,7 +141412,7 @@ function readSessionChunk(sessionId, tokenBudget, offset = 1, eligibleEndOrdinal
+     if (!currentBlock)
+       return true;
+     const blockText = formatBlock(currentBlock);
+-    const blockTokens = estimateTokens(blockText);
++    const blockTokens = estimateBlockTokens(blockText);
+     if (totalTokens + blockTokens > tokenBudget && totalTokens > 0) {
+       return false;
+     }
+@@ -141957,6 +141990,7 @@ var SESSION_META_SELECT_COLUMNS = [
+   "conversation_tokens",
+   "tool_call_tokens",
+   "cleared_reasoning_through_tag",
++  "tool_reclaim_watermark",
+   "last_todo_state",
+   "cached_m0_bytes",
+   "cached_m1_bytes",
+@@ -141983,6 +142017,8 @@ var SESSION_META_SELECT_COLUMNS = [
+   "recovery_no_eligible_head_count",
+   "force_emergency_bypass_window_start",
+   "force_emergency_bypass_used",
++  "emergency_drain_active",
++  "historian_drain_failure_at",
+   "upgrade_reminded_at",
+   "pi_stable_id_scheme"
+ ];
+@@ -142005,6 +142041,7 @@ var META_COLUMNS = {
+   conversationTokens: "conversation_tokens",
+   toolCallTokens: "tool_call_tokens",
+   clearedReasoningThroughTag: "cleared_reasoning_through_tag",
++  toolReclaimWatermark: "tool_reclaim_watermark",
+   lastTodoState: "last_todo_state",
+   cachedM0Bytes: "cached_m0_bytes",
+   cachedM1Bytes: "cached_m1_bytes",
+@@ -142031,6 +142068,8 @@ var META_COLUMNS = {
+   recoveryNoEligibleHeadCount: "recovery_no_eligible_head_count",
+   forceEmergencyBypassWindowStart: "force_emergency_bypass_window_start",
+   forceEmergencyBypassUsed: "force_emergency_bypass_used",
++  emergencyDrainActive: "emergency_drain_active",
++  historianDrainFailureAt: "historian_drain_failure_at",
+   upgradeRemindedAt: "upgrade_reminded_at",
+   piStableIdScheme: "pi_stable_id_scheme"
+ };
+@@ -142073,7 +142112,7 @@ function isSessionMetaRow(row) {
+   if (row === null || typeof row !== "object")
+     return false;
+   const r = row;
+-  return typeof r.session_id === "string" && typeof r.last_response_time === "number" && isStringOrNull(r.cache_ttl) && typeof r.counter === "number" && typeof r.last_nudge_tokens === "number" && isStringOrNull(r.last_nudge_band) && isStringOrNull(r.last_transform_error) && typeof r.is_subagent === "number" && typeof r.last_context_percentage === "number" && typeof r.last_input_tokens === "number" && isNumberOrNull(r.observed_safe_input_tokens) && isNumberOrNull(r.cache_alert_sent) && isNumberOrNull(r.times_execute_threshold_reached) && isNumberOrNull(r.compartment_in_progress) && (r.system_prompt_hash === null || typeof r.system_prompt_hash === "string" || typeof r.system_prompt_hash === "number") && isNumberOrNull(r.system_prompt_tokens) && isNumberOrNull(r.conversation_tokens) && isNumberOrNull(r.tool_call_tokens) && isNumberOrNull(r.cleared_reasoning_through_tag) && isStringOrNull(r.last_todo_state) && isBlobOrNull(r.cached_m0_bytes) && isBlobOrNull(r.cached_m1_bytes) && isNumberOrNull(r.cached_m0_project_memory_epoch) && isStringOrNull(r.cached_m0_workspace_fingerprint) && isNumberOrNull(r.cached_m0_project_user_profile_version) && isNumberOrNull(r.cached_m0_max_compartment_seq) && isNumberOrNull(r.cached_m0_max_memory_id) && isNumberOrNull(r.cached_m0_max_mutation_id) && isNumberOrNull(r.cached_m0_max_memory_mutation_id) && isStringOrNull(r.cached_m0_project_docs_hash) && isNumberOrNull(r.cached_m0_materialized_at) && isNumberOrNull(r.cached_m0_session_facts_version) && isStringOrNull(r.cached_m0_upgrade_state) && isStringOrNull(r.cached_m0_system_hash) && isStringOrNull(r.cached_m0_tool_set_hash) && isStringOrNull(r.cached_m0_model_key) && isStringOrNull(r.last_observed_model_key) && isNumberOrNull(r.last_usage_context_limit) && isNumberOrNull(r.prior_boundary_ordinal) && isNumberOrNull(r.protected_tail_policy_version) && isNumberOrNull(r.protected_tail_drain_window_started_at) && isNumberOrNull(r.protected_tail_drain_tokens) && isNumberOrNull(r.recovery_no_eligible_head_count) && isNumberOrNull(r.force_emergency_bypass_window_start) && isNumberOrNull(r.force_emergency_bypass_used) && isNumberOrNull(r.upgrade_reminded_at) && isNumberOrNull(r.pi_stable_id_scheme);
++  return typeof r.session_id === "string" && typeof r.last_response_time === "number" && isStringOrNull(r.cache_ttl) && typeof r.counter === "number" && typeof r.last_nudge_tokens === "number" && isStringOrNull(r.last_nudge_band) && isStringOrNull(r.last_transform_error) && typeof r.is_subagent === "number" && typeof r.last_context_percentage === "number" && typeof r.last_input_tokens === "number" && isNumberOrNull(r.observed_safe_input_tokens) && isNumberOrNull(r.cache_alert_sent) && isNumberOrNull(r.times_execute_threshold_reached) && isNumberOrNull(r.compartment_in_progress) && (r.system_prompt_hash === null || typeof r.system_prompt_hash === "string" || typeof r.system_prompt_hash === "number") && isNumberOrNull(r.system_prompt_tokens) && isNumberOrNull(r.conversation_tokens) && isNumberOrNull(r.tool_call_tokens) && isNumberOrNull(r.cleared_reasoning_through_tag) && isStringOrNull(r.last_todo_state) && isBlobOrNull(r.cached_m0_bytes) && isBlobOrNull(r.cached_m1_bytes) && isNumberOrNull(r.cached_m0_project_memory_epoch) && isStringOrNull(r.cached_m0_workspace_fingerprint) && isNumberOrNull(r.cached_m0_project_user_profile_version) && isNumberOrNull(r.cached_m0_max_compartment_seq) && isNumberOrNull(r.cached_m0_max_memory_id) && isNumberOrNull(r.cached_m0_max_mutation_id) && isNumberOrNull(r.cached_m0_max_memory_mutation_id) && isStringOrNull(r.cached_m0_project_docs_hash) && isNumberOrNull(r.cached_m0_materialized_at) && isNumberOrNull(r.cached_m0_session_facts_version) && isStringOrNull(r.cached_m0_upgrade_state) && isStringOrNull(r.cached_m0_system_hash) && isStringOrNull(r.cached_m0_tool_set_hash) && isStringOrNull(r.cached_m0_model_key) && isStringOrNull(r.last_observed_model_key) && isNumberOrNull(r.last_usage_context_limit) && isNumberOrNull(r.prior_boundary_ordinal) && isNumberOrNull(r.protected_tail_policy_version) && isNumberOrNull(r.protected_tail_drain_window_started_at) && isNumberOrNull(r.protected_tail_drain_tokens) && isNumberOrNull(r.recovery_no_eligible_head_count) && isNumberOrNull(r.force_emergency_bypass_window_start) && isNumberOrNull(r.force_emergency_bypass_used) && isNumberOrNull(r.upgrade_reminded_at) && isNumberOrNull(r.pi_stable_id_scheme) && isNumberOrNull(r.tool_reclaim_watermark);
+ }
+ function getDefaultSessionMeta(sessionId) {
+   return {
+@@ -142096,6 +142135,7 @@ function getDefaultSessionMeta(sessionId) {
+     conversationTokens: 0,
+     toolCallTokens: 0,
+     clearedReasoningThroughTag: 0,
++    toolReclaimWatermark: 0,
+     lastTodoState: "",
+     cachedM0Bytes: null,
+     cachedM1Bytes: null,
+@@ -142159,6 +142199,7 @@ function toSessionMeta(row) {
+     conversationTokens: numOrZero(row.conversation_tokens),
+     toolCallTokens: numOrZero(row.tool_call_tokens),
+     clearedReasoningThroughTag: numOrZero(row.cleared_reasoning_through_tag),
++    toolReclaimWatermark: numOrZero(row.tool_reclaim_watermark),
+     lastTodoState: lastTodoStateRaw,
+     cachedM0Bytes: toBufferOrNull(row.cached_m0_bytes),
+     cachedM1Bytes: toBufferOrNull(row.cached_m1_bytes),
+@@ -142930,8 +142971,9 @@ function backfillToolOwnersInChunks(db, result) {
+ var databases = new Map;
+ var persistenceByDatabase = new WeakMap;
+ var persistenceErrorByDatabase = new WeakMap;
++var pathByDatabase = new WeakMap;
+ var lastSchemaFenceRejection = null;
+-var LATEST_SUPPORTED_VERSION = 36;
++var LATEST_SUPPORTED_VERSION = 38;
+ function resolveDatabasePath(dbPathOverride) {
+   if (dbPathOverride) {
+     return { dbDir: dirname2(dbPathOverride), dbPath: dbPathOverride };
+@@ -142944,6 +142986,9 @@ function resolveDatabasePath(dbPathOverride) {
+   const dbDir = getMagicContextStorageDir();
+   return { dbDir, dbPath: join5(dbDir, "context.db") };
+ }
++function getDatabasePath(db) {
++  return pathByDatabase.get(db) ?? null;
++}
+ function migrateLegacyStorageIfNeeded(targetDbPath, targetDbDir) {
+   if (existsSync4(targetDbPath))
+     return;
+@@ -143458,6 +143503,8 @@ CREATE INDEX IF NOT EXISTS idx_dream_queue_pending ON dream_queue(started_at, en
+       recovery_no_eligible_head_count INTEGER NOT NULL DEFAULT 0,
+       force_emergency_bypass_window_start INTEGER NOT NULL DEFAULT 0,
+       force_emergency_bypass_used INTEGER NOT NULL DEFAULT 0,
++      emergency_drain_active INTEGER NOT NULL DEFAULT 0,
++      historian_drain_failure_at INTEGER NOT NULL DEFAULT 0,
+       cached_m0_materialized_at INTEGER,
+       cached_m0_session_facts_version INTEGER,
+       cached_m0_upgrade_state TEXT,
+@@ -143521,6 +143568,23 @@ CREATE INDEX IF NOT EXISTS idx_dream_queue_pending ON dream_queue(started_at, en
+     CREATE INDEX IF NOT EXISTS idx_historian_runs_status
+       ON historian_runs(status, created_at DESC);
+ 
++    CREATE TABLE IF NOT EXISTS transform_decisions (
++      session_id         TEXT    NOT NULL,
++      harness            TEXT    NOT NULL DEFAULT 'opencode',
++      message_id         TEXT    NOT NULL,
++      ts_ms              INTEGER NOT NULL,
++      decision           TEXT    NOT NULL,
++      materialized       INTEGER NOT NULL DEFAULT 0,
++      materialize_reason TEXT,
++      emergency          INTEGER NOT NULL DEFAULT 0,
++      dropped_tokens     INTEGER NOT NULL DEFAULT 0,
++      dropped_count      INTEGER NOT NULL DEFAULT 0,
++      input_tokens       INTEGER NOT NULL DEFAULT 0,
++      PRIMARY KEY (session_id, harness, message_id)
++    );
++    CREATE INDEX IF NOT EXISTS idx_transform_decisions_session_harness
++      ON transform_decisions(session_id, harness);
++
+     CREATE INDEX IF NOT EXISTS idx_tags_session_tag_number ON tags(session_id, tag_number);
+     CREATE INDEX IF NOT EXISTS idx_tags_session_message_id ON tags(session_id, message_id);
+     CREATE INDEX IF NOT EXISTS idx_pending_ops_session ON pending_ops(session_id);
+@@ -143598,6 +143662,7 @@ CREATE INDEX IF NOT EXISTS idx_dream_queue_pending ON dream_queue(started_at, en
+   ensureColumn(db, "session_meta", "historian_last_failure_at", "INTEGER DEFAULT NULL");
+   ensureColumn(db, "session_meta", "system_prompt_hash", "TEXT DEFAULT ''");
+   ensureColumn(db, "session_meta", "cleared_reasoning_through_tag", "INTEGER DEFAULT 0");
++  ensureColumn(db, "session_meta", "tool_reclaim_watermark", "INTEGER DEFAULT 0");
+   ensureColumn(db, "session_meta", "stripped_placeholder_ids", "TEXT DEFAULT ''");
+   ensureColumn(db, "session_meta", "stale_reduce_stripped_ids", "TEXT DEFAULT ''");
+   ensureColumn(db, "session_meta", "processed_image_stripped_ids", "TEXT DEFAULT ''");
+@@ -143671,6 +143736,8 @@ CREATE INDEX IF NOT EXISTS idx_dream_queue_pending ON dream_queue(started_at, en
+   ensureColumn(db, "session_meta", "recovery_no_eligible_head_count", "INTEGER NOT NULL DEFAULT 0");
+   ensureColumn(db, "session_meta", "force_emergency_bypass_window_start", "INTEGER NOT NULL DEFAULT 0");
+   ensureColumn(db, "session_meta", "force_emergency_bypass_used", "INTEGER NOT NULL DEFAULT 0");
++  ensureColumn(db, "session_meta", "emergency_drain_active", "INTEGER NOT NULL DEFAULT 0");
++  ensureColumn(db, "session_meta", "historian_drain_failure_at", "INTEGER NOT NULL DEFAULT 0");
+   ensureColumn(db, "session_meta", "cached_m0_materialized_at", "INTEGER");
+   ensureColumn(db, "session_meta", "cached_m0_session_facts_version", "INTEGER");
+   ensureColumn(db, "session_meta", "cached_m0_upgrade_state", "TEXT");
+@@ -143749,6 +143816,22 @@ CREATE INDEX IF NOT EXISTS idx_dream_queue_pending ON dream_queue(started_at, en
+         failed_at INTEGER NOT NULL,
+         UNIQUE(table_name, row_id)
+       );
++      CREATE TABLE IF NOT EXISTS transform_decisions (
++        session_id         TEXT    NOT NULL,
++        harness            TEXT    NOT NULL DEFAULT 'opencode',
++        message_id         TEXT    NOT NULL,
++        ts_ms              INTEGER NOT NULL,
++        decision           TEXT    NOT NULL,
++        materialized       INTEGER NOT NULL DEFAULT 0,
++        materialize_reason TEXT,
++        emergency          INTEGER NOT NULL DEFAULT 0,
++        dropped_tokens     INTEGER NOT NULL DEFAULT 0,
++        dropped_count      INTEGER NOT NULL DEFAULT 0,
++        input_tokens       INTEGER NOT NULL DEFAULT 0,
++        PRIMARY KEY (session_id, harness, message_id)
++      );
++      CREATE INDEX IF NOT EXISTS idx_transform_decisions_session_harness
++        ON transform_decisions(session_id, harness);
+     `);
+   ensureColumn(db, "tags", "harness", "TEXT NOT NULL DEFAULT 'opencode'");
+   ensureColumn(db, "pending_ops", "harness", "TEXT NOT NULL DEFAULT 'opencode'");
+@@ -143835,7 +143918,9 @@ function healNullIntegerColumns(db) {
+     ["protected_tail_drain_tokens", 0],
+     ["recovery_no_eligible_head_count", 0],
+     ["force_emergency_bypass_window_start", 0],
+-    ["force_emergency_bypass_used", 0]
++    ["force_emergency_bypass_used", 0],
++    ["emergency_drain_active", 0],
++    ["historian_drain_failure_at", 0]
+   ];
+   for (const [column, fallback] of columns) {
+     try {
+@@ -143911,6 +143996,7 @@ function openDatabase(dbPathOrOptions) {
+     setDatabase(db);
+     loadToolDefinitionMeasurements(db);
+     databases.set(dbPath, db);
++    pathByDatabase.set(db, dbPath);
+     persistenceByDatabase.set(db, true);
+     persistenceErrorByDatabase.delete(db);
+     return db;
+@@ -145152,6 +145238,41 @@ var MIGRATIONS = [
+                 `);
+       }
+     }
++  },
++  {
++    version: 37,
++    description: "emergency drain catch-up latch + historian drain failure backoff",
++    up: (db) => {
++      const hasSessionMeta = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_meta'").get();
++      if (!hasSessionMeta)
++        return;
++      ensureColumn(db, "session_meta", "emergency_drain_active", "INTEGER NOT NULL DEFAULT 0");
++      ensureColumn(db, "session_meta", "historian_drain_failure_at", "INTEGER NOT NULL DEFAULT 0");
++    }
++  },
++  {
++    version: 38,
++    description: "durable transform decisions for cache-event cause attribution",
++    up: (db) => {
++      db.exec(`
++                CREATE TABLE IF NOT EXISTS transform_decisions (
++                    session_id         TEXT    NOT NULL,
++                    harness            TEXT    NOT NULL DEFAULT 'opencode',
++                    message_id         TEXT    NOT NULL,
++                    ts_ms              INTEGER NOT NULL,
++                    decision           TEXT    NOT NULL,
++                    materialized       INTEGER NOT NULL DEFAULT 0,
++                    materialize_reason TEXT,
++                    emergency          INTEGER NOT NULL DEFAULT 0,
++                    dropped_tokens     INTEGER NOT NULL DEFAULT 0,
++                    dropped_count      INTEGER NOT NULL DEFAULT 0,
++                    input_tokens       INTEGER NOT NULL DEFAULT 0,
++                    PRIMARY KEY (session_id, harness, message_id)
++                );
++                CREATE INDEX IF NOT EXISTS idx_transform_decisions_session_harness
++                    ON transform_decisions(session_id, harness);
++            `);
++    }
+   }
+ ];
+ var LATEST_MIGRATION_VERSION = MIGRATIONS.reduce((max, m) => Math.max(max, m.version), 0);
+@@ -145583,7 +145704,9 @@ var DEFAULT_PROTECTED_TAIL_META = {
+   protectedTailDrainTokens: 0,
+   recoveryNoEligibleHeadCount: 0,
+   forceEmergencyBypassWindowStart: 0,
+-  forceEmergencyBypassUsed: 0
++  forceEmergencyBypassUsed: 0,
++  emergencyDrainActive: 0,
++  historianDrainFailureAt: 0
+ };
+ function toProtectedTailMeta(row) {
+   if (row === null || typeof row !== "object")
+@@ -145597,7 +145720,9 @@ function toProtectedTailMeta(row) {
+     protectedTailDrainTokens: numberOr(r.protected_tail_drain_tokens, 0),
+     recoveryNoEligibleHeadCount: numberOr(r.recovery_no_eligible_head_count, 0),
+     forceEmergencyBypassWindowStart: numberOr(r.force_emergency_bypass_window_start, 0),
+-    forceEmergencyBypassUsed: numberOr(r.force_emergency_bypass_used, 0)
++    forceEmergencyBypassUsed: numberOr(r.force_emergency_bypass_used, 0),
++    emergencyDrainActive: numberOr(r.emergency_drain_active, 0),
++    historianDrainFailureAt: numberOr(r.historian_drain_failure_at, 0)
+   };
+ }
+ function loadProtectedTailMeta(db, sessionId) {
+@@ -145605,7 +145730,7 @@ function loadProtectedTailMeta(db, sessionId) {
+   const row = db.prepare(`SELECT prior_boundary_ordinal, protected_tail_policy_version,
+                     protected_tail_drain_window_started_at, protected_tail_drain_tokens,
+                     recovery_no_eligible_head_count, force_emergency_bypass_window_start,
+-                    force_emergency_bypass_used
++                    force_emergency_bypass_used, emergency_drain_active, historian_drain_failure_at
+              FROM session_meta WHERE session_id = ?`).get(sessionId);
+   return toProtectedTailMeta(row);
+ }
+@@ -145649,6 +145774,17 @@ function protectedTailWindowBudget(usagePercentage, usable, perRunCap) {
+     return Math.min(750000, Math.max(3 * perRunCap, Math.round(0.35 * usable)));
+   return Math.min(500000, Math.max(perRunCap, Math.round(0.2 * usable)));
+ }
++var EMERGENCY_DRAIN_ENTER_PERCENTAGE = 95;
++var EMERGENCY_DRAIN_EXIT_MARGIN = 10;
++var EMERGENCY_DRAIN_FALLBACK_EXIT_PERCENTAGE = 55;
++var EMERGENCY_DRAIN_FAILURE_BACKOFF_MS = 60000;
++var EMERGENCY_DRAIN_MAX_LATCH_MS = 30 * 60 * 1000;
++function emergencyDrainExitThreshold(executeThresholdPercentage) {
++  if (!Number.isFinite(executeThresholdPercentage) || executeThresholdPercentage <= 0) {
++    return EMERGENCY_DRAIN_FALLBACK_EXIT_PERCENTAGE;
++  }
++  return Math.max(0, executeThresholdPercentage - EMERGENCY_DRAIN_EXIT_MARGIN);
++}
+ function reserveProtectedTailDrainTokens(args) {
+   const now = args.now ?? Date.now();
+   const requested = Math.max(0, Math.floor(args.trueRawTokens));
+@@ -145667,18 +145803,30 @@ function reserveProtectedTailDrainTokens(args) {
+     let meta = loadProtectedTailMeta(args.db, args.sessionId);
+     if (now - meta.protectedTailDrainWindowStartedAt > DRAIN_WINDOW_MS) {
+       args.db.prepare(`UPDATE session_meta
+-                     SET protected_tail_drain_window_started_at = ?, protected_tail_drain_tokens = 0,
+-                         force_emergency_bypass_window_start = ?, force_emergency_bypass_used = 0
+-                     WHERE session_id = ?`).run(now, now, args.sessionId);
++                     SET protected_tail_drain_window_started_at = ?, protected_tail_drain_tokens = 0
++                     WHERE session_id = ?`).run(now, args.sessionId);
+       meta = loadProtectedTailMeta(args.db, args.sessionId);
+     }
++    const exitThreshold = emergencyDrainExitThreshold(args.executeThresholdPercentage);
++    let latchActiveSince = meta.emergencyDrainActive;
++    if (args.usagePercentage >= EMERGENCY_DRAIN_ENTER_PERCENTAGE) {
++      if (latchActiveSince <= 0)
++        latchActiveSince = now;
++    } else if (latchActiveSince > 0) {
++      const expired = now - latchActiveSince > EMERGENCY_DRAIN_MAX_LATCH_MS;
++      if (args.usagePercentage < exitThreshold || expired)
++        latchActiveSince = 0;
++    }
++    if (latchActiveSince !== meta.emergencyDrainActive) {
++      args.db.prepare("UPDATE session_meta SET emergency_drain_active = ? WHERE session_id = ?").run(latchActiveSince, args.sessionId);
++    }
++    const latchActive = latchActiveSince > 0;
+     const budget = protectedTailWindowBudget(args.usagePercentage, args.usable, args.perRunCap);
+     const remaining = Math.max(0, budget - meta.protectedTailDrainTokens);
+     let reserved = Math.min(requested, args.perRunCap, remaining);
+     let bypass = false;
+-    const bypassWindowExpired = now - meta.forceEmergencyBypassWindowStart > DRAIN_WINDOW_MS;
+-    const bypassUsed = bypassWindowExpired ? 0 : meta.forceEmergencyBypassUsed;
+-    if (reserved <= 0 && args.usagePercentage >= 95 && bypassUsed === 0) {
++    const inFailureBackoff = meta.historianDrainFailureAt > 0 && now - meta.historianDrainFailureAt < EMERGENCY_DRAIN_FAILURE_BACKOFF_MS;
++    if (reserved <= 0 && latchActive && !inFailureBackoff) {
+       reserved = Math.min(requested, args.perRunCap);
+       bypass = true;
+     }
+@@ -145686,10 +145834,8 @@ function reserveProtectedTailDrainTokens(args) {
+       return;
+     args.db.prepare(`UPDATE session_meta
+                  SET protected_tail_drain_window_started_at = CASE WHEN protected_tail_drain_window_started_at = 0 THEN ? ELSE protected_tail_drain_window_started_at END,
+-                     protected_tail_drain_tokens = COALESCE(protected_tail_drain_tokens, 0) + ?,
+-                     force_emergency_bypass_window_start = CASE WHEN ? THEN ? ELSE force_emergency_bypass_window_start END,
+-                     force_emergency_bypass_used = CASE WHEN ? THEN 1 ELSE force_emergency_bypass_used END
+-                 WHERE session_id = ?`).run(now, reserved, bypass ? 1 : 0, now, bypass ? 1 : 0, args.sessionId);
++                     protected_tail_drain_tokens = COALESCE(protected_tail_drain_tokens, 0) + ?
++                 WHERE session_id = ?`).run(now, reserved, args.sessionId);
+     result = {
+       ok: true,
+       reservedTokens: reserved,
+@@ -145699,6 +145845,25 @@ function reserveProtectedTailDrainTokens(args) {
+   })();
+   return result;
+ }
++function clearEmergencyDrainLatch(db, sessionId) {
++  db.transaction(() => {
++    ensureSessionMetaRow(db, sessionId);
++    db.prepare("UPDATE session_meta SET emergency_drain_active = 0 WHERE session_id = ?").run(sessionId);
++  })();
++}
++function recordHistorianDrainFailure(db, sessionId, now) {
++  const ts = now ?? Date.now();
++  db.transaction(() => {
++    ensureSessionMetaRow(db, sessionId);
++    db.prepare("UPDATE session_meta SET historian_drain_failure_at = ? WHERE session_id = ?").run(ts, sessionId);
++  })();
++}
++function clearHistorianDrainFailure(db, sessionId) {
++  db.transaction(() => {
++    ensureSessionMetaRow(db, sessionId);
++    db.prepare("UPDATE session_meta SET historian_drain_failure_at = 0 WHERE session_id = ?").run(sessionId);
++  })();
++}
+ function rollbackProtectedTailDrainReservation(db, reservation) {
+   if (!reservation || reservation.tokens <= 0)
+     return;
+@@ -146217,6 +146382,7 @@ var SESSION_META_FALLBACK_SELECTS = {
+   last_transform_error: "'' AS last_transform_error",
+   system_prompt_hash: "'' AS system_prompt_hash",
+   last_todo_state: "'' AS last_todo_state",
++  tool_reclaim_watermark: "0 AS tool_reclaim_watermark",
+   cached_m0_bytes: "NULL AS cached_m0_bytes",
+   cached_m1_bytes: "NULL AS cached_m1_bytes",
+   cached_m0_project_memory_epoch: "NULL AS cached_m0_project_memory_epoch",
+@@ -146294,6 +146460,14 @@ function updateSessionMeta(db, sessionId, updates) {
+     db.prepare(`UPDATE session_meta SET ${setClauses.join(", ")} WHERE session_id = ?`).run(...values, sessionId);
+   })();
+ }
++function advanceToolReclaimWatermark(db, sessionId, maxTagNumber) {
++  if (maxTagNumber <= 0)
++    return;
++  db.transaction(() => {
++    ensureSessionMetaRow(db, sessionId);
++    db.prepare("UPDATE session_meta SET tool_reclaim_watermark = MAX(COALESCE(tool_reclaim_watermark, 0), ?) WHERE session_id = ?").run(maxTagNumber, sessionId);
++  })();
++}
+ // ../plugin/src/features/magic-context/storage-notes.ts
+ var NOTE_TYPES = new Set(["session", "smart"]);
+ var NOTE_STATUSES = new Set(["active", "pending", "ready", "dismissed"]);
+@@ -146691,12 +146865,37 @@ function getActiveTagTokenAggregate(db, sessionId, protectedTags = 0) {
+     nullCount: row?.null_count ?? 0
+   };
+ }
+-function getTriggerTagTokenUpperBound(db, sessionId) {
+-  const row = db.prepare(`SELECT
++function getOldestActiveUnprotectedToolTags(db, sessionId, protectedTags = 0, limit = 4) {
++  if (limit <= 0)
++    return [];
++  const boundedLimit = Math.max(1, Math.min(10, Math.floor(limit)));
++  const whereProtected = protectedTags > 0 ? `AND tag_number < (
++                    SELECT tag_number FROM tags
++                    WHERE session_id = ? AND status = 'active'
++                    ORDER BY tag_number DESC LIMIT 1 OFFSET ?
++                )` : "";
++  const params = protectedTags > 0 ? [sessionId, sessionId, protectedTags - 1, boundedLimit] : [sessionId, boundedLimit];
++  const rows = db.prepare(`SELECT tag_number, tool_name
++             FROM tags
++             WHERE session_id = ? AND status = 'active' AND type = 'tool' ${whereProtected}
++             ORDER BY tag_number ASC, id ASC
++             LIMIT ?`).all(...params);
++  return rows.filter((row) => typeof row.tag_number === "number").map((row) => ({
++    tagNumber: row.tag_number,
++    toolName: typeof row.tool_name === "string" ? row.tool_name : null
++  }));
++}
++function getTriggerTagTokenUpperBound(db, sessionId, floor = 0) {
++  const sql = floor > 0 ? `SELECT
++                COALESCE(SUM(COALESCE(token_count, 0) + COALESCE(input_token_count, 0) + COALESCE(reasoning_token_count, 0)), 0) AS bound,
++                COALESCE(SUM(CASE WHEN token_count IS NULL THEN 1 ELSE 0 END), 0) AS null_count
++             FROM tags
++             WHERE session_id = ? AND status IN ('active', 'dropped') AND tag_number >= ?` : `SELECT
+                 COALESCE(SUM(COALESCE(token_count, 0) + COALESCE(input_token_count, 0) + COALESCE(reasoning_token_count, 0)), 0) AS bound,
+                 COALESCE(SUM(CASE WHEN token_count IS NULL THEN 1 ELSE 0 END), 0) AS null_count
+              FROM tags
+-             WHERE session_id = ? AND status IN ('active', 'dropped')`).get(sessionId);
++             WHERE session_id = ? AND status IN ('active', 'dropped')`;
++  const row = floor > 0 ? db.prepare(sql).get(sessionId, floor) : db.prepare(sql).get(sessionId);
+   return { bound: row?.bound ?? 0, nullCount: row?.null_count ?? 0 };
+ }
+ function updateTagInputByteSize(db, sessionId, tagNumber, newInputByteSize) {
+@@ -146723,10 +146922,12 @@ function getUpdateTagInputTokenCountStatement(db) {
+ function updateTagTokenCount(db, sessionId, tagNumber, newTokenCount) {
+   getUpdateTagTokenCountStatement(db).run(newTokenCount, sessionId, tagNumber);
+ }
+-function getAllStatusTagTokenTotalsFlat(db, sessionId) {
+-  const rows = db.prepare(`SELECT type, message_id, tool_owner_message_id, token_count, input_token_count, reasoning_token_count
+-             FROM tags
+-             WHERE session_id = ?`).all(sessionId);
++function getAllStatusTagTokenTotalsFlat(db, sessionId, floor = 0) {
++  const rows = floor > 0 ? db.prepare(`SELECT type, message_id, tool_owner_message_id, token_count, input_token_count, reasoning_token_count
++                       FROM tags
++                       WHERE session_id = ? AND tag_number >= ?`).all(sessionId, floor) : db.prepare(`SELECT type, message_id, tool_owner_message_id, token_count, input_token_count, reasoning_token_count
++                       FROM tags
++                       WHERE session_id = ?`).all(sessionId);
+   const totals = new Map;
+   const nullMessageIds = new Set;
+   for (const row of rows) {
+@@ -146845,6 +147046,52 @@ function getTagNumberByMessageId(db, sessionId, messageId) {
+   const row = getTagNumberByMessageIdStatement(db).get(sessionId, messageId);
+   return isTagNumberRow(row) ? row.tag_number : null;
+ }
++var getMinMessageTagNumberForRawIdStatements = new WeakMap;
++function isMinTagNumberRow(row) {
++  return row !== null && typeof row === "object" && "m" in row;
++}
++function getMinMessageTagNumberForRawId(db, sessionId, rawId) {
++  if (rawId.includes(":"))
++    return null;
++  let stmt = getMinMessageTagNumberForRawIdStatements.get(db);
++  if (!stmt) {
++    stmt = db.prepare("SELECT MIN(tag_number) AS m FROM tags WHERE session_id = ? AND message_id >= ? AND message_id < ?");
++    getMinMessageTagNumberForRawIdStatements.set(db, stmt);
++  }
++  const row = stmt.get(sessionId, `${rawId}:`, `${rawId};`);
++  return isMinTagNumberRow(row) && typeof row.m === "number" ? row.m : null;
++}
++var TAGGER_FLOOR_SCAN_MESSAGES = 8;
++var TAGGER_FLOOR_MAX_PROBES = 64;
++var TAGGER_FLOOR_SAFETY_MARGIN = 256;
++var TAGGER_FLOOR_PER_SKIP_MARGIN = 64;
++function deriveTagLoadFloor(db, sessionId, rawIds) {
++  let min = Number.POSITIVE_INFINITY;
++  let probes = 0;
++  let hits = 0;
++  let skippedBeforeFirstHit = 0;
++  for (const rawId of rawIds) {
++    if (typeof rawId !== "string" || rawId.length === 0)
++      continue;
++    if (probes >= TAGGER_FLOOR_MAX_PROBES)
++      break;
++    probes++;
++    const m = getMinMessageTagNumberForRawId(db, sessionId, rawId);
++    if (m === null) {
++      if (hits === 0)
++        skippedBeforeFirstHit++;
++      continue;
++    }
++    if (m < min)
++      min = m;
++    if (++hits >= TAGGER_FLOOR_SCAN_MESSAGES)
++      break;
++  }
++  if (!Number.isFinite(min))
++    return 0;
++  const margin = TAGGER_FLOOR_SAFETY_MARGIN + skippedBeforeFirstHit * TAGGER_FLOOR_PER_SKIP_MARGIN;
++  return Math.max(0, min - margin);
++}
+ var TAG_SELECT_COLUMNS = "id, message_id, type, status, drop_mode, tool_name, input_byte_size, byte_size, reasoning_byte_size, session_id, tag_number, caveman_depth, tool_owner_message_id";
+ function getTagsBySession(db, sessionId) {
+   const rows = db.prepare(`SELECT ${TAG_SELECT_COLUMNS} FROM tags WHERE session_id = ? ORDER BY tag_number ASC, id ASC`).all(sessionId).filter(isTagRow);
+@@ -146948,6 +147195,11 @@ init_logger();
+ import { createHash as createHash5 } from "node:crypto";
+ import { realpathSync as realpathSync2 } from "node:fs";
+ import path5 from "node:path";
++
++// ../plugin/src/features/magic-context/memory/relocate-memory.ts
++var memoryCopyColumnsCache = new WeakMap;
++
++// ../plugin/src/features/magic-context/v22-deferred-backfill.ts
+ var BATCH_SIZE = 25;
+ var YIELD_EVERY_N_ROWS = 5;
+ var BACKFILL_META_KEY = "v22_legacy_memory_backfill";
+@@ -147163,65 +147415,6 @@ async function runDeferredV22Backfill(db, options = {}) {
+   };
+ }
+ 
+-// ../plugin/src/agents/historian.ts
+-var HISTORIAN_AGENT = "historian";
+-var HISTORIAN_EDITOR_AGENT = "historian-editor";
+-
+-// ../plugin/src/agents/dreamer.ts
+-var DREAMER_AGENT = "dreamer";
+-
+-// ../plugin/src/agents/sidekick.ts
+-var SIDEKICK_AGENT = "sidekick";
+-
+-// ../plugin/src/shared/model-requirements.ts
+-var HISTORIAN_FALLBACK_CHAIN = [
+-  { providers: ["github-copilot", "anthropic", "opencode"], model: "claude-sonnet-4-6" },
+-  { providers: ["opencode-go"], model: "minimax-m2.7" },
+-  {
+-    providers: ["zai-coding-plan", "bailian-coding-plan", "opencode-go", "opencode"],
+-    model: "glm-5"
+-  },
+-  { providers: ["openai", "github-copilot", "opencode"], model: "gpt-5.4" },
+-  { providers: ["google", "github-copilot", "opencode"], model: "gemini-3.1-pro" }
+-];
+-var DREAMER_FALLBACK_CHAIN = [
+-  { providers: ["github-copilot", "anthropic", "opencode"], model: "claude-sonnet-4-6" },
+-  { providers: ["google", "github-copilot", "opencode"], model: "gemini-3-flash" },
+-  {
+-    providers: ["zai-coding-plan", "bailian-coding-plan", "opencode-go", "opencode"],
+-    model: "glm-5"
+-  },
+-  { providers: ["opencode-go"], model: "minimax-m2.7" },
+-  { providers: ["github-copilot", "openai", "opencode"], model: "gpt-5.4-mini" }
+-];
+-var SIDEKICK_FALLBACK_CHAIN = [
+-  { providers: ["cerebras"], model: "qwen-3-235b-a22b-instruct-2507" },
+-  { providers: ["google", "github-copilot", "opencode"], model: "gemini-3-flash" },
+-  { providers: ["openai", "github-copilot", "opencode"], model: "gpt-5.4-mini" },
+-  { providers: ["opencode"], model: "gpt-5-nano" }
+-];
+-var AGENT_MODEL_REQUIREMENTS = {
+-  [HISTORIAN_AGENT]: { fallbackChain: HISTORIAN_FALLBACK_CHAIN },
+-  [HISTORIAN_EDITOR_AGENT]: { fallbackChain: HISTORIAN_FALLBACK_CHAIN },
+-  [DREAMER_AGENT]: { fallbackChain: DREAMER_FALLBACK_CHAIN },
+-  [SIDEKICK_AGENT]: { fallbackChain: SIDEKICK_FALLBACK_CHAIN }
+-};
+-function expandFallbackChain(chain) {
+-  const models = [];
+-  for (const entry of chain) {
+-    for (const provider of entry.providers) {
+-      models.push(`${provider}/${entry.model}`);
+-    }
+-  }
+-  return models;
+-}
+-function getAgentFallbackModels(agent) {
+-  const requirement = AGENT_MODEL_REQUIREMENTS[agent];
+-  if (!requirement)
+-    return;
+-  return expandFallbackChain(requirement.fallbackChain);
+-}
+-
+ // ../plugin/src/shared/models-dev-cache.ts
+ init_data_path();
+ init_logger();
+@@ -147312,25 +147505,9 @@ function resolveHistorianContextLimit(historianModelOverride) {
+     return DEFAULT_HISTORIAN_CONTEXT_FALLBACK;
+   }
+   if (typeof historianModelOverride === "string" && historianModelOverride.trim() !== "") {
+-    console.warn(`[magic-context] historian.model "${historianModelOverride}" lacks provider prefix ("provider/model-id"); using fallback chain for chunk-budget derivation.`);
+-  }
+-  const chain = AGENT_MODEL_REQUIREMENTS[HISTORIAN_AGENT]?.fallbackChain;
+-  if (!chain || chain.length === 0)
+-    return DEFAULT_HISTORIAN_CONTEXT_FALLBACK;
+-  const expanded = expandFallbackChain(chain);
+-  let minLimit;
+-  for (const key of expanded) {
+-    const [providerID, ...rest] = key.split("/");
+-    const modelID = rest.join("/");
+-    if (!providerID || !modelID)
+-      continue;
+-    const limit = getSdkContextLimit(providerID, modelID);
+-    if (typeof limit !== "number" || limit <= 0)
+-      continue;
+-    if (minLimit === undefined || limit < minLimit)
+-      minLimit = limit;
++    console.warn(`[magic-context] historian.model "${historianModelOverride}" lacks provider prefix ("provider/model-id"); using the default context limit for chunk-budget derivation.`);
+   }
+-  return minLimit ?? DEFAULT_HISTORIAN_CONTEXT_FALLBACK;
++  return DEFAULT_HISTORIAN_CONTEXT_FALLBACK;
+ }
+ 
+ // ../plugin/src/hooks/magic-context/event-resolvers.ts
+@@ -147743,13 +147920,13 @@ async function maybeSendUpgradeReminder(deps, sessionId) {
+ init_data_path();
+ import * as fs2 from "node:fs";
+ import * as path6 from "node:path";
+-var ANNOUNCEMENT_VERSION = "0.24.0";
++var ANNOUNCEMENT_VERSION = "0.26.0";
+ var ANNOUNCEMENT_FEATURES = [
+-  "Searchable session history: ctx_search can now find older discussion by meaning, not just keywords. New history is embedded automatically — to backfill an EXISTING session's older history, run /ctx-embed-history once (it works in the background).",
+-  "Cross-project workspaces: group related repos and share project memories across them, with per-category control over what's shared. Set them up in the dashboard's Workspaces panel.",
+-  "Pi: fixed sessions overflowing the model context while still showing moderate usage — Pi now sheds context before a tool-heavy turn overflows.",
+-  "Fewer prompt-cache busts: doc edits, processed screenshots, and a rebuild-then-bust-again case no longer re-bill large prompt prefixes.",
+-  "Setup wizard now lists your actual models with type-ahead instead of fixed recommendations, and explains the historian/dreamer roles (issue #144). Plus a GitHub Copilot tool-pairing fix (#135)."
++  "Faster on large sessions: per-message transform overhead is at least 2x lower on typical passes and up to ~10x lower when history summarization fires (no more multi-second pause on big sessions).",
++  "No more surprise models: the built-in fallback chain is gone. Hidden agents only use the model (and fallback_models) you configure — no confusing 'model not found' for providers you never set up. `doctor` now records every historian run so real failures are visible.",
++  "Anthropic thinking-block fix: clearing old reasoning no longer risks a stale-signature rejection on Claude / Bedrock / proxied-Claude routes. Plus fewer prompt-cache busts.",
++  "Community fixes: TUI crash on the upgrade progress panel (#168), historian.disallowed_tools for weak models that loop on tool calls (#166), and a Pi-only config key leak (#167).",
++  "New: doctor migrate-session re-homes a session (and optionally its memories) to another project, with a dry-run preview."
+ ];
+ var ANNOUNCEMENT_FOOTER = "Join us on Discord: https://discord.gg/F2uWxjGnU";
+ var STATE_FILENAME = "last_announced_version";
+@@ -147808,15 +147985,9 @@ function shouldKeepSubagents() {
+ init_logger();
+ 
+ // ../plugin/src/shared/resolve-fallbacks.ts
+-function resolveFallbackChain(agentName, userFallbacks) {
++function resolveFallbackChain(userFallbacks) {
+   const userList = normalizeUserFallbacks(userFallbacks);
+-  if (userList.length > 0) {
+-    return dedupe(userList.filter(isValidModelSpec));
+-  }
+-  const builtin = getAgentFallbackModels(agentName);
+-  if (!builtin || builtin.length === 0)
+-    return [];
+-  return dedupe(builtin.filter(isValidModelSpec));
++  return dedupe(userList.filter(isValidModelSpec));
+ }
+ function normalizeUserFallbacks(userFallbacks) {
+   if (!userFallbacks)
+@@ -148028,6 +148199,28 @@ class PiSubagentRunner {
+       const bundled = resolveBundledPiCli();
+       if (bundled) {
+         this.piBinary = bundled;
++      } else if (process.platform === "win32") {
++        try {
++          const piCmdPath = childProcess.execSync("where pi.cmd", { encoding: "utf8", timeout: 5000 }).trim().split(/\r?\n/)[0].trim();
++          const require_ = createRequire2(import.meta.url);
++          const { readFileSync } = require_("node:fs");
++          const cmdContent = readFileSync(piCmdPath, "utf8");
++          const match = cmdContent.match(/node\s+"([^"]+)"/);
++          if (match) {
++            let cliPath = match[1].replace(/%~dp0/g, dirname3(piCmdPath) + "\\");
++            cliPath = resolvePath(cliPath);
++            if (existsSync6(cliPath)) {
++              this.piBinary = process.execPath;
++              this._piCliArgs = [cliPath];
++            } else {
++              this.piBinary = "pi.cmd";
++            }
++          } else {
++            this.piBinary = "pi.cmd";
++          }
++        } catch {
++          this.piBinary = "pi.cmd";
++        }
+       } else {
+         this.piBinary = "pi";
+       }
+@@ -148118,12 +148311,43 @@ class PiSubagentRunner {
+         } catch {}
+       };
+       let child;
++      const spawnArgs = this._piCliArgs ? [...this._piCliArgs, ...args] : args;
++      const useWrapper = process.platform === "win32" && options.systemPrompt && options.systemPrompt.length > 4000;
+       try {
+-        child = this.spawnImpl(this.piBinary, args, {
+-          cwd: options.cwd,
+-          env: process.env,
+-          stdio: [deliverViaStdin ? "pipe" : "ignore", "pipe", "pipe"]
+-        });
++        if (useWrapper) {
++          // On Windows, import pi's CLI in-process to bypass CreateProcess 32767-char limit
++          const { writeFileSync, mkdtempSync } = createRequire2(import.meta.url)("node:fs");
++          const { join: joinTmp } = createRequire2(import.meta.url)("node:path");
++          const { tmpdir } = createRequire2(import.meta.url)("node:os");
++          const { pathToFileURL } = createRequire2(import.meta.url)("node:url");
++          const tmpDir = mkdtempSync(joinTmp(tmpdir(), "pi-"));
++          const wrapperScript = joinTmp(tmpDir, "wrapper.mjs");
++          
++          // Replace placeholder with actual system prompt in args
++          const finalArgs = spawnArgs.map(a => a === "__VIA_WRAPPER__" ? options.systemPrompt : a);
++          const cliPath = this._piCliArgs?.[0] || this.piBinary;
++          
++          // Wrapper imports pi's CLI in-process — args are in memory, no command line limit
++          writeFileSync(wrapperScript, `
++import { pathToFileURL } from 'node:url';
++process.chdir(${JSON.stringify(options.cwd || process.cwd())});
++process.argv = [process.execPath, ${JSON.stringify(cliPath)}, ...${JSON.stringify(finalArgs)}];
++const cliUrl = pathToFileURL(${JSON.stringify(cliPath)}).href;
++await import(cliUrl);
++`, "utf8");
++          
++          child = childProcess.spawn(process.execPath, [wrapperScript], {
++            cwd: options.cwd,
++            env: process.env,
++            stdio: [deliverViaStdin ? "pipe" : "ignore", "pipe", "pipe"]
++          });
++        } else {
++          child = this.spawnImpl(this.piBinary, spawnArgs, {
++            cwd: options.cwd,
++            env: process.env,
++            stdio: [deliverViaStdin ? "pipe" : "ignore", "pipe", "pipe"]
++          });
++        }
+       } catch (error) {
+         settle({
+           ok: false,
+@@ -148144,7 +148368,7 @@ class PiSubagentRunner {
+         return;
+       }
+       emitProgress({ type: "spawned", argv: args, pid: child.pid });
+-      if (deliverViaStdin && child.stdin) {
++      if (deliverViaStdin && !useWrapper && child.stdin) {
+         child.stdin.on("error", () => {});
+         try {
+           child.stdin.end(options.userMessage, "utf8");
+@@ -148428,7 +148652,12 @@ function buildArgs(options, opts) {
+     }
+   }
+   if (options.systemPrompt && options.systemPrompt.length > 0) {
+-    args.push("--system-prompt", options.systemPrompt);
++    if (process.platform === "win32" && options.systemPrompt.length > 4000) {
++      // On Windows, store system prompt for wrapper script to avoid command line length limit
++      args.push("--system-prompt", "__VIA_WRAPPER__");
++    } else {
++      args.push("--system-prompt", options.systemPrompt);
++    }
+   }
+   if (typeof options.model === "string" && options.model.length > 0) {
+     args.push("--model", options.model);
+@@ -148693,7 +148922,7 @@ function enqueueDream(db, projectIdentity, reason, force = false) {
+   return db.transaction(() => {
+     if (!hasActiveDreamLease(db)) {
+       const staleThresholdMs = force ? 2 * 60 * 1000 : 120 * 60 * 1000;
+-      db.prepare("DELETE FROM dream_queue WHERE project_path = ? AND started_at IS NOT NULL AND started_at < ?").run([projectIdentity, now - staleThresholdMs]);
++      db.prepare("DELETE FROM dream_queue WHERE project_path = ? AND started_at IS NOT NULL AND started_at < ?").run(projectIdentity, now - staleThresholdMs);
+     }
+     const existing = db.prepare("SELECT id FROM dream_queue WHERE project_path = ?").get(projectIdentity);
+     if (existing) {
+@@ -148755,6 +148984,9 @@ init_logger();
+ import { existsSync as existsSync8 } from "node:fs";
+ import { join as join11 } from "node:path";
+ 
++// ../plugin/src/agents/dreamer.ts
++var DREAMER_AGENT = "dreamer";
++
+ // ../plugin/src/shared/index.ts
+ init_logger();
+ 
+@@ -148828,9 +149060,11 @@ async function promptWithTimeout(client, args, timeoutMs, signal) {
+     });
+   } catch (error) {
+     if (signal?.aborted) {
++      await abortChildRun(client, args.path.id);
+       throw new Error("prompt aborted by external signal");
+     }
+     if (controller.signal.aborted) {
++      await abortChildRun(client, args.path.id);
+       throw new Error(`prompt timed out after ${timeoutMs}ms`);
+     }
+     throw error;
+@@ -148839,6 +149073,13 @@ async function promptWithTimeout(client, args, timeoutMs, signal) {
+     signal?.removeEventListener("abort", onExternalAbort);
+   }
+ }
++async function abortChildRun(client, sessionId) {
++  try {
++    await client.session.abort({ path: { id: sessionId } });
++  } catch (error) {
++    log(`[model-retry] child session abort failed for ${sessionId}: ${String(error)}`);
++  }
++}
+ function isNonRetryable(error, externalSignal) {
+   if (externalSignal?.aborted)
+     return true;
+@@ -149695,6 +149936,20 @@ function getDistinctStoredModelIds(db, projectPath) {
+   const rows = getDistinctStoredModelIdsStatement(db).all(projectPath);
+   return new Set(rows.map((row) => typeof row.modelId === "string" ? row.modelId : null));
+ }
++function getMemoryEmbedCoverage(db, projectPath, modelId) {
++  const row = db.prepare(`SELECT
++               COUNT(*) AS total,
++               SUM(CASE WHEN EXISTS (
++                   SELECT 1 FROM memory_embeddings e
++                   WHERE e.memory_id = m.id AND e.model_id = ?
++               ) THEN 1 ELSE 0 END) AS embedded
++             FROM memories m
++             WHERE m.project_path = ? AND m.status = 'active'`).get(modelId, projectPath);
++  return {
++    total: typeof row?.total === "number" ? row.total : 0,
++    embedded: typeof row?.embedded === "number" ? row.embedded : 0
++  };
++}
+ 
+ // ../plugin/src/features/magic-context/memory/embedding-cache.ts
+ var DEFAULT_EMBEDDING_CACHE_TTL_MS = 60000;
+@@ -150532,6 +150787,7 @@ ${modeIntro}
+ 4. **Write or update** using the Write tool. Always write to project root, NOT to .planning/.
+ 
+ ### Rules
++- **NEVER touch protected regions**: any content between \`<!-- mc:protected START ... -->\` and \`<!-- mc:protected END -->\` is hand-authored and cache-critical. Reproduce it BYTE-FOR-BYTE in your rewrite — do not edit, reword, reorder, summarize, trim, or drop a single line of it, and keep the marker comments themselves. Only a human edits that region.
+ - **Be prescriptive**: "Use X pattern" not "X pattern is used"
+ - **Always include file paths** in backticks
+ - **Write current state only**: no temporal language, no history
+@@ -166170,14 +166426,16 @@ var SidekickConfigSchema = AgentOverrideConfigSchema.extend({
+ }).optional();
+ var HistorianConfigSchema = AgentOverrideConfigSchema.extend({
+   two_pass: exports_external.boolean().default(false).describe("Run a second editor pass over historian output to clean low-signal U: lines and cross-compartment duplicates. Adds ~1 extra API call and ~1.3x cost per historian run. Useful for models without extended thinking support. (default: false)"),
+-  thinking_level: PiThinkingLevelSchema.describe("Pi only: explicit thinking level passed as --thinking <level> to Pi historian subagent invocations. Required when using reasoning models (e.g. github-copilot/gpt-5.4) because Pi's default thinking-level resolution can pick a value the provider rejects. OpenCode users set variant instead. Valid: off | minimal | low | medium | high | xhigh")
++  thinking_level: PiThinkingLevelSchema.describe("Pi only: explicit thinking level passed as --thinking <level> to Pi historian subagent invocations. Required when using reasoning models (e.g. github-copilot/gpt-5.4) because Pi's default thinking-level resolution can pick a value the provider rejects. OpenCode users set variant instead. Valid: off | minimal | low | medium | high | xhigh"),
++  disallowed_tools: exports_external.array(exports_external.enum(["*", "read", "aft_outline", "aft_zoom", "aft_search"])).default([]).describe(`OpenCode only. Tools to REMOVE from the historian's default allow-list [read, aft_outline, aft_zoom, aft_search]. Applies to both historian and historian-editor agents. Use ["*"] to strip all tool definitions from the model request — this prevents weak instruction-following models (e.g. mistral-small-latest) from entering tool-calling loops. Individual tool names remove just that tool. Note: a user-supplied historian.permission override can re-allow a tool that disallowed_tools removed — disallowed_tools sets the baseline, permission overrides take precedence. (default: [])`)
+ }).optional();
+ var BaseEmbeddingConfigSchema = exports_external.object({
+   provider: exports_external.enum(["local", "openai-compatible", "off"]).default("local").describe("Embedding provider. 'local' uses Xenova/all-MiniLM-L6-v2, 'openai-compatible' requires endpoint and model, 'off' disables embeddings."),
+   model: exports_external.string().optional().describe("Embedding model name. Required for openai-compatible, ignored for local."),
+   endpoint: exports_external.string().optional().describe("API endpoint URL. Required when provider is openai-compatible."),
+   api_key: exports_external.string().optional().describe("API key for remote embedding provider (optional)"),
+-  input_type: exports_external.string().optional().describe("Optional input_type sent in the embedding request body. Required by some openai-compatible providers (e.g. NVIDIA NIM expects 'query' or 'passage'). Omitted from the request when unset."),
++  input_type: exports_external.string().optional().describe("Default input_type for stored/indexed (passage) embeddings in the request body. Required by some openai-compatible providers (e.g. NVIDIA NIM). Omitted from the request when unset."),
++  query_input_type: exports_external.string().optional().describe("Optional input_type for query (search) embeddings on asymmetric models (e.g. NVIDIA NIM 'query'). When unset, query embeddings use embedding.input_type. Passage/stored content always uses embedding.input_type."),
+   truncate: exports_external.string().optional().describe("Optional truncate mode sent in the embedding request body (e.g. NVIDIA NIM accepts 'NONE' | 'START' | 'END'). Omitted from the request when unset."),
+   max_input_tokens: exports_external.number().int().positive().optional().describe("Optional maximum input tokens for chunk embeddings. Defaults conservatively to 512 when omitted.")
+ }).superRefine((data, ctx) => {
+@@ -166207,6 +166465,7 @@ var EmbeddingConfigSchema = BaseEmbeddingConfigSchema.transform((data) => {
+   if (data.provider === "openai-compatible") {
+     const apiKey = data.api_key?.trim();
+     const inputType = data.input_type?.trim();
++    const queryInputType = data.query_input_type?.trim();
+     const truncate = data.truncate?.trim();
+     return {
+       provider: "openai-compatible",
+@@ -166214,6 +166473,7 @@ var EmbeddingConfigSchema = BaseEmbeddingConfigSchema.transform((data) => {
+       endpoint: data.endpoint?.trim() ?? "",
+       ...apiKey ? { api_key: apiKey } : {},
+       ...inputType ? { input_type: inputType } : {},
++      ...queryInputType ? { query_input_type: queryInputType } : {},
+       ...truncate ? { truncate } : {},
+       ...data.max_input_tokens ? { max_input_tokens: data.max_input_tokens } : {}
+     };
+@@ -166490,6 +166750,16 @@ function buildCanonicalChunkTextFromFts(db, sessionId, startOrdinal, endOrdinal)
+   return lines.join(`
+ `);
+ }
++function buildCompartmentSummaryFallbackText(db, compartmentId) {
++  const row = db.prepare("SELECT title, p1, content FROM compartments WHERE id = ?").get(compartmentId);
++  if (!row)
++    return "";
++  const title = typeof row.title === "string" ? row.title.trim() : "";
++  const p1 = typeof row.p1 === "string" ? row.p1.trim() : "";
++  const body = p1.length > 0 ? p1 : typeof row.content === "string" ? row.content.trim() : "";
++  return [title, body].filter((s) => s.length > 0).join(`
++`);
++}
+ function canonicalizeInMemoryChunkTextForEmbedding(chunkText, startOrdinal, endOrdinal) {
+   const lines = [];
+   for (const rawLine of chunkText.split(/\r?\n/)) {
+@@ -166733,6 +167003,28 @@ function countUnembeddedSessionCompartments(db, projectPath, sessionId, modelId)
+                )`).get(projectPath, sessionId, projectPath, modelId);
+   return typeof row?.n === "number" ? row.n : 0;
+ }
++function countSessionCompartmentEmbedCoverage(db, projectPath, sessionId, modelId) {
++  const row = db.prepare(`SELECT
++               COUNT(*) AS total,
++               SUM(CASE WHEN EXISTS (
++                   SELECT 1 FROM compartment_chunk_embeddings e
++                   WHERE e.compartment_id = c.id
++                     AND e.project_path = ?
++                     AND e.model_id = ?
++               ) THEN 1 ELSE 0 END) AS embedded
++             FROM compartments c
++             JOIN session_projects sp
++               ON sp.session_id = c.session_id
++              AND sp.harness = c.harness
++              AND sp.project_path = ?
++             WHERE c.session_id = ?
++               AND c.start_message IS NOT NULL
++               AND c.end_message IS NOT NULL`).get(projectPath, modelId, projectPath, sessionId);
++  return {
++    total: typeof row?.total === "number" ? row.total : 0,
++    embedded: typeof row?.embedded === "number" ? row.embedded : 0
++  };
++}
+ 
+ // ../plugin/src/features/magic-context/memory/cosine-similarity.ts
+ function cosineSimilarity(a, b) {
+@@ -166875,6 +167167,19 @@ async function withQuietConsole(fn) {
+     console.error = origError;
+   }
+ }
++var nativeRuntimeMissing = false;
++function isNativeRuntimeMissingError(error51) {
++  const message = error51 instanceof Error ? error51.message : String(error51 ?? "");
++  const lower = message.toLowerCase();
++  const code = error51?.code;
++  const name2 = error51?.name;
++  if (code === "ERR_DLOPEN_FAILED" && lower.includes("onnxruntime")) {
++    return true;
++  }
++  if (!lower.includes("onnxruntime-node"))
++    return false;
++  return code === "ERR_MODULE_NOT_FOUND" || name2 === "ResolveMessage" || lower.includes("cannot find package") || lower.includes("cannot find module") || lower.includes("err_module_not_found");
++}
+ function isTransientLoadError(error51) {
+   const message = error51 instanceof Error ? error51.message : String(error51 ?? "");
+   if (!message)
+@@ -166939,6 +167244,9 @@ class LocalEmbeddingProvider {
+     if (this.pipeline) {
+       return true;
+     }
++    if (nativeRuntimeMissing) {
++      return false;
++    }
+     if (this.initPromise) {
+       await this.initPromise;
+       return this.pipeline !== null;
+@@ -167005,7 +167313,12 @@ class LocalEmbeddingProvider {
+           await releaseLock();
+         }
+       } catch (error51) {
+-        log("[magic-context] embedding model failed to load:", error51);
++        if (isNativeRuntimeMissingError(error51)) {
++          nativeRuntimeMissing = true;
++          log("[magic-context] local embedding runtime is not installed (onnxruntime-node missing from this install). Local embeddings are disabled. Fix: reinstall the plugin (run `npx @cortexkit/magic-context@latest doctor --force`), or configure an `openai-compatible`/`ollama` embedding endpoint instead. Existing memories are unaffected.");
++        } else {
++          log("[magic-context] embedding model failed to load:", error51);
++        }
+         this.pipeline = null;
+       } finally {
+         this.initPromise = null;
+@@ -167031,7 +167344,7 @@ class LocalEmbeddingProvider {
+       waiter();
+     }
+   }
+-  async embed(text, signal) {
++  async embed(text, signal, _purpose) {
+     if (signal?.aborted)
+       return null;
+     if (this.disposing)
+@@ -167057,7 +167370,7 @@ class LocalEmbeddingProvider {
+       this.finishInFlight();
+     }
+   }
+-  async embedBatch(texts, signal) {
++  async embedBatch(texts, signal, _purpose) {
+     if (texts.length === 0) {
+       return [];
+     }
+@@ -167196,6 +167509,7 @@ class OpenAICompatibleEmbeddingProvider {
+   model;
+   apiKey;
+   inputType;
++  queryInputType;
+   truncate;
+   initialized = false;
+   failureTimes = [];
+@@ -167208,6 +167522,7 @@ class OpenAICompatibleEmbeddingProvider {
+     this.model = options.model?.trim() ?? "";
+     this.apiKey = options.apiKey?.trim() ?? "";
+     this.inputType = options.inputType?.trim() ?? "";
++    this.queryInputType = options.queryInputType?.trim() ?? "";
+     this.truncate = options.truncate?.trim() ?? "";
+     this.maxInputTokens = typeof options.maxInputTokens === "number" && Number.isFinite(options.maxInputTokens) ? Math.max(1, Math.floor(options.maxInputTokens)) : 512;
+     this.modelId = getEmbeddingProviderIdentity({
+@@ -167235,11 +167550,17 @@ class OpenAICompatibleEmbeddingProvider {
+     this.initialized = true;
+     return true;
+   }
+-  async embed(text, signal) {
+-    const [embedding] = await this.embedBatch([text], signal);
++  resolveInputTypeForPurpose(purpose = "passage") {
++    if (purpose === "query") {
++      return this.queryInputType || this.inputType;
++    }
++    return this.inputType;
++  }
++  async embed(text, signal, purpose) {
++    const [embedding] = await this.embedBatch([text], signal, purpose);
+     return embedding ?? null;
+   }
+-  async embedBatch(texts, signal) {
++  async embedBatch(texts, signal, purpose) {
+     if (texts.length === 0) {
+       return [];
+     }
+@@ -167265,6 +167586,7 @@ class OpenAICompatibleEmbeddingProvider {
+       if (signal) {
+         signal.addEventListener("abort", onOuterAbort, { once: true });
+       }
++      const inputTypeForRequest = this.resolveInputTypeForPurpose(purpose);
+       const response = await fetch(`${this.endpoint}/embeddings`, {
+         method: "POST",
+         headers: {
+@@ -167274,7 +167596,7 @@ class OpenAICompatibleEmbeddingProvider {
+         body: JSON.stringify({
+           model: this.model,
+           input: texts,
+-          ...this.inputType ? { input_type: this.inputType } : {},
++          ...inputTypeForRequest ? { input_type: inputTypeForRequest } : {},
+           ...this.truncate ? { truncate: this.truncate } : {}
+         }),
+         redirect: "error",
+@@ -167519,6 +167841,118 @@ function getDistinctCommitEmbeddingModelIds(db, projectPath) {
+   return new Set(rows.map((row) => typeof row.modelId === "string" ? row.modelId : null));
+ }
+ 
++// ../plugin/src/features/magic-context/git-commits/storage-git-commits.ts
++init_logger();
++var insertStatements = new WeakMap;
++var existingShasStatements = new WeakMap;
++var projectCountStatements = new WeakMap;
++var evictStatements = new WeakMap;
++var evictOverflowStatements = new WeakMap;
++var latestCommitTimeStatements = new WeakMap;
++function getInsertStatement(db) {
++  let stmt = insertStatements.get(db);
++  if (!stmt) {
++    stmt = db.prepare(`INSERT INTO git_commits (sha, project_path, short_sha, message, author, committed_at, indexed_at)
++             VALUES (?, ?, ?, ?, ?, ?, ?)
++             ON CONFLICT(sha) DO UPDATE SET
++                 project_path = excluded.project_path,
++                 short_sha = excluded.short_sha,
++                 message = excluded.message,
++                 author = excluded.author,
++                 committed_at = excluded.committed_at,
++                 indexed_at = excluded.indexed_at
++             WHERE git_commits.message != excluded.message`);
++    insertStatements.set(db, stmt);
++  }
++  return stmt;
++}
++function getExistingShasStatement(db) {
++  let stmt = existingShasStatements.get(db);
++  if (!stmt) {
++    stmt = db.prepare("SELECT sha FROM git_commits WHERE project_path = ?");
++    existingShasStatements.set(db, stmt);
++  }
++  return stmt;
++}
++function getProjectCountStatement(db) {
++  let stmt = projectCountStatements.get(db);
++  if (!stmt) {
++    stmt = db.prepare("SELECT COUNT(*) AS count FROM git_commits WHERE project_path = ?");
++    projectCountStatements.set(db, stmt);
++  }
++  return stmt;
++}
++function getLatestCommitTimeStatement(db) {
++  let stmt = latestCommitTimeStatements.get(db);
++  if (!stmt) {
++    stmt = db.prepare("SELECT MAX(committed_at) AS latest FROM git_commits WHERE project_path = ?");
++    latestCommitTimeStatements.set(db, stmt);
++  }
++  return stmt;
++}
++function getEvictOverflowStatement(db) {
++  let stmt = evictOverflowStatements.get(db);
++  if (!stmt) {
++    stmt = db.prepare(`DELETE FROM git_commits
++             WHERE rowid IN (
++                 SELECT rowid FROM git_commits
++                 WHERE project_path = ?
++                 ORDER BY committed_at DESC, sha DESC
++                 LIMIT -1 OFFSET ?
++             )`);
++    evictOverflowStatements.set(db, stmt);
++  }
++  return stmt;
++}
++function upsertCommits(db, projectPath, commits) {
++  if (commits.length === 0)
++    return { inserted: 0, updated: 0 };
++  const existing = new Set;
++  for (const row of getExistingShasStatement(db).all(projectPath)) {
++    existing.add(row.sha);
++  }
++  let inserted = 0;
++  let updated = 0;
++  const now = Date.now();
++  const insertStmt = getInsertStatement(db);
++  db.transaction(() => {
++    for (const commit of commits) {
++      const result = insertStmt.run(commit.sha, projectPath, commit.shortSha, commit.message, commit.author, commit.committedAtMs, now);
++      if (result.changes > 0) {
++        if (existing.has(commit.sha)) {
++          updated++;
++        } else {
++          inserted++;
++          existing.add(commit.sha);
++        }
++      }
++    }
++  })();
++  return { inserted, updated };
++}
++function getCommitCount(db, projectPath) {
++  const row = getProjectCountStatement(db).get(projectPath);
++  return row?.count ?? 0;
++}
++function getLatestIndexedCommitTimeMs(db, projectPath) {
++  const row = getLatestCommitTimeStatement(db).get(projectPath);
++  return row?.latest ?? null;
++}
++function enforceProjectCap(db, projectPath, maxCommits) {
++  if (maxCommits <= 0)
++    return 0;
++  const count = getCommitCount(db, projectPath);
++  if (count <= maxCommits)
++    return 0;
++  getEvictOverflowStatement(db).run(projectPath, maxCommits);
++  const after = getCommitCount(db, projectPath);
++  const evicted = Math.max(0, count - after);
++  if (evicted > 0) {
++    log(`[git-commits] evicted ${evicted} oldest commits for project ${projectPath} (cap=${maxCommits}, was=${count})`);
++  }
++  return evicted;
++}
++
+ // ../plugin/src/features/magic-context/git-commits/sweep-coordinator.ts
+ var GIT_SWEEP_COOLDOWN_MS = 10 * 60 * 1000;
+ var GIT_SWEEP_LEASE_TTL_MS = 5 * 60 * 1000;
+@@ -167713,8 +168147,12 @@ function repairMisScopedCompartmentChunkEmbeddingsForProject(db, projectPath) {
+ var OFF_PROVIDER_IDENTITY = "embedding-provider:off";
+ var SWEEP_MAX_WALL_CLOCK_MS = 10 * 60 * 1000;
+ var CHUNK_DRAIN_BATCH_SIZE = 8;
+-var MAX_WINDOWS_PER_EMBED_CALL = 16;
++var MAX_WINDOWS_PER_EMBED_CALL = 2;
+ var SESSION_EMBED_LEASE_RENEWAL_MS = 60 * 1000;
++var EMBED_SLICE_RETRY_ATTEMPTS = 3;
++var EMBED_SLICE_RETRY_BASE_MS = 250;
++var EMBED_SLOW_FAILURE_NO_RETRY_MS = 1e4;
++var MAX_CONSECUTIVE_FAILED_BATCHES = 3;
+ var projectRegistrations = new Map;
+ var loadUnembeddedMemoriesStatements = new WeakMap;
+ var globalRegistrationGeneration = 0;
+@@ -167732,6 +168170,7 @@ function resolveEmbeddingConfig(config2) {
+   if (config2.provider === "openai-compatible") {
+     const apiKey = config2.api_key?.trim();
+     const inputType = config2.input_type?.trim();
++    const queryInputType = config2.query_input_type?.trim();
+     const truncate = config2.truncate?.trim();
+     return {
+       provider: "openai-compatible",
+@@ -167739,6 +168178,7 @@ function resolveEmbeddingConfig(config2) {
+       endpoint: config2.endpoint.trim(),
+       ...apiKey ? { api_key: apiKey } : {},
+       ...inputType ? { input_type: inputType } : {},
++      ...queryInputType ? { query_input_type: queryInputType } : {},
+       ...truncate ? { truncate } : {},
+       ...config2.max_input_tokens ? {
+         max_input_tokens: normalizeCompartmentChunkMaxInputTokens(config2.max_input_tokens)
+@@ -167760,6 +168200,7 @@ function createProvider(config2) {
+       model: config2.model,
+       apiKey: config2.api_key,
+       inputType: config2.input_type,
++      queryInputType: config2.query_input_type,
+       truncate: config2.truncate,
+       maxInputTokens: config2.max_input_tokens
+     });
+@@ -167814,7 +168255,9 @@ function snapshotFor(registration) {
+     enabled,
+     gitCommitEnabled,
+     modelId: registration.observationMode || !providerIsOn ? "off" : registration.modelId,
+-    chunkModelId: registration.observationMode || !providerIsOn ? "off" : registration.chunkModelId
++    chunkModelId: registration.observationMode || !providerIsOn ? "off" : registration.chunkModelId,
++    model: registration.observationMode || !providerIsOn ? "off" : ("model" in registration.config) && registration.config.model.trim() ? registration.config.model.trim() : registration.modelId,
++    provider: registration.observationMode || !providerIsOn ? "off" : registration.config.provider ?? "local"
+   };
+ }
+ function disposeProvider(provider) {
+@@ -167940,7 +168383,7 @@ function getOrCreateProjectProvider(registration) {
+   registration.provider = provider;
+   return provider;
+ }
+-async function embedTextForProject(projectIdentity, text, signal) {
++async function embedTextForProject(projectIdentity, text, signal, purpose = "passage") {
+   const registration = projectRegistrations.get(projectIdentity);
+   if (!registration)
+     return null;
+@@ -167949,7 +168392,7 @@ async function embedTextForProject(projectIdentity, text, signal) {
+   const provider = getOrCreateProjectProvider(registration);
+   if (!provider)
+     return null;
+-  const vector = await provider.embed(text, signal);
++  const vector = await provider.embed(text, signal, purpose);
+   if (!vector)
+     return null;
+   const current = projectRegistrations.get(projectIdentity);
+@@ -167958,7 +168401,7 @@ async function embedTextForProject(projectIdentity, text, signal) {
+   }
+   return { vector, modelId, generation };
+ }
+-async function embedBatchForProject(projectIdentity, texts, signal) {
++async function embedBatchForProject(projectIdentity, texts, signal, purpose = "passage") {
+   if (texts.length === 0) {
+     const registration2 = projectRegistrations.get(projectIdentity);
+     if (!registration2 || registration2.observationMode)
+@@ -167974,7 +168417,7 @@ async function embedBatchForProject(projectIdentity, texts, signal) {
+   const provider = getOrCreateProjectProvider(registration);
+   if (!provider)
+     return null;
+-  const vectors = await provider.embedBatch(texts, signal);
++  const vectors = await provider.embedBatch(texts, signal, purpose);
+   const current = projectRegistrations.get(projectIdentity);
+   if (!current || current.generation !== generation || current.runtimeFingerprint !== runtimeFingerprint) {
+     return null;
+@@ -168025,12 +168468,13 @@ async function embedUnembeddedMemoriesForProject(db, projectIdentity, batchSize
+ }
+ async function embedCandidateChunkBatch(db, projectIdentity, modelId, candidates, signal) {
+   const noWork = [];
++  const failed = [];
+   if (candidates.length === 0)
+-    return { embedded: 0, noWork };
++    return { embedded: 0, noWork, failed };
+   const maxInputTokens = getProjectEmbeddingMaxInputTokens(projectIdentity);
+   const prepared = [];
+   for (const candidate of candidates) {
+-    const canonicalText = buildCanonicalChunkTextFromFts(db, candidate.sessionId, candidate.startMessage, candidate.endMessage);
++    const canonicalText = buildCanonicalChunkTextFromFts(db, candidate.sessionId, candidate.startMessage, candidate.endMessage) || buildCompartmentSummaryFallbackText(db, candidate.id);
+     if (canonicalText.length === 0) {
+       noWork.push(candidate.id);
+       continue;
+@@ -168043,7 +168487,7 @@ async function embedCandidateChunkBatch(db, projectIdentity, modelId, candidates
+     prepared.push({ candidate, windows });
+   }
+   if (prepared.length === 0)
+-    return { embedded: 0, noWork };
++    return { embedded: 0, noWork, failed };
+   let embedded = 0;
+   let i = 0;
+   while (i < prepared.length) {
+@@ -168060,35 +168504,60 @@ async function embedCandidateChunkBatch(db, projectIdentity, modelId, candidates
+     const texts = [];
+     for (const item of slice)
+       texts.push(...item.windows.map((w) => w.text));
+-    try {
+-      const result = await embedBatchForProject(projectIdentity, texts, signal);
+-      if (!result)
+-        continue;
++    const persistedIds = new Set;
++    for (let attempt = 0;attempt < EMBED_SLICE_RETRY_ATTEMPTS; attempt++) {
+       if (signal?.aborted)
+         break;
+-      let offset = 0;
+-      for (const item of slice) {
+-        const vectors = result.vectors.slice(offset, offset + item.windows.length);
+-        offset += item.windows.length;
+-        if (vectors.length !== item.windows.length || vectors.some((v) => !v)) {
+-          continue;
++      let result = null;
++      const attemptStart = Date.now();
++      try {
++        result = await embedBatchForProject(projectIdentity, texts, signal);
++      } catch (error51) {
++        log("[magic-context] failed to proactively embed compartment chunks:", error51);
++      }
++      if (signal?.aborted)
++        break;
++      if (result) {
++        let offset = 0;
++        for (const item of slice) {
++          const vectors = result.vectors.slice(offset, offset + item.windows.length);
++          offset += item.windows.length;
++          if (persistedIds.has(item.candidate.id))
++            continue;
++          if (vectors.length !== item.windows.length || vectors.some((v) => !v)) {
++            continue;
++          }
++          const rows = item.windows.map((window, index) => ({
++            compartmentId: item.candidate.id,
++            sessionId: item.candidate.sessionId,
++            projectPath: projectIdentity,
++            window,
++            modelId,
++            vector: vectors[index]
++          }));
++          replaceCompartmentChunkEmbeddings(db, rows);
++          persistedIds.add(item.candidate.id);
+         }
+-        const rows = item.windows.map((window, index) => ({
+-          compartmentId: item.candidate.id,
+-          sessionId: item.candidate.sessionId,
+-          projectPath: projectIdentity,
+-          window,
+-          modelId,
+-          vector: vectors[index]
+-        }));
+-        replaceCompartmentChunkEmbeddings(db, rows);
+-        embedded += 1;
+       }
+-    } catch (error51) {
+-      log("[magic-context] failed to proactively embed compartment chunks:", error51);
++      if (persistedIds.size === slice.length)
++        break;
++      if (persistedIds.size > 0)
++        break;
++      if (Date.now() - attemptStart >= EMBED_SLOW_FAILURE_NO_RETRY_MS)
++        break;
++      if (attempt < EMBED_SLICE_RETRY_ATTEMPTS - 1) {
++        await new Promise((resolve4) => setTimeout(resolve4, EMBED_SLICE_RETRY_BASE_MS * 2 ** attempt));
++      }
++    }
++    embedded += persistedIds.size;
++    if (!signal?.aborted) {
++      for (const item of slice) {
++        if (!persistedIds.has(item.candidate.id))
++          failed.push(item.candidate.id);
++      }
+     }
+   }
+-  return { embedded, noWork };
++  return { embedded, noWork, failed };
+ }
+ async function embedSessionCompartmentChunks(db, projectIdentity, sessionId, options) {
+   const snapshot = getProjectEmbeddingSnapshot(projectIdentity);
+@@ -168111,9 +168580,11 @@ async function embedSessionCompartmentChunks(db, projectIdentity, sessionId, opt
+   renewal.unref?.();
+   const batchSize = Math.max(1, options?.batchSize ?? CHUNK_DRAIN_BATCH_SIZE);
+   const skipIds = [];
++  const failedIds = [];
+   let embedded = 0;
+   let aborted2 = false;
+-  let providerStalled = false;
++  let providerDown = false;
++  let consecutiveFailedBatches = 0;
+   try {
+     options?.onProgress?.({ embedded, total });
+     for (;; ) {
+@@ -168121,15 +168592,26 @@ async function embedSessionCompartmentChunks(db, projectIdentity, sessionId, opt
+         aborted2 = true;
+         break;
+       }
+-      const candidates = loadUnembeddedSessionChunkCandidates(db, projectIdentity, sessionId, snapshot.chunkModelId, batchSize, skipIds);
++      const candidates = loadUnembeddedSessionChunkCandidates(db, projectIdentity, sessionId, snapshot.chunkModelId, batchSize, [...skipIds, ...failedIds]);
+       if (candidates.length === 0)
+         break;
+-      const { embedded: n, noWork } = await embedCandidateChunkBatch(db, projectIdentity, snapshot.chunkModelId, candidates, options?.signal);
++      const {
++        embedded: n,
++        noWork,
++        failed
++      } = await embedCandidateChunkBatch(db, projectIdentity, snapshot.chunkModelId, candidates, options?.signal);
+       for (const id of noWork)
+         skipIds.push(id);
++      for (const id of failed)
++        failedIds.push(id);
+       if (n === 0 && noWork.length === 0) {
+-        providerStalled = true;
+-        break;
++        consecutiveFailedBatches += 1;
++        if (consecutiveFailedBatches >= MAX_CONSECUTIVE_FAILED_BATCHES) {
++          providerDown = true;
++          break;
++        }
++      } else {
++        consecutiveFailedBatches = 0;
+       }
+       embedded += n;
+       options?.onProgress?.({ embedded: Math.min(embedded, total), total });
+@@ -168137,16 +168619,50 @@ async function embedSessionCompartmentChunks(db, projectIdentity, sessionId, opt
+     }
+   } finally {
+     clearInterval(renewal);
+-    releaseGitSweepLease(db, projectIdentity, holderId);
++    try {
++      releaseGitSweepLease(db, projectIdentity, holderId);
++    } catch (error51) {
++      log("[magic-context] embed drain: lease release failed (will TTL-expire):", error51);
++    }
+   }
+   if (aborted2)
+-    return { status: "aborted", embedded, total };
+-  if (providerStalled) {
++    return { status: "aborted", embedded, total, failed: failedIds.length };
++  if (providerDown || failedIds.length > 0) {
+     const remaining = Math.max(0, countUnembeddedSessionCompartments(db, projectIdentity, sessionId, snapshot.chunkModelId) - skipIds.length);
+-    if (remaining > 0)
+-      return { status: "stalled", embedded, total, remaining };
++    if (remaining > 0) {
++      return { status: "stalled", embedded, total, remaining, failed: failedIds.length };
++    }
++  }
++  return { status: "done", embedded, total, failed: failedIds.length };
++}
++function getEmbeddingCoverageStatus(db, projectIdentity, sessionId) {
++  const snapshot = getProjectEmbeddingSnapshot(projectIdentity);
++  if (!snapshot?.enabled || snapshot.chunkModelId === "off") {
++    return {
++      enabled: false,
++      model: snapshot?.model ?? "off",
++      provider: snapshot?.provider ?? "off",
++      session: { embedded: 0, total: 0 },
++      memories: { embedded: 0, total: 0 },
++      commits: { embedded: 0, total: 0, gitEnabled: false }
++    };
+   }
+-  return { status: "done", embedded, total };
++  const session = countSessionCompartmentEmbedCoverage(db, projectIdentity, sessionId, snapshot.chunkModelId);
++  const memories = getMemoryEmbedCoverage(db, projectIdentity, snapshot.modelId);
++  const gitEnabled = snapshot.gitCommitEnabled;
++  const commits = gitEnabled ? {
++    embedded: countEmbeddedCommits(db, projectIdentity),
++    total: getCommitCount(db, projectIdentity),
++    gitEnabled: true
++  } : { embedded: 0, total: 0, gitEnabled: false };
++  return {
++    enabled: true,
++    model: snapshot.model,
++    provider: snapshot.provider,
++    session,
++    memories,
++    commits
++  };
+ }
+ 
+ // ../plugin/src/features/magic-context/memory/embedding.ts
+@@ -168167,6 +168683,7 @@ function createProvider2(config2) {
+       model: config2.model,
+       apiKey: config2.api_key,
+       inputType: config2.input_type,
++      queryInputType: config2.query_input_type,
+       truncate: config2.truncate,
+       maxInputTokens: config2.max_input_tokens
+     });
+@@ -168195,118 +168712,6 @@ async function embedText(text, signal) {
+ }
+ var SWEEP_MAX_WALL_CLOCK_MS2 = 10 * 60 * 1000;
+ 
+-// ../plugin/src/features/magic-context/git-commits/storage-git-commits.ts
+-init_logger();
+-var insertStatements = new WeakMap;
+-var existingShasStatements = new WeakMap;
+-var projectCountStatements = new WeakMap;
+-var evictStatements = new WeakMap;
+-var evictOverflowStatements = new WeakMap;
+-var latestCommitTimeStatements = new WeakMap;
+-function getInsertStatement(db) {
+-  let stmt = insertStatements.get(db);
+-  if (!stmt) {
+-    stmt = db.prepare(`INSERT INTO git_commits (sha, project_path, short_sha, message, author, committed_at, indexed_at)
+-             VALUES (?, ?, ?, ?, ?, ?, ?)
+-             ON CONFLICT(sha) DO UPDATE SET
+-                 project_path = excluded.project_path,
+-                 short_sha = excluded.short_sha,
+-                 message = excluded.message,
+-                 author = excluded.author,
+-                 committed_at = excluded.committed_at,
+-                 indexed_at = excluded.indexed_at
+-             WHERE git_commits.message != excluded.message`);
+-    insertStatements.set(db, stmt);
+-  }
+-  return stmt;
+-}
+-function getExistingShasStatement(db) {
+-  let stmt = existingShasStatements.get(db);
+-  if (!stmt) {
+-    stmt = db.prepare("SELECT sha FROM git_commits WHERE project_path = ?");
+-    existingShasStatements.set(db, stmt);
+-  }
+-  return stmt;
+-}
+-function getProjectCountStatement(db) {
+-  let stmt = projectCountStatements.get(db);
+-  if (!stmt) {
+-    stmt = db.prepare("SELECT COUNT(*) AS count FROM git_commits WHERE project_path = ?");
+-    projectCountStatements.set(db, stmt);
+-  }
+-  return stmt;
+-}
+-function getLatestCommitTimeStatement(db) {
+-  let stmt = latestCommitTimeStatements.get(db);
+-  if (!stmt) {
+-    stmt = db.prepare("SELECT MAX(committed_at) AS latest FROM git_commits WHERE project_path = ?");
+-    latestCommitTimeStatements.set(db, stmt);
+-  }
+-  return stmt;
+-}
+-function getEvictOverflowStatement(db) {
+-  let stmt = evictOverflowStatements.get(db);
+-  if (!stmt) {
+-    stmt = db.prepare(`DELETE FROM git_commits
+-             WHERE rowid IN (
+-                 SELECT rowid FROM git_commits
+-                 WHERE project_path = ?
+-                 ORDER BY committed_at DESC, sha DESC
+-                 LIMIT -1 OFFSET ?
+-             )`);
+-    evictOverflowStatements.set(db, stmt);
+-  }
+-  return stmt;
+-}
+-function upsertCommits(db, projectPath, commits) {
+-  if (commits.length === 0)
+-    return { inserted: 0, updated: 0 };
+-  const existing = new Set;
+-  for (const row of getExistingShasStatement(db).all(projectPath)) {
+-    existing.add(row.sha);
+-  }
+-  let inserted = 0;
+-  let updated = 0;
+-  const now = Date.now();
+-  const insertStmt = getInsertStatement(db);
+-  db.transaction(() => {
+-    for (const commit of commits) {
+-      const result = insertStmt.run(commit.sha, projectPath, commit.shortSha, commit.message, commit.author, commit.committedAtMs, now);
+-      if (result.changes > 0) {
+-        if (existing.has(commit.sha)) {
+-          updated++;
+-        } else {
+-          inserted++;
+-          existing.add(commit.sha);
+-        }
+-      }
+-    }
+-  })();
+-  return { inserted, updated };
+-}
+-function getCommitCount(db, projectPath) {
+-  const row = getProjectCountStatement(db).get(projectPath);
+-  return row?.count ?? 0;
+-}
+-function getLatestIndexedCommitTimeMs(db, projectPath) {
+-  const row = getLatestCommitTimeStatement(db).get(projectPath);
+-  return row?.latest ?? null;
+-}
+-function enforceProjectCap(db, projectPath, maxCommits) {
+-  if (maxCommits <= 0)
+-    return 0;
+-  const count = getCommitCount(db, projectPath);
+-  if (count <= maxCommits)
+-    return 0;
+-  getEvictOverflowStatement(db).run(projectPath, maxCommits);
+-  const after = getCommitCount(db, projectPath);
+-  const evicted = Math.max(0, count - after);
+-  if (evicted > 0) {
+-    log(`[git-commits] evicted ${evicted} oldest commits for project ${projectPath} (cap=${maxCommits}, was=${count})`);
+-  }
+-  return evicted;
+-}
+-
+ // ../plugin/src/features/magic-context/git-commits/indexer.ts
+ var MS_PER_DAY = 24 * 60 * 60 * 1000;
+ var EMBED_BATCH_SIZE = 16;
+@@ -168715,7 +169120,7 @@ async function sweepProject(reg, origin, db, gitCommitEnabled = getProjectEmbedd
+       experimentalPinKeyFiles: reg.experimentalPinKeyFiles,
+       projectIdentity: reg.projectIdentity,
+       sessionDirectoryOverride: reg.directory,
+-      fallbackModels: resolveFallbackChain(DREAMER_AGENT, reg.dreamerConfig.fallback_models)
++      fallbackModels: resolveFallbackChain(reg.dreamerConfig.fallback_models)
+     });
+   } catch (error51) {
+     log(`[dreamer] timer-triggered queue processing failed for ${reg.projectIdentity}:`, error51);
+@@ -169591,7 +169996,7 @@ async function awaitInFlightDreamers() {
+ function createPiDreamerClient(opts) {
+   const runner2 = piSubagentRunnerFactory();
+   const model = opts.config.model;
+-  const fallbackModels = resolveFallbackChain(DREAMER_AGENT, opts.config.fallback_models);
++  const fallbackModels = resolveFallbackChain(opts.config.fallback_models);
+   const session = {
+     create: async (args) => {
+       const sessionId = `magic-context-pi-dream-${++sessionCounter}`;
+@@ -169836,87 +170241,229 @@ function registerCtxDreamCommand(pi, deps) {
+   });
+ }
+ 
+-// src/commands/ctx-embed-history.ts
+-function registerCtxEmbedHistoryCommand(pi, deps) {
+-  pi.registerCommand("ctx-embed-history", {
+-    description: "Embed all of this session's history compartments for semantic search, in one pass",
+-    handler: async (_args, ctx) => {
++// ../plugin/src/hooks/magic-context/embed-session-state.ts
++var embedPauseBySession = new Set;
++var embedRunStateBySession = new Map;
++var autoEmbedAttemptedBySession = new Set;
++
++// ../plugin/src/hooks/magic-context/format-embed-status.ts
++function formatEmbedStatusText(coverage, drain) {
++  if (!coverage.enabled) {
++    return "Embedding is off (no provider configured).";
++  }
++  const lines = [];
++  lines.push(`Embedding — model: ${coverage.model} (${coverage.provider})`);
++  lines.push(`This session:  ${coverage.session.embedded} / ${coverage.session.total} compartments embedded`);
++  lines.push(`Project memories:  ${coverage.memories.embedded} / ${coverage.memories.total} embedded`);
++  if (coverage.commits.gitEnabled) {
++    lines.push(`Git commits:  ${coverage.commits.embedded} / ${coverage.commits.total}`);
++  } else {
++    lines.push("Git commits:  0 / 0 (git indexing off)");
++  }
++  let drainLine = "Drain: idle";
++  switch (drain.status) {
++    case "running": {
++      const e = drain.embedded ?? coverage.session.embedded;
++      const t = drain.total ?? coverage.session.total;
++      const failedSuffix = drain.failed && drain.failed > 0 ? ` (${drain.failed} failed)` : "";
++      drainLine = `Drain: running ${e}/${t}${failedSuffix}`;
++      break;
++    }
++    case "paused": {
++      const e = drain.embedded ?? coverage.session.embedded;
++      const t = drain.total ?? coverage.session.total;
++      drainLine = `Drain: paused ${e}/${t}`;
++      break;
++    }
++    case "stopped":
++      drainLine = "Drain: stopped (provider down)";
++      break;
++    default:
++      drainLine = "Drain: idle";
++  }
++  lines.push(drainLine);
++  return lines.join(`
++`);
++}
++
++// src/commands/ctx-embed.ts
++function clearPiEmbedSessionState(sessionId) {
++  embedPauseBySession.delete(sessionId);
++  const ctrl = embedRunStateBySession.get(sessionId);
++  if (ctrl) {
++    ctrl.abort();
++    embedRunStateBySession.delete(sessionId);
++  }
++  autoEmbedAttemptedBySession.delete(sessionId);
++}
++async function runEmbedDrain(db, projectIdentity, sessionId) {
++  const activeCtrl = embedRunStateBySession.get(sessionId);
++  if (activeCtrl && !activeCtrl.signal.aborted) {
++    return {
++      text: `## /ctx-embed
++
++Embedding is already running for this session.`,
++      level: "info"
++    };
++  }
++  embedPauseBySession.delete(sessionId);
++  const prior = embedRunStateBySession.get(sessionId);
++  if (prior)
++    prior.abort();
++  const controller = new AbortController;
++  embedRunStateBySession.set(sessionId, controller);
++  let outcome;
++  try {
++    outcome = await embedSessionCompartmentChunks(db, projectIdentity, sessionId, {
++      signal: controller.signal
++    });
++  } finally {
++    if (embedRunStateBySession.get(sessionId) === controller) {
++      embedRunStateBySession.delete(sessionId);
++    }
++  }
++  switch (outcome.status) {
++    case "nothing":
++      return {
++        text: `## /ctx-embed
++
++All of this session's history is already embedded.`,
++        level: "info"
++      };
++    case "disabled":
++      return {
++        text: `## /ctx-embed
++
++No embedding provider is configured, so there is nothing to embed.`,
++        level: "info"
++      };
++    case "busy":
++      return {
++        text: `## /ctx-embed
++
++Embedding is already running for this project. Try again shortly.`,
++        level: "info"
++      };
++    case "aborted": {
++      const cov = getEmbeddingCoverageStatus(db, projectIdentity, sessionId);
++      return {
++        text: `## /ctx-embed
++
++Paused at ${cov.session.embedded}/${cov.session.total} compartments embedded.`,
++        level: "info"
++      };
++    }
++    case "stalled":
++      return {
++        text: `## /ctx-embed
++
++Embedded ${outcome.embedded} compartment${outcome.embedded === 1 ? "" : "s"}; ${outcome.remaining} could not be embedded (the provider returned no result). Run /ctx-embed start again to retry them.`,
++        level: "info"
++      };
++    default:
++      return {
++        text: `## /ctx-embed
++
++Embedded ${outcome.embedded} compartment${outcome.embedded === 1 ? "" : "s"} of history for semantic search.`,
++        level: "success"
++      };
++  }
++}
++function registerCtxEmbedCommand(pi, deps) {
++  pi.registerCommand("ctx-embed", {
++    description: "Embedding status, or start/pause history compartment embedding (start | pause)",
++    handler: async (args, ctx) => {
+       const sessionId = resolveSessionId(ctx);
+       if (!sessionId) {
+         sendCtxStatusMessage(pi, {
+-          title: "/ctx-embed-history",
+-          text: `## /ctx-embed-history
++          title: "/ctx-embed",
++          text: `## /ctx-embed
+ 
+ No active Pi session is available.`,
+           level: "error"
+         });
+         return;
+       }
++      const project = deps.resolveProject?.(ctx) ?? {
++        projectDir: deps.projectDir,
++        projectIdentity: deps.projectIdentity
++      };
++      const sub = args.trim().toLowerCase();
++      if (sub === "pause") {
++        embedPauseBySession.add(sessionId);
++        const ctrl = embedRunStateBySession.get(sessionId);
++        if (ctrl)
++          ctrl.abort();
++        const cov = getEmbeddingCoverageStatus(deps.db, project.projectIdentity, sessionId);
++        sendCtxStatusMessage(pi, {
++          title: "/ctx-embed",
++          text: `## /ctx-embed
++
++Paused at ${cov.session.embedded}/${cov.session.total} compartments embedded.`,
++          level: "info"
++        });
++        return;
++      }
+       if (deps.memoryEnabled === false) {
+         sendCtxStatusMessage(pi, {
+-          title: "/ctx-embed-history",
+-          text: `## /ctx-embed-history
++          title: "/ctx-embed",
++          text: `## /ctx-embed
+ 
+ Memory is disabled for this project, so there is no semantic embedding to backfill.`,
+           level: "info"
+         });
+         return;
+       }
+-      const project = deps.resolveProject?.(ctx) ?? {
+-        projectDir: deps.projectDir,
+-        projectIdentity: deps.projectIdentity
+-      };
+       await ensureProjectRegisteredFromPiDirectory(project.projectDir, deps.db);
+-      const outcome = await embedSessionCompartmentChunks(deps.db, project.projectIdentity, sessionId);
+-      const { text, level } = (() => {
+-        switch (outcome.status) {
+-          case "nothing":
+-            return {
+-              text: `## /ctx-embed-history
+-
+-All of this session's history is already embedded.`,
+-              level: "info"
+-            };
+-          case "disabled":
+-            return {
+-              text: `## /ctx-embed-history
+-
+-No embedding provider is configured, so there is nothing to embed.`,
+-              level: "info"
+-            };
+-          case "busy":
+-            return {
+-              text: `## /ctx-embed-history
+-
+-Embedding is already running for this project — ${outcome.total} compartment${outcome.total === 1 ? "" : "s"} still pending. Try again shortly.`,
+-              level: "info"
+-            };
+-          case "stalled":
+-            return {
+-              text: `## /ctx-embed-history
+-
+-Embedded ${outcome.embedded} compartment${outcome.embedded === 1 ? "" : "s"}; ${outcome.remaining} could not be embedded (the provider returned no result). Run /ctx-embed-history again to retry them.`,
+-              level: "info"
+-            };
+-          default:
+-            return {
+-              text: `## /ctx-embed-history
++      if (sub === "start") {
++        const { text, level } = await runEmbedDrain(deps.db, project.projectIdentity, sessionId);
++        sendCtxStatusMessage(pi, { title: "/ctx-embed", text, level });
++        return;
++      }
++      if (sub !== "") {
++        sendCtxStatusMessage(pi, {
++          title: "/ctx-embed",
++          text: "## /ctx-embed\n\nUsage: `/ctx-embed` (status), `/ctx-embed start`, or `/ctx-embed pause`.",
++          level: "info"
++        });
++        return;
++      }
++      const coverage = getEmbeddingCoverageStatus(deps.db, project.projectIdentity, sessionId);
++      const statusText = formatEmbedStatusText(coverage, { status: "idle" });
++      sendCtxStatusMessage(pi, {
++        title: "/ctx-embed",
++        text: `## Embedding Status
+ 
+-Embedded ${outcome.embedded} compartment${outcome.embedded === 1 ? "" : "s"} of history for semantic search.`,
+-              level: "success"
+-            };
+-        }
+-      })();
+-      sendCtxStatusMessage(pi, { title: "/ctx-embed-history", text, level }, {
+-        sessionId,
+-        projectIdentity: project.projectIdentity,
+-        status: outcome.status,
+-        embedded: outcome.embedded,
+-        total: outcome.total
++${statusText}`,
++        level: "info"
+       });
+     }
+   });
+ }
++function maybeAutoEmbedPiSession(deps, sessionId, projectDir, projectIdentity, notify) {
++  if (autoEmbedAttemptedBySession.has(sessionId))
++    return;
++  if (embedPauseBySession.has(sessionId))
++    return;
++  if (deps.memoryEnabled === false)
++    return;
++  autoEmbedAttemptedBySession.add(sessionId);
++  (async () => {
++    try {
++      await new Promise((resolve5) => setTimeout(resolve5, 0));
++      await ensureProjectRegisteredFromPiDirectory(projectDir, deps.db);
++      const coverage = getEmbeddingCoverageStatus(deps.db, projectIdentity, sessionId);
++      if (!coverage.enabled)
++        return;
++      const remaining = coverage.session.total - coverage.session.embedded;
++      if (remaining <= 0)
++        return;
++      notify(`Embedding ${remaining} compartment${remaining === 1 ? "" : "s"} of history in the background…`);
++      const { text } = await runEmbedDrain(deps.db, projectIdentity, sessionId);
++      notify(text.replace(/^## \/ctx-embed\n\n/, ""));
++    } catch {}
++  })();
++}
+ 
+ // ../plugin/src/hooks/magic-context/execute-flush.ts
+ init_logger();
+@@ -170010,10 +170557,9 @@ function makeToolCompositeKey(ownerMsgId, callId) {
+ }
+ var GET_COUNTER_SQL = `SELECT counter FROM session_meta WHERE session_id = ?`;
+ var GET_ASSIGNMENTS_SQL = "SELECT message_id, tag_number, type, tool_owner_message_id FROM tags WHERE session_id = ? ORDER BY tag_number ASC";
++var GET_ASSIGNMENTS_SCOPED_SQL = "SELECT message_id, tag_number, type, tool_owner_message_id FROM tags WHERE session_id = ? AND tag_number >= ? ORDER BY tag_number ASC";
+ var PROBE_DATA_VERSION_SQL = "PRAGMA main.data_version";
+-var PROBE_TOTAL_CHANGES_SQL = "SELECT total_changes() AS tc";
+ var probeDataVersionStatements = new WeakMap;
+-var probeTotalChangesStatements = new WeakMap;
+ function getProbeDataVersionStatement(db) {
+   let stmt = probeDataVersionStatements.get(db);
+   if (!stmt) {
+@@ -170022,14 +170568,6 @@ function getProbeDataVersionStatement(db) {
+   }
+   return stmt;
+ }
+-function getProbeTotalChangesStatement(db) {
+-  let stmt = probeTotalChangesStatements.get(db);
+-  if (!stmt) {
+-    stmt = db.prepare(PROBE_TOTAL_CHANGES_SQL);
+-    probeTotalChangesStatements.set(db, stmt);
+-  }
+-  return stmt;
+-}
+ function isAssignmentRow(row) {
+   if (row === null || typeof row !== "object") {
+     return false;
+@@ -170222,20 +170760,18 @@ function createTagger() {
+   }
+   function probeSignature(db) {
+     const dvRow = getProbeDataVersionStatement(db).get();
+-    const tcRow = getProbeTotalChangesStatement(db).get();
+     return {
+-      dataVersion: dvRow?.data_version ?? 0,
+-      totalChanges: tcRow?.tc ?? 0
++      dataVersion: dvRow?.data_version ?? 0
+     };
+   }
+-  function initFromDb(sessionId, db) {
++  function initFromDb(sessionId, db, floor = 0) {
+     const probe = probeSignature(db);
+     const cached2 = loadSignatures.get(sessionId);
+-    if (cached2 !== undefined && cached2.db === db && cached2.dataVersion === probe.dataVersion && cached2.totalChanges === probe.totalChanges) {
++    if (cached2 !== undefined && cached2.db === db && cached2.dataVersion === probe.dataVersion && cached2.floor === floor) {
+       return;
+     }
+     const row = db.prepare(GET_COUNTER_SQL).get(sessionId);
+-    const assignmentRows = db.prepare(GET_ASSIGNMENTS_SQL).all(sessionId).filter(isAssignmentRow);
++    const assignmentRows = (floor > 0 ? db.prepare(GET_ASSIGNMENTS_SCOPED_SQL).all(sessionId, floor) : db.prepare(GET_ASSIGNMENTS_SQL).all(sessionId)).filter(isAssignmentRow);
+     const sessionAssignments = getSessionAssignments(sessionId);
+     sessionAssignments.clear();
+     let maxTagNumber = 0;
+@@ -170256,7 +170792,7 @@ function createTagger() {
+     loadSignatures.set(sessionId, {
+       db,
+       dataVersion: probe.dataVersion,
+-      totalChanges: probe.totalChanges
++      floor
+     });
+   }
+   function cleanup(sessionId) {
+@@ -170280,6 +170816,162 @@ function createTagger() {
+   };
+ }
+ 
++// ../plugin/src/features/magic-context/transform-decision-log.ts
++var canonicalReasons = new Set([
++  "system_hash",
++  "model_change",
++  "project_memory_epoch",
++  "ttl_idle",
++  "explicit_flush",
++  "max_mutation_id",
++  "first_render",
++  "pressure_refold",
++  "upgrade_state",
++  "cached_m1_missing"
++]);
++var piReasonAliases = {
++  project_memory_change: "project_memory_epoch",
++  pending_mutations: "max_mutation_id",
++  renderer_upgrade: "upgrade_state",
++  cache_invalid: "cached_m1_missing",
++  drift: "pressure_refold"
++};
++var sharedReasonAliases = {
++  model_key: "model_change",
++  pressure: "pressure_refold"
++};
++var pendingDecisionBySession = new Map;
++var pendingPiDecisionBySession = new Map;
++var lastBoundMessageIdBySession = new Map;
++var scheduledWriteTokensBySession = new Map;
++var writerOverrideForTests = null;
++function normalizeMaterializeReason(harness, reason, rematerialized) {
++  const raw = typeof reason === "string" ? reason.trim() : "";
++  if (raw.length > 0) {
++    const alias = sharedReasonAliases[raw] ?? (harness === "pi" ? piReasonAliases[raw] : undefined) ?? undefined;
++    if (alias)
++      return alias;
++    if (canonicalReasons.has(raw))
++      return raw;
++    return null;
++  }
++  return rematerialized ? "pressure_refold" : null;
++}
++function recordPendingPiTransformDecision(sessionId, decision, snapshotNewestAssistantEntryId) {
++  if (!decision.bustedThisPass)
++    return;
++  pendingPiDecisionBySession.set(sessionId, {
++    ...decision,
++    snapshotNewestAssistantEntryId
++  });
++}
++function findNewestPiAssistantEntryId(entries) {
++  if (!Array.isArray(entries))
++    return null;
++  for (let i = entries.length - 1;i >= 0; i--) {
++    const entry = entries[i];
++    if (!entry || typeof entry !== "object")
++      continue;
++    const row = entry;
++    if (row.type !== "message" || typeof row.id !== "string" || row.id.length === 0) {
++      continue;
++    }
++    const message = row.message;
++    if (message && typeof message === "object" && message.role === "assistant") {
++      return row.id;
++    }
++  }
++  return null;
++}
++function schedulePiTransformDecisionResolve(args) {
++  const pending = pendingPiDecisionBySession.get(args.sessionId);
++  if (!pending)
++    return false;
++  const targetMessageId = findNewestPiAssistantEntryIdAfter(args.branchEntries, pending.snapshotNewestAssistantEntryId);
++  if (!targetMessageId)
++    return false;
++  const dbPath = getDatabasePath(args.db);
++  if (!dbPath)
++    return false;
++  pendingPiDecisionBySession.delete(args.sessionId);
++  const token = addScheduledWriteToken(args.sessionId);
++  setTimeout(() => {
++    try {
++      if (!hasScheduledWriteToken(args.sessionId, token))
++        return;
++      writeTransformDecisionBestEffort(dbPath, {
++        ...pending,
++        sessionId: args.sessionId,
++        harness: "pi",
++        messageId: targetMessageId
++      });
++    } finally {
++      deleteScheduledWriteToken(args.sessionId, token);
++    }
++  }, 0);
++  return true;
++}
++function addScheduledWriteToken(sessionId) {
++  const token = Symbol(sessionId);
++  let tokens = scheduledWriteTokensBySession.get(sessionId);
++  if (!tokens) {
++    tokens = new Set;
++    scheduledWriteTokensBySession.set(sessionId, tokens);
++  }
++  tokens.add(token);
++  return token;
++}
++function hasScheduledWriteToken(sessionId, token) {
++  return scheduledWriteTokensBySession.get(sessionId)?.has(token) === true;
++}
++function deleteScheduledWriteToken(sessionId, token) {
++  const tokens = scheduledWriteTokensBySession.get(sessionId);
++  if (!tokens)
++    return;
++  tokens.delete(token);
++  if (tokens.size === 0)
++    scheduledWriteTokensBySession.delete(sessionId);
++}
++function findNewestPiAssistantEntryIdAfter(entries, snapshotNewestAssistantEntryId) {
++  if (!Array.isArray(entries))
++    return null;
++  for (let i = entries.length - 1;i >= 0; i--) {
++    const entry = entries[i];
++    if (!entry || typeof entry !== "object")
++      continue;
++    const row = entry;
++    if (row.type !== "message" || typeof row.id !== "string" || row.id.length === 0) {
++      continue;
++    }
++    if (snapshotNewestAssistantEntryId !== null && row.id === snapshotNewestAssistantEntryId) {
++      continue;
++    }
++    const message = row.message;
++    if (message && typeof message === "object" && message.role === "assistant") {
++      return row.id;
++    }
++  }
++  return null;
++}
++function writeTransformDecisionBestEffort(dbPath, row) {
++  try {
++    const writer = writerOverrideForTests ?? writeTransformDecisionRow;
++    writer(dbPath, row);
++  } catch {}
++}
++function writeTransformDecisionRow(dbPath, row) {
++  const db = new Database(dbPath);
++  try {
++    db.exec("PRAGMA busy_timeout=0");
++    db.prepare(`INSERT OR REPLACE INTO transform_decisions (
++                session_id, harness, message_id, ts_ms, decision, materialized,
++                materialize_reason, emergency, dropped_tokens, dropped_count, input_tokens
++            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(row.sessionId, row.harness, row.messageId, row.tsMs, row.decision, row.materialized ? 1 : 0, row.materializeReason, row.emergency ? 1 : 0, Math.max(0, Math.floor(row.droppedTokens)), Math.max(0, Math.floor(row.droppedCount)), Math.max(0, Math.floor(row.inputTokens)));
++  } finally {
++    closeQuietly(db);
++  }
++}
++
+ // ../plugin/src/features/magic-context/work-metrics.ts
+ function asNumber2(value) {
+   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+@@ -170331,76 +171023,12 @@ function computePiWorkMetrics(sessionEntries) {
+   return { newWorkTokens, totalInputTokens };
+ }
+ 
+-// ../plugin/src/hooks/magic-context/system-injection-stripper.ts
+-var SYSTEM_INJECTION_MARKERS = [
+-  "<!-- OMO_INTERNAL_INITIATOR -->",
+-  "[SYSTEM DIRECTIVE: MAGIC-CONTEXT",
+-  "[SYSTEM DIRECTIVE: OH-MY-OPENCODE",
+-  "[Category+Skill Reminder]",
+-  "[EDIT ERROR - IMMEDIATE ACTION REQUIRED]",
+-  "[task CALL FAILED - IMMEDIATE RETRY REQUIRED]",
+-  "[EMERGENCY CONTEXT WINDOW WARNING]",
+-  "Unstable background agent appears idle",
+-  "**THE SUBAGENT JUST CLAIMED THIS TASK IS DONE."
+-];
+-var SYSTEM_REMINDER_REGEX = /<system-reminder>[\s\S]*?<\/system-reminder>/gi;
+-var OMO_MARKER_REGEX = /<!-- OMO_INTERNAL_INITIATOR -->/g;
+-function stripSystemInjection(text) {
+-  let hasInjection = false;
+-  for (const marker of SYSTEM_INJECTION_MARKERS) {
+-    if (text.includes(marker)) {
+-      hasInjection = true;
+-      break;
+-    }
+-  }
+-  if (SYSTEM_REMINDER_REGEX.test(text))
+-    hasInjection = true;
+-  SYSTEM_REMINDER_REGEX.lastIndex = 0;
+-  if (!hasInjection)
+-    return null;
+-  let cleaned = text;
+-  cleaned = cleaned.replace(SYSTEM_REMINDER_REGEX, "");
+-  cleaned = cleaned.replace(OMO_MARKER_REGEX, "");
+-  cleaned = cleaned.replace(/\[SYSTEM DIRECTIVE: OH-MY-(?:OPENCODE|CLAUDE)[^\]]*\][\s\S]*?(?=\n\n(?!\s*[-*])|$)/g, "");
+-  for (const marker of SYSTEM_INJECTION_MARKERS) {
+-    if (marker.startsWith("<!-- ") || marker.startsWith("[SYSTEM DIRECTIVE"))
+-      continue;
+-    const idx = cleaned.indexOf(marker);
+-    if (idx === -1)
+-      continue;
+-    const blockEnd = cleaned.indexOf(`
+-
+-`, idx + marker.length);
+-    cleaned = blockEnd !== -1 ? cleaned.slice(0, idx) + cleaned.slice(blockEnd) : cleaned.slice(0, idx);
+-  }
+-  return cleaned.trim();
+-}
+-
+ // ../plugin/src/hooks/magic-context/apply-operations.ts
+-var USER_DROP_PREVIEW_CHARS = 250;
+ var RECENT_TOOL_SKELETON_WINDOW = 20;
+-function buildReplacementContent(tagId, target) {
+-  const role = target.message?.info.role;
+-  if (role !== "user") {
+-    return `[dropped §${tagId}§]`;
+-  }
+-  const currentContent = target.getContent?.() ?? "";
+-  const strippedInjection = stripSystemInjection(currentContent);
+-  if (strippedInjection !== null && stripTagPrefix(strippedInjection).trim().length === 0) {
+-    return `[dropped §${tagId}§]`;
+-  }
+-  const originalText = stripTagPrefix(currentContent);
+-  if (originalText.length <= USER_DROP_PREVIEW_CHARS) {
+-    return `[truncated §${tagId}§]
+-${originalText}`;
+-  }
+-  const hardCut = originalText.slice(0, USER_DROP_PREVIEW_CHARS);
+-  const softCutIndex = hardCut.search(/\s\S*$/);
+-  const preview = softCutIndex > USER_DROP_PREVIEW_CHARS - 30 ? hardCut.slice(0, softCutIndex) : hardCut;
+-  return `[truncated §${tagId}§]
+-${preview}…`;
+-}
+-function applyPendingOperations(sessionId, db, targets, protectedTags = 0, preloadedTags, preloadedPendingOps) {
++function buildReplacementContent(tagId) {
++  return `[dropped §${tagId}§]`;
++}
++function applyPendingOperations(sessionId, db, targets, protectedTags = 0, preloadedTags, preloadedPendingOps, syntheticPendingOps = []) {
+   let didMutateMessage = false;
+   db.transaction(() => {
+     const tags = preloadedTags ?? getTagsBySession(db, sessionId);
+@@ -170408,11 +171036,16 @@ function applyPendingOperations(sessionId, db, targets, protectedTags = 0, prelo
+     const tagTypeById = new Map(tags.map((tag) => [tag.tagNumber, tag.type]));
+     const protectedTagIds = protectedTags > 0 ? new Set(tags.filter((tag) => tag.status === "active").map((tag) => tag.tagNumber).sort((left, right) => right - left).slice(0, protectedTags)) : new Set;
+     const pendingOps = preloadedPendingOps ?? getPendingOps(db, sessionId);
++    const opsToApply = [
++      ...pendingOps.map((op) => ({ op, synthetic: false })),
++      ...syntheticPendingOps.map((op) => ({ op, synthetic: true }))
++    ];
+     const skeletonWindow = new Set(tags.filter((tag) => tag.type === "tool").map((tag) => tag.tagNumber).sort((left, right) => right - left).slice(0, RECENT_TOOL_SKELETON_WINDOW));
+-    for (const pendingOp of pendingOps) {
++    for (const { op: pendingOp, synthetic } of opsToApply) {
+       const tagStatus = tagStatusById.get(pendingOp.tagId);
+       if (tagStatus === "compacted" || tagStatus === "dropped") {
+-        removePendingOp(db, sessionId, pendingOp.tagId);
++        if (!synthetic)
++          removePendingOp(db, sessionId, pendingOp.tagId);
+         continue;
+       }
+       if (protectedTagIds.has(pendingOp.tagId)) {
+@@ -170420,33 +171053,46 @@ function applyPendingOperations(sessionId, db, targets, protectedTags = 0, prelo
+       }
+       const target = targets.get(pendingOp.tagId);
+       const isToolTag = tagTypeById.get(pendingOp.tagId) === "tool";
++      if (synthetic) {
++        if (!isToolTag || target?.canDrop?.() !== true)
++          continue;
++      }
++      let shouldPersistDrop = false;
+       if (isToolTag) {
+         if (skeletonWindow.has(pendingOp.tagId)) {
+           const truncResult = target?.truncate?.() ?? "absent";
+-          if (truncResult === "incomplete") {
++          if (truncResult === "incomplete" || synthetic && truncResult !== "truncated") {
+             continue;
+           }
+           if (truncResult === "truncated") {
+             didMutateMessage = true;
+           }
+           updateTagDropMode(db, sessionId, pendingOp.tagId, "truncated");
++          shouldPersistDrop = true;
+         } else {
+           const dropResult = target?.drop?.() ?? "absent";
+-          if (dropResult === "incomplete") {
++          if (dropResult === "incomplete" || synthetic && dropResult !== "removed") {
+             continue;
+           }
+           if (dropResult === "removed") {
+             didMutateMessage = true;
+           }
+           updateTagDropMode(db, sessionId, pendingOp.tagId, "full");
++          shouldPersistDrop = true;
+         }
+       } else if (target) {
+-        const changed = target.setContent(buildReplacementContent(pendingOp.tagId, target));
++        const changed = target.setContent(buildReplacementContent(pendingOp.tagId));
+         if (changed)
+           didMutateMessage = true;
++        shouldPersistDrop = true;
++      } else if (!synthetic) {
++        shouldPersistDrop = true;
+       }
++      if (!shouldPersistDrop)
++        continue;
+       updateTagStatus(db, sessionId, pendingOp.tagId, "dropped");
+-      removePendingOp(db, sessionId, pendingOp.tagId);
++      if (!synthetic)
++        removePendingOp(db, sessionId, pendingOp.tagId);
+     }
+   })();
+   return didMutateMessage;
+@@ -170470,7 +171116,7 @@ function applyFlushedStatuses(sessionId, db, targets, preloadedTags) {
+           }
+         }
+       } else if (target) {
+-        const changed = target.setContent(buildReplacementContent(tag.tagNumber, target));
++        const changed = target.setContent(buildReplacementContent(tag.tagNumber));
+         if (changed)
+           didMutateMessage = true;
+       }
+@@ -170758,7 +171404,8 @@ function applyCavemanCleanup(sessionId, db, targets, tags, config2) {
+   const result = {
+     compressedToLite: 0,
+     compressedToFull: 0,
+-    compressedToUltra: 0
++    compressedToUltra: 0,
++    mutatedTextTags: 0
+   };
+   if (!config2.enabled)
+     return result;
+@@ -170799,7 +171446,9 @@ function applyCavemanCleanup(sessionId, db, targets, tags, config2) {
+       const target = targets.get(tag.tagNumber);
+       if (!target)
+         continue;
+-      target.setContent(compressed);
++      const didMutate = target.setContent(compressed);
++      if (didMutate)
++        result.mutatedTextTags += 1;
+       updateCavemanDepth(db, sessionId, tag.tagNumber, targetDepth);
+       if (targetDepth === DEPTH_LITE)
+         result.compressedToLite += 1;
+@@ -171177,7 +171826,7 @@ function buildToolArcs(messages) {
+   }
+   return arcs.sort((a, b) => a.invOrdinal - b.invOrdinal || (a.resOrdinal ?? Number.MAX_SAFE_INTEGER) - (b.resOrdinal ?? Number.MAX_SAFE_INTEGER));
+ }
+-function fenceBoundaryForToolArcs(candidate, arcs, lastCompartmentEndOrdinal) {
++function fenceBoundaryForToolArcs(candidate, arcs, lastCompartmentEndOrdinal, recentOpenArcCutoff) {
+   let boundary = candidate;
+   for (const arc of arcs) {
+     if (arc.resOrdinal !== null) {
+@@ -171186,6 +171835,8 @@ function fenceBoundaryForToolArcs(candidate, arcs, lastCompartmentEndOrdinal) {
+       }
+       continue;
+     }
++    if (arc.invOrdinal < recentOpenArcCutoff)
++      continue;
+     if (arc.invOrdinal >= lastCompartmentEndOrdinal + 1 && arc.invOrdinal < boundary) {
+       return arc.invOrdinal;
+     }
+@@ -171423,7 +172074,7 @@ function semanticSnapBoundary(args) {
+   return snapped;
+ }
+ function applyHeadCap(args) {
+-  const { index, protectedTailStart, offset, arcs, capTokens } = args;
++  const { index, protectedTailStart, offset, arcs, capTokens, recentOpenArcCutoff } = args;
+   if (offset >= protectedTailStart)
+     return { eligibleEndOrdinal: offset, oversizeAtomicUnit: false };
+   let end = index.findHeadEndForCap(offset, protectedTailStart, capTokens);
+@@ -171431,7 +172082,7 @@ function applyHeadCap(args) {
+   for (const arc of arcs) {
+     const resOrdinal = arc.resOrdinal;
+     if (resOrdinal === null) {
+-      if (arc.invOrdinal >= offset && arc.invOrdinal < end) {
++      if (arc.invOrdinal >= recentOpenArcCutoff && arc.invOrdinal >= offset && arc.invOrdinal < end) {
+         end = Math.min(end, arc.invOrdinal);
+       }
+       continue;
+@@ -171498,7 +172149,14 @@ function resolveProtectedTailBoundary(ctx) {
+   }
+   if (ctx.mode === "manual-full-recomp") {
+     const arcs2 = buildToolArcs(messages);
+-    const firstOpenArc = arcs2.find((arc) => arc.resOrdinal === null && arc.invOrdinal >= offset);
++    const recompTarget = deriveProtectedTailTokenTarget({
++      contextLimit: ctx.contextLimit,
++      executeThresholdPercentage: ctx.executeThresholdPercentage,
++      usagePercentage: 0,
++      triggerBudget: ctx.triggerBudget
++    });
++    const recentOpenArcCutoff2 = index.findSuffixStartForTokens(recompTarget.N);
++    const firstOpenArc = arcs2.find((arc) => arc.resOrdinal === null && arc.invOrdinal >= offset && arc.invOrdinal >= recentOpenArcCutoff2);
+     const protectedTailStart2 = firstOpenArc?.invOrdinal ?? rawMessageCount + 1;
+     const rawRangeFingerprint2 = computeRawRangeFingerprint(messages, offset, protectedTailStart2);
+     return {
+@@ -171540,13 +172198,14 @@ function resolveProtectedTailBoundary(ctx) {
+   const scaledN = ctx.emergencyTailScale ? Math.max(1, Math.floor(target.N * ctx.emergencyTailScale)) : target.N;
+   const arcs = buildToolArcs(messages);
+   let boundary = index.findSuffixStartForTokens(scaledN);
++  const recentOpenArcCutoff = boundary;
+   let boundaryReason = boundary === 1 ? "whole-session-smaller-than-tail" : "size-walk";
+   const tokenAtBoundary = index.tokenForOrdinal(boundary);
+   if (boundary <= rawMessageCount && tokenAtBoundary > Math.max(2 * scaledN, 64000) && boundary < rawMessageCount) {
+     boundary += 1;
+     boundaryReason = "huge-message-exception";
+   }
+-  boundary = fenceBoundaryForToolArcs(boundary, arcs, ctx.lastCompartmentEndOrdinal);
++  boundary = fenceBoundaryForToolArcs(boundary, arcs, ctx.lastCompartmentEndOrdinal, recentOpenArcCutoff);
+   const snapped = semanticSnapBoundary({
+     messages,
+     index,
+@@ -171556,7 +172215,7 @@ function resolveProtectedTailBoundary(ctx) {
+   });
+   if (snapped !== boundary)
+     boundaryReason = "semantic-snap";
+-  boundary = fenceBoundaryForToolArcs(snapped, arcs, ctx.lastCompartmentEndOrdinal);
++  boundary = fenceBoundaryForToolArcs(snapped, arcs, ctx.lastCompartmentEndOrdinal, recentOpenArcCutoff);
+   let runtimeFloor = offset;
+   if (ctx.migrationFloorActive)
+     runtimeFloor = Math.max(runtimeFloor, ctx.priorBoundaryOrdinal);
+@@ -171592,7 +172251,8 @@ function resolveProtectedTailBoundary(ctx) {
+     offset,
+     arcs,
+     lastCompartmentEndOrdinal: ctx.lastCompartmentEndOrdinal,
+-    capTokens: perRunCap
++    capTokens: perRunCap,
++    recentOpenArcCutoff
+   });
+   const rawRangeFingerprint = computeRawRangeFingerprint(messages, offset, head.eligibleEndOrdinal);
+   return {
+@@ -171643,7 +172303,7 @@ function resolveBoundaryContext(args) {
+   }
+   let storedTokenTotals;
+   try {
+-    storedTokenTotals = getAllStatusTagTokenTotalsFlat(args.db, args.sessionId).totals;
++    storedTokenTotals = getAllStatusTagTokenTotalsFlat(args.db, args.sessionId, args.taggerFloor ?? 0).totals;
+   } catch (error51) {
+     sessionLog(args.sessionId, "protected-tail stored-token map unavailable (live fallback):", error51);
+   }
+@@ -171760,6 +172420,38 @@ var DEFAULT_MIN_COMMIT_CLUSTERS_FOR_TRIGGER = 3;
+ var TAIL_SIZE_TRIGGER_MULTIPLIER = 3;
+ var FORCE_COMPARTMENT_PERCENTAGE = 80;
+ var BLOCK_UNTIL_DONE_PERCENTAGE = 95;
++var CONTENT_TAG_OWNER_SUFFIX = /:(?:p|file)\d+$/;
++function tagOwnerMessageId(row) {
++  if (row.type === "tool")
++    return row.tool_owner_message_id ?? row.message_id;
++  return row.message_id.replace(CONTENT_TAG_OWNER_SUFFIX, "");
++}
++function getActiveOrDroppedTagOwnerMessageIds(db, sessionId, floor = 0) {
++  const rows = floor > 0 ? db.prepare(`SELECT type, message_id, tool_owner_message_id
++                       FROM tags
++                       WHERE session_id = ? AND status IN ('active', 'dropped') AND tag_number >= ?`).all(sessionId, floor) : db.prepare(`SELECT type, message_id, tool_owner_message_id
++                       FROM tags
++                       WHERE session_id = ? AND status IN ('active', 'dropped')`).all(sessionId);
++  const owners = new Set;
++  for (const row of rows)
++    owners.add(tagOwnerMessageId(row));
++  return owners;
++}
++function estimateUntaggedInMemoryTailUpperBound(db, sessionId, inMemoryTail, taggerFloor = 0) {
++  const lastCompartmentEnd = getLastCompartmentEndMessage(db, sessionId);
++  const coveredOwnerMessageIds = getActiveOrDroppedTagOwnerMessageIds(db, sessionId, taggerFloor);
++  let total = 0;
++  for (const message of inMemoryTail.messages) {
++    if (message.ordinal <= lastCompartmentEnd)
++      continue;
++    if (coveredOwnerMessageIds.has(message.id))
++      continue;
++    total += estimateTrueRawMessageTokens(message, {
++      providerShapeVersion: "opencode-v1"
++    }).total;
++  }
++  return total;
++}
+ function getProactiveCompartmentTriggerPercentage(executeThresholdPercentage) {
+   return Math.max(0, executeThresholdPercentage - PROACTIVE_TRIGGER_OFFSET_PERCENTAGE);
+ }
+@@ -171813,7 +172505,7 @@ function resolveBoundaryContextLimit(usage, fallbackContextLimit) {
+   }
+   return 128000;
+ }
+-function getUnsummarizedTailInfo(db, sessionId, triggerBudget, usage, executeThresholdPercentage, contextLimit, inMemoryTail) {
++function getUnsummarizedTailInfo(db, sessionId, triggerBudget, usage, executeThresholdPercentage, contextLimit, inMemoryTail, taggerFloor = 0) {
+   return withRawSessionMessageCache(() => {
+     try {
+       const memoryPrimed = inMemoryTail ? primeInMemoryTailRawMessageCache({
+@@ -171842,7 +172534,8 @@ function getUnsummarizedTailInfo(db, sessionId, triggerBudget, usage, executeThr
+         contextLimit: resolveBoundaryContextLimit(usage, contextLimit),
+         executeThresholdPercentage,
+         usage,
+-        usageSource: "live"
++        usageSource: "live",
++        taggerFloor
+       });
+       const hasProtectedEligibleHead = boundary.offset < boundary.protectedTailStart;
+       if (!hasProtectedEligibleHead) {
+@@ -171873,7 +172566,7 @@ function getUnsummarizedTailInfo(db, sessionId, triggerBudget, usage, executeThr
+     }
+   });
+ }
+-function checkCompartmentTrigger(db, sessionId, sessionMeta, usage, _previousPercentage, executeThresholdPercentage, triggerBudget, clearReasoningAge, commitClusterTrigger, preloadedActiveTags, contextLimit, inMemoryTail) {
++function checkCompartmentTrigger(db, sessionId, sessionMeta, usage, _previousPercentage, executeThresholdPercentage, triggerBudget, clearReasoningAge, commitClusterTrigger, preloadedActiveTags, contextLimit, inMemoryTail, taggerFloorOverride) {
+   if (sessionMeta.compartmentInProgress) {
+     sessionLog(sessionId, `compartment trigger: skipped — historian already in progress (usage=${usage.percentage.toFixed(1)}%)`);
+     return { shouldFire: false };
+@@ -171887,14 +172580,17 @@ function checkCompartmentTrigger(db, sessionId, sessionMeta, usage, _previousPer
+       inMemoryTail = undefined;
+     }
+   }
++  const taggerFloor = taggerFloorOverride !== undefined && taggerFloorOverride > 0 ? taggerFloorOverride : inMemoryTail ? deriveTagLoadFloor(db, sessionId, inMemoryTail.messages.map((m) => m.id)) : 0;
+   const proactiveFloorForGate = getProactiveCompartmentTriggerPercentage(executeThresholdPercentage);
+-  if (!inMemoryTail && usage.percentage < proactiveFloorForGate) {
++  if (usage.percentage < proactiveFloorForGate) {
+     try {
+-      const { bound, nullCount } = getTriggerTagTokenUpperBound(db, sessionId);
++      const { bound: persistedBound, nullCount } = getTriggerTagTokenUpperBound(db, sessionId, taggerFloor);
+       if (nullCount === 0) {
+-        const eligibleUpperBound = bound;
++        const untaggedUpperBound = inMemoryTail ? estimateUntaggedInMemoryTailUpperBound(db, sessionId, inMemoryTail, taggerFloor) : 0;
++        const eligibleUpperBound = persistedBound + untaggedUpperBound;
+         if (eligibleUpperBound < triggerBudget) {
+-          sessionLog(sessionId, `compartment trigger: cheap-skip at ${usage.percentage.toFixed(1)}% (below proactive floor ${proactiveFloorForGate}%) — live-tail upper bound ${eligibleUpperBound} < triggerBudget ${triggerBudget}; no size trigger possible, skipped full raw read`);
++          const memorySuffix = inMemoryTail ? ` (persisted=${persistedBound}, untagged-memory≤${untaggedUpperBound})` : "";
++          sessionLog(sessionId, `compartment trigger: cheap-skip at ${usage.percentage.toFixed(1)}% (below proactive floor ${proactiveFloorForGate}%) — live-tail upper bound ${eligibleUpperBound}${memorySuffix} < triggerBudget ${triggerBudget}; no size trigger possible, skipped full raw read`);
+           return { shouldFire: false };
+         }
+       }
+@@ -171902,7 +172598,7 @@ function checkCompartmentTrigger(db, sessionId, sessionMeta, usage, _previousPer
+       sessionLog(sessionId, `compartment trigger: cheap-gate skipped (falling through to full read): ${error51 instanceof Error ? error51.message : String(error51)}`);
+     }
+   }
+-  const tailInfo = getUnsummarizedTailInfo(db, sessionId, triggerBudget, usage, executeThresholdPercentage, contextLimit, inMemoryTail);
++  const tailInfo = getUnsummarizedTailInfo(db, sessionId, triggerBudget, usage, executeThresholdPercentage, contextLimit, inMemoryTail, taggerFloor);
+   if (!tailInfo.hasNewRawHistory) {
+     try {
+       const lastCompartmentEnd = getLastCompartmentEndMessage(db, sessionId);
+@@ -172066,6 +172762,13 @@ function computePressure(input) {
+ function approxThousands(tokens) {
+   return `${Math.round(tokens / 1000)}k`;
+ }
++function formatOldestReclaimableHint(hint) {
++  if (!hint || hint.length === 0)
++    return "";
++  const rendered = hint.slice(0, 4).map((tag) => `§${tag.tagNumber}§ ${tag.toolName ?? "tool"}`).join(" · ");
++  return rendered.length > 0 ? `
++oldest reclaimable: ${rendered}.` : "";
++}
+ var CHANNEL2_USABLE_FRACTION = 1 / 3;
+ var CHANNEL2_MIN_RECLAIMABLE = 1e4;
+ function shouldTriggerChannel2(input) {
+@@ -172075,14 +172778,16 @@ function shouldTriggerChannel2(input) {
+     return true;
+   return input.reclaimableTokens >= input.usableTokens * CHANNEL2_USABLE_FRACTION;
+ }
+-function buildChannel2Reminder(undroppedTokens) {
++function buildChannel2Reminder(undroppedTokens, hint) {
+   const amount = approxThousands(undroppedTokens);
++  const hintText = formatOldestReclaimableHint(hint);
+   return `<system-reminder>
+-` + `Routine context housekeeping is near: a large span of this session will be comparted soon, ` + `and ~${amount} tokens of tool output remain unreduced. Drop spent outputs with ctx_reduce ` + `first so the archived span is the part that matters.
++` + `Routine context housekeeping is near: a large span of this session will be comparted soon, ` + `and ~${amount} tokens of tool output remain unreduced. Drop spent outputs with ctx_reduce ` + `first so the archived span is the part that matters.${hintText}
+ ` + `</system-reminder>`;
+ }
+-function buildChannel1Reminder(level, undroppedTokens) {
++function buildChannel1Reminder(level, undroppedTokens, hint) {
+   const amount = approxThousands(undroppedTokens);
++  const hintText = formatOldestReclaimableHint(hint);
+   let body;
+   switch (level) {
+     case "gentle":
+@@ -172098,7 +172803,7 @@ function buildChannel1Reminder(level, undroppedTokens) {
+   return `
+ 
+ <system-reminder>
+-${body}
++${body}${hintText}
+ </system-reminder>`;
+ }
+ 
+@@ -172646,6 +173351,41 @@ function renderMemoryBlockV2(memories, wrapper = "project-memory", renderOptions
+ `);
+ }
+ 
++// ../plugin/src/hooks/magic-context/tool-reclaim.ts
++function buildSyntheticToolReclaimOps(input) {
++  const watermark = Math.max(0, input.watermark);
++  if (watermark <= 0)
++    return [];
++  const realPendingTagIds = new Set((input.pendingOps ?? []).map((op) => op.tagId));
++  const tags = getActiveTagsBySession(input.db, input.sessionId);
++  const synthetic = [];
++  for (const tag of tags) {
++    if (tag.type !== "tool")
++      continue;
++    if (tag.status !== "active")
++      continue;
++    if (tag.tagNumber > watermark)
++      continue;
++    if (realPendingTagIds.has(tag.tagNumber))
++      continue;
++    if (input.targets.get(tag.tagNumber)?.canDrop?.() !== true)
++      continue;
++    synthetic.push({
++      id: 0,
++      sessionId: input.sessionId,
++      tagId: tag.tagNumber,
++      operation: "drop",
++      queuedAt: 0
++    });
++  }
++  return synthetic;
++}
++function advanceToolReclaimWatermarkToCurrentMax(db, sessionId) {
++  const maxTagNumber = getMaxTagNumberBySession(db, sessionId);
++  advanceToolReclaimWatermark(db, sessionId, maxTagNumber);
++  return maxTagNumber;
++}
++
+ // src/context-handler.ts
+ init_logger();
+ 
+@@ -173056,7 +173796,7 @@ function tagToolPart(args) {
+     const tagged = prependTag(tagId, text);
+     args.part.setText(tagged);
+   }
+-  args.targets.set(tagId, buildToolTarget(args.part, args.message));
++  args.targets.set(tagId, buildToolTarget(args.part, args.message, tagId));
+ }
+ function setToolContentOrText(part, content) {
+   try {
+@@ -173096,7 +173836,7 @@ function buildAggregateTarget(tagId, occurrences) {
+       return any2 ? "removed" : "absent";
+     },
+     truncate() {
+-      const sentinel = "[truncated]";
++      const sentinel = `[dropped §${tagId}§]`;
+       let any2 = false;
+       for (const occ of occurrences) {
+         if (setToolContentOrText(occ.part, sentinel)) {
+@@ -173128,7 +173868,7 @@ function buildTextTarget(part, message) {
+     }
+   };
+ }
+-function buildToolTarget(part, message) {
++function buildToolTarget(part, message, tagId) {
+   return {
+     setContent(content) {
+       return setToolContentOrText(part, content);
+@@ -173137,11 +173877,11 @@ function buildToolTarget(part, message) {
+       return part.getText() ?? null;
+     },
+     drop() {
+-      const replaced = part.replaceWithSentinel(`[dropped §${part.id ?? "?"}§]`);
++      const replaced = part.replaceWithSentinel(`[dropped §${tagId}§]`);
+       return replaced ? "removed" : "absent";
+     },
+     truncate() {
+-      const ok = setToolContentOrText(part, "[truncated]");
++      const ok = setToolContentOrText(part, `[dropped §${tagId}§]`);
+       return ok ? "truncated" : "absent";
+     },
+     message: {
+@@ -174172,7 +174912,7 @@ async function runAutoSearchHintForPi(args) {
+       embeddingEnabled,
+       gitCommitsEnabled,
+       embedQuery: async (text, signal) => {
+-        const result = await embedTextForProject(options.projectPath, text, signal);
++        const result = await embedTextForProject(options.projectPath, text, signal, "query");
+         return result?.vector ?? null;
+       },
+       isEmbeddingRuntimeEnabled: () => embeddingEnabled === true,
+@@ -174426,9 +175166,10 @@ function maybeChannel1ReminderForToolResult(args) {
+     return null;
+   return {
+     type: "text",
+-    text: buildChannel1Reminder(decision.level, decision.undroppedTokens)
++    text: buildChannel1Reminder(decision.level, decision.undroppedTokens, state.oldestReclaimableToolTags)
+   };
+ }
++var CHANNEL2_NUDGE_CUSTOM_TYPE = "magic-context:ceiling-nudge";
+ function maybeDeliverChannel2Pi(pi, db, sessionId, deliverAs = "followUp") {
+   let state;
+   try {
+@@ -174456,9 +175197,12 @@ function maybeDeliverChannel2Pi(pi, db, sessionId, deliverAs = "followUp") {
+   if (!casChannel2NudgeState(db, sessionId, "pending", "claimed"))
+     return false;
+   try {
+-    pi.sendUserMessage(buildChannel2Reminder(undropped), {
+-      deliverAs
+-    });
++    pi.sendMessage({
++      customType: CHANNEL2_NUDGE_CUSTOM_TYPE,
++      content: buildChannel2Reminder(undropped, baseline.oldestReclaimableToolTags),
++      display: false,
++      details: { kind: "channel-2-ceiling-nudge" }
++    }, { deliverAs });
+   } catch (error51) {
+     try {
+       casChannel2NudgeState(db, sessionId, "claimed", "pending");
+@@ -174650,6 +175394,51 @@ function planEmergencyDrop(input) {
+   };
+ }
+ 
++// ../plugin/src/hooks/magic-context/system-injection-stripper.ts
++var SYSTEM_INJECTION_MARKERS = [
++  "<!-- OMO_INTERNAL_INITIATOR -->",
++  "[SYSTEM DIRECTIVE: MAGIC-CONTEXT",
++  "[SYSTEM DIRECTIVE: OH-MY-OPENCODE",
++  "[Category+Skill Reminder]",
++  "[EDIT ERROR - IMMEDIATE ACTION REQUIRED]",
++  "[task CALL FAILED - IMMEDIATE RETRY REQUIRED]",
++  "[EMERGENCY CONTEXT WINDOW WARNING]",
++  "Unstable background agent appears idle",
++  "**THE SUBAGENT JUST CLAIMED THIS TASK IS DONE."
++];
++var SYSTEM_REMINDER_REGEX = /<system-reminder>[\s\S]*?<\/system-reminder>/gi;
++var OMO_MARKER_REGEX = /<!-- OMO_INTERNAL_INITIATOR -->/g;
++function stripSystemInjection(text) {
++  let hasInjection = false;
++  for (const marker of SYSTEM_INJECTION_MARKERS) {
++    if (text.includes(marker)) {
++      hasInjection = true;
++      break;
++    }
++  }
++  if (SYSTEM_REMINDER_REGEX.test(text))
++    hasInjection = true;
++  SYSTEM_REMINDER_REGEX.lastIndex = 0;
++  if (!hasInjection)
++    return null;
++  let cleaned = text;
++  cleaned = cleaned.replace(SYSTEM_REMINDER_REGEX, "");
++  cleaned = cleaned.replace(OMO_MARKER_REGEX, "");
++  cleaned = cleaned.replace(/\[SYSTEM DIRECTIVE: OH-MY-(?:OPENCODE|CLAUDE)[^\]]*\][\s\S]*?(?=\n\n(?!\s*[-*])|$)/g, "");
++  for (const marker of SYSTEM_INJECTION_MARKERS) {
++    if (marker.startsWith("<!-- ") || marker.startsWith("[SYSTEM DIRECTIVE"))
++      continue;
++    const idx = cleaned.indexOf(marker);
++    if (idx === -1)
++      continue;
++    const blockEnd = cleaned.indexOf(`
++
++`, idx + marker.length);
++    cleaned = blockEnd !== -1 ? cleaned.slice(0, idx) + cleaned.slice(blockEnd) : cleaned.slice(0, idx);
++  }
++  return cleaned.trim();
++}
++
+ // src/heuristic-cleanup-pi.ts
+ init_logger();
+ var DEDUP_SAFE_TOOLS = new Set([
+@@ -174753,6 +175542,7 @@ function applyPiHeuristicCleanup(sessionId, db, targets, piMessages, config2, pr
+   const protectedCutoff = maxTag - config2.protectedTags;
+   const toolAgeCutoff = protectedCutoff;
+   let droppedTools = 0;
++  let emergencyDroppedTools = 0;
+   let deduplicatedTools = 0;
+   let droppedInjections = 0;
+   let droppedStaleReduceCalls = 0;
+@@ -174785,6 +175575,7 @@ function applyPiHeuristicCleanup(sessionId, db, targets, piMessages, config2, pr
+             updateTagStatus(db, sessionId, tag.tagNumber, "dropped");
+             updateTagDropMode(db, sessionId, tag.tagNumber, "full");
+             droppedTools++;
++            emergencyDroppedTools++;
+           }
+         }
+         setEmergencyDropSample(db, sessionId, emergency.currentTotalInputTokens);
+@@ -174808,10 +175599,14 @@ function applyPiHeuristicCleanup(sessionId, db, targets, piMessages, config2, pr
+         if (!matched)
+           continue;
+         const target = targets.get(tag.tagNumber);
+-        target?.drop?.();
++        const result = target?.drop?.() ?? "absent";
++        if (result === "incomplete")
++          continue;
+         updateTagDropMode(db, sessionId, tag.tagNumber, "full");
+         updateTagStatus(db, sessionId, tag.tagNumber, "dropped");
+-        droppedStaleReduceCalls++;
++        if (result === "removed" || result === "truncated") {
++          droppedStaleReduceCalls++;
++        }
+       }
+     })();
+   }
+@@ -174883,7 +175678,9 @@ function applyPiHeuristicCleanup(sessionId, db, targets, piMessages, config2, pr
+             continue;
+           updateTagDropMode(db, sessionId, tag.tagNumber, "full");
+           updateTagStatus(db, sessionId, tag.tagNumber, "dropped");
+-          deduplicatedTools++;
++          if (result === "removed" || result === "truncated") {
++            deduplicatedTools++;
++          }
+         }
+       }
+     })();
+@@ -174892,6 +175689,7 @@ function applyPiHeuristicCleanup(sessionId, db, targets, piMessages, config2, pr
+     sessionLog(sessionId, `heuristic cleanup: dropped ${droppedTools} tool tags, stale ctx_reduce=${droppedStaleReduceCalls}, deduplicated ${deduplicatedTools} tool calls, dropped ${droppedInjections} system injections`);
+   }
+   let compressedTextTags = 0;
++  let mutatedTextTags = 0;
+   if (config2.caveman?.enabled) {
+     const cavemanResult = applyCavemanCleanup(sessionId, db, targets, tags, {
+       enabled: true,
+@@ -174899,13 +175697,16 @@ function applyPiHeuristicCleanup(sessionId, db, targets, piMessages, config2, pr
+       protectedTags: config2.protectedTags
+     });
+     compressedTextTags = cavemanResult.compressedToLite + cavemanResult.compressedToFull + cavemanResult.compressedToUltra;
++    mutatedTextTags = cavemanResult.mutatedTextTags;
+   }
+   return {
+     droppedTools,
+     deduplicatedTools,
+     droppedInjections,
+     droppedStaleReduceCalls,
+-    compressedTextTags
++    emergencyDroppedTools,
++    compressedTextTags,
++    mutatedTextTags
+   };
+ }
+ function buildMessageIdToMaxTagFromTargets(targets) {
+@@ -176201,7 +177002,7 @@ async function embedAndStoreCompartmentChunks(db, sessionId, projectPath, compar
+   for (const compartment of compartments) {
+     try {
+       const fromMemory = compartment.sourceChunkText ? canonicalizeInMemoryChunkTextForEmbedding(compartment.sourceChunkText, compartment.startMessage, compartment.endMessage) : "";
+-      const canonicalText = fromMemory || buildCanonicalChunkTextFromFts(db, sessionId, compartment.startMessage, compartment.endMessage);
++      const canonicalText = fromMemory || buildCanonicalChunkTextFromFts(db, sessionId, compartment.startMessage, compartment.endMessage) || buildCompartmentSummaryFallbackText(db, compartment.id);
+       if (canonicalText.length === 0)
+         continue;
+       const windows = chunkCanonicalText(canonicalText, compartment.startMessage, compartment.endMessage, maxInputTokens);
+@@ -179394,6 +180195,7 @@ async function runPiHistorian(deps) {
+         } else {
+           recordHighPressureNoEligibleHead(db, boundarySnapshot);
+         }
++        clearEmergencyDrainLatch(db, sessionId);
+         return;
+       }
+       const perRunCap = selectPerRunCap(boundarySnapshot);
+@@ -179405,7 +180207,8 @@ async function runPiHistorian(deps) {
+         trueRawTokens: boundarySnapshot.trueRawEligibleTokens,
+         usagePercentage: boundarySnapshot.usagePercentage,
+         usable,
+-        perRunCap
++        perRunCap,
++        executeThresholdPercentage: boundarySnapshot.executeThresholdPercentage
+       });
+       if (!reserve.ok) {
+         sessionLog(sessionId, `historian rate-limit skip: ${reserve.skippedReason ?? "quota exhausted"}`);
+@@ -179422,6 +180225,7 @@ async function runPiHistorian(deps) {
+         } else {
+           recordHighPressureNoEligibleHead(db, boundarySnapshot);
+         }
++        clearEmergencyDrainLatch(db, sessionId);
+         telemetry.status = "noop";
+         telemetry.failureReason = "chunk empty after filtering";
+         rollbackDrainReservation();
+@@ -179653,6 +180457,7 @@ ${chunkText}`,
+         }
+         appendCompartments(db, sessionId, newCompartments);
+         clearHistorianFailureState(db, sessionId);
++        clearHistorianDrainFailure(db, sessionId);
+         recordProtectedTailPublicationFloor(db, sessionId, lastNewEnd + 1);
+         clearEmergencyRecovery(db, sessionId);
+         if (firstKeptEntryId && lastNewEndMessageId) {
+@@ -179749,8 +180554,12 @@ ${chunkText}`,
+       await notify(buildHistorianFailureNotice(failCount, desc.brief));
+     }
+   } finally {
+-    if (!completedSuccessfully && !retainDrainReservationForRetryThrottle) {
+-      rollbackDrainReservation();
++    if (!completedSuccessfully) {
++      if (!retainDrainReservationForRetryThrottle) {
++        rollbackDrainReservation();
++      } else {
++        recordHistorianDrainFailure(db, sessionId);
++      }
+     }
+     updateSessionMeta(db, sessionId, { compartmentInProgress: false });
+     try {
+@@ -179989,7 +180798,7 @@ var INLINE_THINKING_PATTERNS = [
+   /<thinking>[\s\S]*?<\/thinking>\s*/gi,
+   /<think>[\s\S]*?<\/think>\s*/gi
+ ];
+-var CLEARED = "[cleared]";
++var CLEARED = "";
+ function stripInlineThinkingMarkup(text) {
+   let cleaned = text;
+   for (const pattern of INLINE_THINKING_PATTERNS) {
+@@ -180038,8 +180847,11 @@ function clearOldReasoningPi(args) {
+     for (const part of msg.content) {
+       if (part && typeof part === "object" && part.type === "thinking") {
+         const tp = part;
+-        if (tp.thinking !== CLEARED) {
++        if (tp.redacted)
++          continue;
++        if (tp.thinking !== CLEARED || tp.thinkingSignature !== undefined) {
+           tp.thinking = CLEARED;
++          tp.thinkingSignature = undefined;
+           cleared++;
+         }
+       }
+@@ -180117,8 +180929,11 @@ function replayClearedReasoningPi(args) {
+     for (const part of msg.content) {
+       if (part && typeof part === "object" && part.type === "thinking") {
+         const tp = part;
+-        if (tp.thinking !== CLEARED) {
++        if (tp.redacted)
++          continue;
++        if (tp.thinking !== CLEARED || tp.thinkingSignature !== undefined) {
+           tp.thinking = CLEARED;
++          tp.thinkingSignature = undefined;
+           cleared++;
+         }
+       }
+@@ -180282,9 +181097,7 @@ Context is managed for you entirely automatically — there's nothing to prune a
+ var CTX_NOTE_GUIDANCE = `Use \`ctx_note\` ONLY for genuinely future concerns — something to revisit much later, not work coming up in the next few turns (that's already in your active context) and not active multi-step work (use todos for that). Magic Context preserves your full context across both compaction and restarts, so an upcoming restart or "let's come back to this later" is never a reason to take a note — nothing is lost either way. Notes you do take survive compression and resurface at natural work boundaries (after commits, historian runs, todo completion).`;
+ var TOOL_HISTORY_GUIDANCE = `Compressed history intentionally omits tool calls and their outputs — summaries like "I edited file X" are historian records, not patterns to replicate. In the live conversation, older tool calls and their results are cleaned up to save context — you may see your own past messages referencing actions without the corresponding tool call or result visible. This is normal context management. ALWAYS use real tool calls; never simulate, fabricate, or inline tool outputs in your text. If there is no tool result message, the action did not happen. NEVER simulate, hallucinate or claim tool calls, command output, search results, file edits, or diffs in plain text as if they actually occurred.`;
+ var BASE_INTRO = (protectedTags) => `Messages and tool outputs are tagged with §N§ identifiers (e.g., §1§, §42§).
+-Use \`ctx_reduce\` to manage context size. It supports one operation:
+-- \`drop\`: Remove entirely (best for tool outputs you already acted on).
+-Syntax: "3-5", "1,2,9", or "1-5,8,12-15". Last ${protectedTags} tags are protected.
++Use \`ctx_reduce\` to mark spent tagged content as discardable and reclaim space. Marking is NOT an immediate delete — it queues the content, which stays fully visible until space is actually needed (as soon as the next turn if you're already under pressure, much later if not), so mark a tool output as soon as you're done with it rather than hoarding the call for the end of the turn. The last ${protectedTags} tags are protected (marking one just queues it until it ages out). Syntax: "3-5", "1,2,9", or "1-5,8,12-15".
+ Do not announce or narrate \`ctx_reduce\` drops — just call the tool silently. Saying "I'll drop these outputs" wastes tokens the user does not care about.
+ ${CTX_NOTE_GUIDANCE}
+ Use \`ctx_memory\` for durable project knowledge: write what future sessions must know, update/archive/merge the memories you see in \`<project-memory>\` when they drift. Memories persist across sessions and every new session starts with them.
+@@ -180303,7 +181116,7 @@ Use \`ctx_expand\` to recover the raw conversation behind a \`<compartment>\` su
+ \`ctx_search\` returns ranked results from memories, git commits, and raw message history. Use message ordinals from results with \`ctx_expand\` to retrieve surrounding conversation context.
+ ${TOOL_HISTORY_GUIDANCE}
+ NEVER drop large ranges blindly (e.g., "1-50"). Review each tag before deciding.
+-NEVER drop user messages — they are short and will be summarized by compartmentalization automatically. Dropping them loses context the historian needs.
++Keep your user's instructions and intent — never drop a user message for its directive, even an old one. But a large block of pasted content inside a user message (logs, data dumps, long code, attachments) is fair to mark discardable once you've extracted what you need — it stays searchable via \`ctx_search\`.
+ NEVER drop assistant text messages unless they are exceptionally large. Your conversation messages are lightweight; only large tool outputs are worth dropping.
+ Before your turn finishes, consider using \`ctx_reduce\` to drop large tool outputs you no longer need.`;
+ var BASE_INTRO_NO_REDUCE = () => `${CTX_NOTE_GUIDANCE}
+@@ -181435,6 +182248,11 @@ function registerPiContextHandler(pi, baseOptions) {
+       updateSessionProjectTracking(sessionId, projectIdentity, options.db);
+       logTransformTiming(sessionId, "findSessionId", tFindSession, `messages=${event.messages.length}`);
+       const branchEntries = readPiBranchEntriesForContext(ctx, sessionId);
++      schedulePiTransformDecisionResolve({
++        db: options.db,
++        sessionId,
++        branchEntries
++      });
+       const rawMessageProvider = {
+         readMessages: () => branchEntries !== null ? convertEntriesToRawMessages([...branchEntries]) : readPiSessionMessages(ctx),
+         readMessageById: (messageId) => readPiSessionMessageById(ctx, messageId)
+@@ -181671,6 +182489,20 @@ function registerPiContextHandler(pi, baseOptions) {
+         appendCompaction: resolvePiAppendCompaction(ctx),
+         readBranchEntries: resolvePiReadBranchEntries(ctx)
+       });
++      const piDecisionSnapshotNewestAssistant = branchEntries === null ? undefined : findNewestPiAssistantEntryId(branchEntries);
++      if (result.bustedThisPass && piDecisionSnapshotNewestAssistant !== undefined) {
++        recordPendingPiTransformDecision(sessionId, {
++          tsMs: Date.now(),
++          decision: schedulerDecision,
++          materialized: result.materialized,
++          materializeReason: normalizeMaterializeReason("pi", result.materializeReason, result.materialized),
++          emergency: result.emergency,
++          droppedTokens: result.droppedTokens,
++          droppedCount: result.droppedCount,
++          inputTokens: usageInputTokens,
++          bustedThisPass: true
++        }, piDecisionSnapshotNewestAssistant);
++      }
+       if (options.historian) {
+         maybeFireHistorian({
+           ctx,
+@@ -181780,6 +182612,7 @@ function registerPiContextHandler(pi, baseOptions) {
+           const executeThresholdTokensPi = Math.round((usageContextLimit ?? 0) * resolvedExecuteThresholdPct / 100);
+           const usableTokensPi = Math.max(0, executeThresholdTokensPi - usageInputTokens + liveTailTokens);
+           resetLastNudgeCycleIfTailShrank(options.db, sessionId, tailToolTokens);
++          const oldestReclaimableToolTags = getOldestActiveUnprotectedToolTags(options.db, sessionId, options.protectedTags ?? 20);
+           setPiChannel1Baseline(sessionId, {
+             tailToolTokens,
+             historyBudgetTokens: historyBudgetTokens ?? 0,
+@@ -181788,7 +182621,8 @@ function registerPiContextHandler(pi, baseOptions) {
+             lastInputTokens: usageInputTokens,
+             turnToolTokens: 0,
+             usableTokens: usableTokensPi,
+-            reducedSinceRefresh: false
++            reducedSinceRefresh: false,
++            oldestReclaimableToolTags
+           });
+           if (usageContextLimit && usageContextLimit > 0 && resolvedExecuteThresholdPct > 0) {
+             const channel2ShouldTrigger = shouldTriggerChannel2({
+@@ -181816,6 +182650,7 @@ function registerPiContextHandler(pi, baseOptions) {
+       logTransformTiming(sessionId, "postTransformPhase", tPostTransform);
+       sessionLog(sessionId, `transform completed in ${(performance.now() - transformStartTime).toFixed(1)}ms (${outputMessages.length} messages, ${result.targetCount} targets, watermark: ${result.reasoningWatermark})`);
+       clearLastTransformErrorIfSet(options.db, sessionId);
++      options.maybeAutoEmbedSession?.(sessionId, projectDirectory, projectIdentity);
+       return { messages: outputMessages };
+     } catch (err) {
+       const message = err instanceof Error ? err.message : String(err);
+@@ -182162,6 +182997,13 @@ async function runPipeline(args) {
+   let historyWasConsumedThisPass = false;
+   let materializationSatisfiedThisPass = false;
+   let pendingOpsAppliedThisPass = false;
++  let pendingOpsDidMutate = false;
++  let heuristicOrReasoningDidMutate = false;
++  let didMutateFromFlushedStatuses = false;
++  let droppedCount = 0;
++  const droppedTokens = 0;
++  let emergency = false;
++  let autoReclaimDidMutateThisPass = false;
+   let suppressDeferredHistoryDrain = false;
+   let casLost = false;
+   const deferredHistoryWasPendingAtPassStart = deferredHistoryRefreshSessions.has(args.sessionId);
+@@ -182247,7 +183089,10 @@ async function runPipeline(args) {
+     sessionLog(args.sessionId, `pending ops WILL APPLY — reason=${applyReason}, pendingOps=${pendingOps.length}, context=${args.contextUsage.percentage.toFixed(1)}%`);
+     try {
+       const tApplyPending = performance.now();
+-      applyPendingOperations(args.sessionId, args.db, targets, args.protectedTags, undefined, pendingOps);
++      pendingOpsDidMutate = applyPendingOperations(args.sessionId, args.db, targets, args.protectedTags, undefined, pendingOps);
++      if (pendingOpsDidMutate) {
++        droppedCount += pendingOps.length;
++      }
+       logTransformTiming(args.sessionId, "applyPendingOperations", tApplyPending);
+       executedWorkThisPass = true;
+       materializationSatisfiedThisPass = true;
+@@ -182269,7 +183114,7 @@ async function runPipeline(args) {
+   const flushedSliceTags = getTagsByNumbers(args.db, args.sessionId, targetTagNumbers);
+   logTransformTiming(args.sessionId, "getTagsByNumbers", tGetTags, `targets=${targetTagNumbers.length} fetched=${flushedSliceTags.length}`);
+   const tFlushed = performance.now();
+-  applyFlushedStatuses(args.sessionId, args.db, targets, flushedSliceTags);
++  didMutateFromFlushedStatuses = applyFlushedStatuses(args.sessionId, args.db, targets, flushedSliceTags);
+   logTransformTiming(args.sessionId, "applyFlushedStatuses", tFlushed);
+   logTransformTiming(args.sessionId, "batchFinalize:flushed", tFlushed);
+   const messageIdToMaxTag = buildMessageIdToMaxTag(targets);
+@@ -182331,6 +183176,11 @@ async function runPipeline(args) {
+         } : undefined,
+         caveman: args.heuristics.caveman
+       }, activeTags, stableIdResolver);
++      const heuristicMutationCount = heuristicsResult.droppedTools + heuristicsResult.deduplicatedTools + heuristicsResult.droppedInjections + heuristicsResult.droppedStaleReduceCalls + heuristicsResult.mutatedTextTags;
++      droppedCount += heuristicsResult.droppedTools + heuristicsResult.deduplicatedTools + heuristicsResult.droppedInjections + heuristicsResult.droppedStaleReduceCalls + heuristicsResult.mutatedTextTags;
++      emergency ||= heuristicsResult.emergencyDroppedTools > 0;
++      if (heuristicMutationCount > 0)
++        heuristicOrReasoningDidMutate = true;
+       heuristicsExecuted = true;
+       executedWorkThisPass = true;
+       if (hasPendingMaterializeSignal) {
+@@ -182339,7 +183189,7 @@ async function runPipeline(args) {
+       if (currentTurnId !== null) {
+         lastHeuristicsTurnIdBySession.set(args.sessionId, currentTurnId);
+       }
+-      logTransformTiming(args.sessionId, "applyHeuristicCleanup", tHeuristic, `droppedTools=${heuristicsResult.droppedTools} deduplicatedTools=${heuristicsResult.deduplicatedTools} droppedInjections=${heuristicsResult.droppedInjections} compressedTextTags=${heuristicsResult.compressedTextTags}`);
++      logTransformTiming(args.sessionId, "applyHeuristicCleanup", tHeuristic, `droppedTools=${heuristicsResult.droppedTools} deduplicatedTools=${heuristicsResult.deduplicatedTools} droppedInjections=${heuristicsResult.droppedInjections} staleReduce=${heuristicsResult.droppedStaleReduceCalls} compressedTextTags=${heuristicsResult.compressedTextTags} mutatedTextTags=${heuristicsResult.mutatedTextTags}`);
+     } catch (err) {
+       sessionLog(args.sessionId, `heuristic cleanup failed (continuing): ${err instanceof Error ? err.message : String(err)}`);
+     }
+@@ -182376,6 +183226,10 @@ async function runPipeline(args) {
+       }
+       logTransformTiming(args.sessionId, "clearOldReasoning", tClearReasoning);
+       logTransformTiming(args.sessionId, "watermarkCleanup", tClearReasoning);
++      if (clearOutcome.cleared > 0 || stripOutcome.stripped > 0) {
++        heuristicOrReasoningDidMutate = true;
++        droppedCount += clearOutcome.cleared + stripOutcome.stripped;
++      }
+       if (combinedWatermark > prevWatermark || clearOutcome.cleared > 0 || stripOutcome.stripped > 0) {
+         executedWorkThisPass = true;
+       }
+@@ -182383,7 +183237,36 @@ async function runPipeline(args) {
+       sessionLog(args.sessionId, `reasoning clearing failed (continuing): ${err instanceof Error ? err.message : String(err)}`);
+     }
+   }
++  const toolReclaimExecutePass = args.schedulerDecision === "execute";
++  const alreadyMutatingThisPass = pendingOpsDidMutate || heuristicOrReasoningDidMutate;
++  const emergencyDropEligible = args.forceMaterialization === true || args.contextUsage.percentage >= FORCE_MATERIALIZATION_PERCENTAGE;
++  let autoReclaimTargetCount = 0;
++  let autoReclaimDidMutate = false;
++  if (toolReclaimExecutePass && alreadyMutatingThisPass && !emergencyDropEligible) {
++    const reclaimMeta = getOrCreateSessionMeta(args.db, args.sessionId);
++    const syntheticPendingOps = buildSyntheticToolReclaimOps({
++      db: args.db,
++      sessionId: args.sessionId,
++      targets,
++      watermark: reclaimMeta.toolReclaimWatermark ?? 0,
++      pendingOps
++    });
++    autoReclaimTargetCount = syntheticPendingOps.length;
++    if (syntheticPendingOps.length > 0) {
++      autoReclaimDidMutate = applyPendingOperations(args.sessionId, args.db, targets, args.protectedTags, undefined, [], syntheticPendingOps);
++      if (autoReclaimDidMutate) {
++        droppedCount += syntheticPendingOps.length;
++        autoReclaimDidMutateThisPass = true;
++      }
++    }
++  }
+   transcript.commit();
++  if (toolReclaimExecutePass) {
++    advanceToolReclaimWatermarkToCurrentMax(args.db, args.sessionId);
++  }
++  if (autoReclaimTargetCount > 0) {
++    sessionLog(args.sessionId, `tool reclaim auto-drop: targets=${autoReclaimTargetCount} mutated=${autoReclaimDidMutate}`);
++  }
+   const postCommitStableIdByRef = new Map;
+   const postCommitEntryIdByRef = new Map;
+   for (let i = 0;i < args.messages.length; i++) {
+@@ -182483,6 +183366,9 @@ async function runPipeline(args) {
+   } catch (err) {
+     sessionLog(args.sessionId, `token accounting failed (continuing): ${err instanceof Error ? err.message : String(err)}`);
+   }
++  const materialized = injectionResult?.m0Materialized === true;
++  const materializeReason = injectionResult?.m0Reason ?? null;
++  const bustedThisPass = didMutateFromFlushedStatuses || pendingOpsDidMutate || heuristicOrReasoningDidMutate || autoReclaimDidMutateThisPass || materialized || historyWasConsumedThisPass;
+   return {
+     messages: outputMessages,
+     heuristicsExecuted,
+@@ -182491,6 +183377,12 @@ async function runPipeline(args) {
+     syntheticLeadingCount: injectionResult?.syntheticLeadingCount ?? 0,
+     heuristicsResult,
+     injectionResult,
++    materialized,
++    materializeReason,
++    droppedTokens,
++    droppedCount,
++    emergency,
++    bustedThisPass,
+     targetCount: targets.size,
+     reasoningWatermark: getOrCreateSessionMeta(args.db, args.sessionId).clearedReasoningThroughTag ?? 0,
+     activeTags,
+@@ -182667,6 +183559,7 @@ function clearContextHandlerSession(sessionId) {
+     rawMessageProviderUnregistersBySession.delete(sessionId);
+   }
+   clearSessionTracking(sessionId);
++  clearPiEmbedSessionState(sessionId);
+ }
+ 
+ // src/commands/ctx-flush.ts
+@@ -182916,6 +183809,12 @@ function updateCompactionMarkerAfterPublication(db, sessionId, lastCompartmentEn
+ // ../plugin/src/hooks/magic-context/compartment-runner-historian.ts
+ import { mkdirSync as mkdirSync7, unlinkSync as unlinkSync2, writeFileSync as writeFileSync4 } from "node:fs";
+ import { join as join16 } from "node:path";
++
++// ../plugin/src/agents/historian.ts
++var HISTORIAN_AGENT = "historian";
++var HISTORIAN_EDITOR_AGENT = "historian-editor";
++
++// ../plugin/src/hooks/magic-context/compartment-runner-historian.ts
+ init_data_path();
+ function historianResponseDumpDir(directory) {
+   return getProjectMagicContextHistorianDir(directory);
+@@ -185169,7 +186068,7 @@ function formatThresholdPercent(value) {
+ // package.json
+ var package_default = {
+   name: "@cortexkit/pi-magic-context",
+-  version: "0.24.1",
++  version: "0.26.0",
+   type: "module",
+   description: "Pi coding agent extension for Magic Context — cross-session memory and context management",
+   main: "dist/index.js",
+@@ -185782,9 +186681,184 @@ Older parts of this session are summarized into <compartment> blocks inside <ses
+ 
+ ctx_expand(start=120, end=245)  ← the compartment's own start/end attributes
+ 
+-Returns the raw transcript as [N] U:/A: lines, capped at ~15K tokens; an oversized range returns the head and tells you where to continue. Also works with ordinals from ctx_search message results — expand a window around a hit (e.g. start=N-10, end=N+5). Ranges after the last compartment are your live tail — already visible in context, not expandable.`;
++Returns the raw transcript as [N] U:/A: lines, capped at ~15K tokens; an oversized range returns the head and tells you where to continue. Also works with ordinals from ctx_search message results — expand a window around a hit (e.g. start=N-10, end=N+5). Ranges after the last compartment are your live tail — already visible in context, not expandable.
++
++Two recovery modes for finer detail:
++- ctx_expand(start=120, end=245, verbose=true) — lists each message SEPARATELY with its ordinal [N] and a per-part preview (each tool call shown with its output size). Use this to find the exact message or tool call you want, then recover it in full by ordinal.
++- ctx_expand(message=138) — returns the FULL untruncated content of the message at that ordinal: every text part, and every tool call's complete input + output, read from stored history. This is the cheap way to get back a tool output you dropped with ctx_reduce — the original is still in storage even though the wire shows [dropped §N§]. If the message was deleted from history (session prune/revert), it says so.`;
+ var CTX_EXPAND_TOKEN_BUDGET = 15000;
+ 
++// ../plugin/src/tools/ctx-expand/render.ts
++function isRecord3(value) {
++  return value !== null && typeof value === "object" && !Array.isArray(value);
++}
++function roleLabel(role) {
++  if (role === "assistant")
++    return "A (assistant)";
++  if (role === "user")
++    return "U (user)";
++  return role;
++}
++function truncate2(value, max) {
++  const t = value.trim();
++  return t.length <= max ? t : `${t.slice(0, max)}…`;
++}
++function keyArg(input) {
++  if (!input)
++    return "";
++  for (const k of ["filePath", "path", "pattern", "query", "symbol", "module", "action"]) {
++    const v = input[k];
++    if (typeof v === "string" && v.length > 0)
++      return truncate2(v, 60);
++  }
++  if (typeof input.description === "string")
++    return truncate2(input.description, 60);
++  return "";
++}
++function asToolPart(part) {
++  const type = typeof part.type === "string" ? part.type : "";
++  if (type === "tool") {
++    const state = isRecord3(part.state) ? part.state : null;
++    const output = state && typeof state.output === "string" ? state.output : state && state.output != null ? JSON.stringify(state.output) : null;
++    const metadata = state && isRecord3(state.metadata) ? state.metadata : null;
++    const title = state && typeof state.title === "string" && state.title || metadata && typeof metadata.title === "string" && metadata.title || null;
++    return {
++      name: typeof part.tool === "string" ? part.tool : "tool",
++      callId: typeof part.callID === "string" ? part.callID : "",
++      title,
++      input: state && isRecord3(state.input) ? state.input : null,
++      output
++    };
++  }
++  if (type === "tool_use") {
++    return {
++      name: typeof part.name === "string" ? part.name : "tool",
++      callId: typeof part.id === "string" ? part.id : "",
++      title: null,
++      input: isRecord3(part.input) ? part.input : null,
++      output: null
++    };
++  }
++  if (type === "tool_result") {
++    const content = part.content;
++    const output = typeof content === "string" ? content : content != null ? JSON.stringify(content) : null;
++    return {
++      name: "tool_result",
++      callId: typeof part.tool_use_id === "string" ? part.tool_use_id : "",
++      title: null,
++      input: null,
++      output
++    };
++  }
++  return null;
++}
++function textOf(part) {
++  if (part.type === "text" && typeof part.text === "string")
++    return part.text;
++  return null;
++}
++function reasoningOf(part) {
++  if ((part.type === "reasoning" || part.type === "thinking") && typeof part.text === "string") {
++    return part.text;
++  }
++  return null;
++}
++function renderPartPreview(part) {
++  if (!isRecord3(part))
++    return null;
++  const text = textOf(part);
++  if (text !== null) {
++    const t = truncate2(text, 200);
++    return t.length > 0 ? `    • ${t}` : null;
++  }
++  const tool = asToolPart(part);
++  if (tool) {
++    const arg = keyArg(tool.input);
++    const head = arg ? `${tool.name}(${arg})` : tool.name;
++    return tool.output !== null ? `    • tool ${head} → output ~${estimateTokens(tool.output)} tok` : `    • tool ${head}`;
++  }
++  const reasoning = reasoningOf(part);
++  if (reasoning !== null)
++    return `    • [reasoning] ${truncate2(reasoning, 120)}`;
++  const type = typeof part.type === "string" ? part.type : "part";
++  if (type === "file")
++    return "    • [file]";
++  if (type === "step-start" || type === "step-finish")
++    return null;
++  return `    • [${type}]`;
++}
++function renderPartFull(part) {
++  if (!isRecord3(part))
++    return null;
++  const text = textOf(part);
++  if (text !== null) {
++    return text.trim().length > 0 ? `  [text]
++${text}` : null;
++  }
++  const tool = asToolPart(part);
++  if (tool) {
++    const lines = [];
++    const idSuffix = tool.callId ? ` #${tool.callId}` : "";
++    lines.push(`  [tool: ${tool.name}${idSuffix}]`);
++    if (tool.title && tool.title.trim().length > 0) {
++      lines.push(`  description: ${tool.title.trim()}`);
++    }
++    if (tool.input)
++      lines.push(`  input: ${JSON.stringify(tool.input)}`);
++    if (tool.output !== null)
++      lines.push(`  output:
++${tool.output}`);
++    return lines.join(`
++`);
++  }
++  const type = typeof part.type === "string" ? part.type : "part";
++  if (type === "file") {
++    const name2 = typeof part.filename === "string" && part.filename || typeof part.url === "string" && part.url || "";
++    return `  [file]${name2 ? ` ${name2}` : ""}`;
++  }
++  return null;
++}
++function renderMessageByOrdinal(sessionId, ordinal) {
++  const msg = readRawSessionMessages(sessionId).find((m) => m.ordinal === ordinal);
++  if (!msg) {
++    return `No message at ordinal ${ordinal} in this session's stored history — it was deleted ` + `(session prune/revert) or the ordinal is wrong, so it can't be recovered. ` + `Re-run the tool if you still need the data.`;
++  }
++  const rendered = msg.parts.map(renderPartFull).filter((l) => l !== null);
++  const lines = [`[${msg.ordinal}] ${roleLabel(msg.role)} — full recovery:`, ""];
++  if (rendered.length === 0) {
++    lines.push("  (no recoverable content — message had only structural/reasoning parts)");
++  } else {
++    lines.push(...rendered);
++  }
++  return lines.join(`
++`);
++}
++function renderVerboseRange(sessionId, start, end, tokenBudget) {
++  const messages = readRawSessionMessages(sessionId).filter((m) => m.ordinal >= start && m.ordinal <= end);
++  const out = [];
++  let usedTokens = 0;
++  let lastOrdinal = start - 1;
++  let truncated = false;
++  for (const msg of messages) {
++    const header = `[${msg.ordinal}] ${roleLabel(msg.role)}`;
++    const partLines = msg.parts.map(renderPartPreview).filter((l) => l !== null);
++    const block = partLines.length > 0 ? `${header}
++${partLines.join(`
++`)}` : header;
++    const blockTokens = estimateTokens(block);
++    if (usedTokens + blockTokens > tokenBudget && out.length > 0) {
++      truncated = true;
++      break;
++    }
++    out.push(block);
++    usedTokens += blockTokens;
++    lastOrdinal = msg.ordinal;
++  }
++  return { text: out.join(`
++
++`), lastOrdinal, truncated };
++}
++
+ // ../../node_modules/.bun/typebox@1.1.38/node_modules/typebox/build/system/memory/memory.mjs
+ var exports_memory = {};
+ __export(exports_memory, {
+@@ -189850,12 +190924,18 @@ __export(exports_typebox, {
+ });
+ // src/tools/ctx-expand.ts
+ var ParamsSchema = exports_typebox.Object({
+-  start: exports_typebox.Number({
++  start: exports_typebox.Optional(exports_typebox.Number({
+     description: "Start message ordinal (from compartment start attribute)"
+-  }),
+-  end: exports_typebox.Number({
++  })),
++  end: exports_typebox.Optional(exports_typebox.Number({
+     description: "End message ordinal (from compartment end attribute)"
+-  })
++  })),
++  verbose: exports_typebox.Optional(exports_typebox.Boolean({
++    description: "With start/end: list each message separately with its ordinal [N] and per-part preview, so you can recover one in full by ordinal."
++  })),
++  message: exports_typebox.Optional(exports_typebox.Number({
++    description: "Full untruncated recovery of ONE message by its ordinal (text + every tool call's full input/output). Recovers a tool output you dropped with ctx_reduce."
++  }))
+ });
+ function ok(text) {
+   return { content: [{ type: "text", text }], details: undefined };
+@@ -189874,22 +190954,41 @@ function createCtxExpandTool(deps) {
+     description: CTX_EXPAND_DESCRIPTION,
+     parameters: ParamsSchema,
+     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+-      if (typeof params.start !== "number" || typeof params.end !== "number" || params.start < 1 || params.end < params.start) {
+-        return err("Error: start and end must be positive integers with start <= end.");
+-      }
+       const sessionId = ctx.sessionManager.getSessionId();
+       if (!sessionId) {
+         return err("Error: no active Pi session.");
+       }
+-      const lastCompartmentEnd = getLastCompartmentEndMessage(deps.db, sessionId);
+-      if (lastCompartmentEnd >= 0 && params.start > lastCompartmentEnd) {
+-        return ok(`Range ${params.start}-${params.end} is entirely within the live tail (after the last compacted message ${lastCompartmentEnd}); those messages are already visible in context.`);
+-      }
+-      const effectiveEnd = lastCompartmentEnd >= 0 ? Math.min(params.end, lastCompartmentEnd) : params.end;
+       const unregister = setRawMessageProvider(sessionId, {
+         readMessages: () => readPiSessionMessages(ctx)
+       });
+       try {
++        if (typeof params.message === "number" && params.message >= 1) {
++          return ok(renderMessageByOrdinal(sessionId, params.message));
++        }
++        if (typeof params.start !== "number" || typeof params.end !== "number" || params.start < 1 || params.end < params.start) {
++          return err("Error: provide either message=<ordinal>, or start and end (positive integers, start <= end).");
++        }
++        const lastCompartmentEnd = getLastCompartmentEndMessage(deps.db, sessionId);
++        if (lastCompartmentEnd >= 0 && params.start > lastCompartmentEnd) {
++          return ok(`Range ${params.start}-${params.end} is entirely within the live tail (after the last compacted message ${lastCompartmentEnd}); those messages are already visible in context.`);
++        }
++        const effectiveEnd = lastCompartmentEnd >= 0 ? Math.min(params.end, lastCompartmentEnd) : params.end;
++        if (params.verbose === true) {
++          const v = renderVerboseRange(sessionId, params.start, effectiveEnd, CTX_EXPAND_TOKEN_BUDGET);
++          if (!v.text) {
++            return ok(`No messages found in range ${params.start}-${effectiveEnd}. The range may be outside this session's history.`);
++          }
++          const out = [
++            `Messages ${params.start}-${v.lastOrdinal} (verbose). Recover any one in full with ctx_expand(message=<ordinal>):`,
++            "",
++            v.text
++          ];
++          if (v.truncated) {
++            out.push("", `Truncated at message ${v.lastOrdinal} (budget: ~${CTX_EXPAND_TOKEN_BUDGET} tokens). Call again with start=${v.lastOrdinal + 1} end=${effectiveEnd} verbose=true for more.`);
++          }
++          return ok(out.join(`
++`));
++        }
+         const chunk = readSessionChunk(sessionId, CTX_EXPAND_TOKEN_BUDGET, params.start, effectiveEnd + 1);
+         if (!chunk.text || chunk.messageCount === 0) {
+           return ok(`No messages found in range ${params.start}-${params.end}. The range may be outside this session's history.`);
+@@ -190608,15 +191707,16 @@ function parseInteger(str) {
+ }
+ 
+ // ../plugin/src/tools/ctx-reduce/constants.ts
+-var CTX_REDUCE_DESCRIPTION = `Reduce context by dropping tagged content you no longer need.
+-Use §N§ identifiers visible in conversation. The \`drop\` param accepts ranges: "3-5", "1,2,9", "1-5,8".
++var CTX_REDUCE_DESCRIPTION = `Mark spent tagged content as discardable to reclaim context space. This is NOT an immediate delete. Use §N§ identifiers visible in the conversation. The \`drop\` param accepts ranges: "3-5", "1,2,9", "1-5,8".
++
++How it works:
++- Marking QUEUES content for release. It stays fully visible to you until context space is actually needed — which may be as soon as the next turn if you are already under pressure, or many turns later if not. So mark spent outputs as soon as you finish with them; don't hoard the call for the end of the turn.
++- The newest tags are protected: marking one just queues it until it ages out of the recent window, so marking recent output is harmless.
++- When content is finally released it becomes a short placeholder, and re-running the tool is the only way to get it back. So mark only what you are genuinely DONE with — the test is "have I extracted what I need from this?", not "is it safe / do I have time before it drops?".
+ 
+-CRITICAL RULES:
+-- NEVER blanket-drop large ranges (e.g., "1-50"). Always review what each tag contains first.
+-- Only drop tool outputs you have already processed and no longer need.
+-- Protected tags are accepted but deferred until they leave the last protected range.
+-- Keep recent context — only reduce OLD content that is no longer relevant to current work.
+-- Dropped content is gone forever.`;
++Mark discardable once processed: large outputs you've summarized, repeated or redundant dumps, data written to disk, status/log output that only confirmed an expected state.
++Keep: user messages, unresolved errors, raw evidence you haven't extracted yet, and outputs whose exact wording may matter later.
++Never blanket-mark large ranges (e.g. "1-50") — review what each tag holds first.`;
+ 
+ // src/tools/ctx-reduce.ts
+ var ParamsSchema4 = exports_typebox.Object({
+@@ -190843,7 +191943,7 @@ function createCtxSearchTool(deps) {
+         memoryEnabled,
+         embeddingEnabled,
+         embedQuery: async (text, signal) => {
+-          const result = await embedTextForProject(projectIdentity, text, signal);
++          const result = await embedTextForProject(projectIdentity, text, signal, "query");
+           return result?.vector ?? null;
+         },
+         isEmbeddingRuntimeEnabled: () => embeddingEnabled === true,
+@@ -191071,7 +192171,7 @@ function resolveSidekickFromConfig(config2) {
+     systemPrompt: sidekick.system_prompt,
+     timeoutMs: sidekick.timeout_ms,
+     thinking_level: sidekick.thinking_level,
+-    fallbackModels: resolveFallbackChain("sidekick", sidekick.fallback_models)
++    fallbackModels: resolveFallbackChain(sidekick.fallback_models)
+   };
+ }
+ function resolveHistorianFromConfig(config2) {
+@@ -191083,7 +192183,7 @@ function resolveHistorianFromConfig(config2) {
+     return;
+   const historianContextLimit = resolveHistorianContextLimit(model);
+   const historianChunkTokens = deriveHistorianChunkTokens(historianContextLimit);
+-  const fallbackModels = resolveFallbackChain("historian", historian?.fallback_models);
++  const fallbackModels = resolveFallbackChain(historian?.fallback_models);
+   return {
+     runner: new PiSubagentRunner,
+     model,
+@@ -191217,7 +192317,21 @@ async function src_default2(pi) {
+     },
+     historian: hist,
+     autoSearch: auto,
+-    resolveForProject: resolveContextOptionsForProject
++    resolveForProject: resolveContextOptionsForProject,
++    maybeAutoEmbedSession: (sessionId, dir, identity) => {
++      maybeAutoEmbedPiSession({
++        db: database,
++        projectDir: dir,
++        projectIdentity: identity,
++        memoryEnabled: cfg.memory.enabled
++      }, sessionId, dir, identity, (text) => {
++        pi.sendMessage({
++          customType: "ctx-status",
++          content: text,
++          display: true
++        }, { triggerTurn: false });
++      });
++    }
+   });
+   function resolveContextOptionsForProject(dir) {
+     const cached2 = contextOptionsByDir.get(dir);
+@@ -191299,14 +192413,14 @@ async function src_default2(pi) {
+     onProjectSeen: (identity) => seenDreamerProjectIdentities.add(identity)
+   });
+   info("registered /ctx-dream");
+-  registerCtxEmbedHistoryCommand(pi, {
++  registerCtxEmbedCommand(pi, {
+     db,
+     projectDir,
+     projectIdentity,
+     memoryEnabled: config2.memory.enabled,
+     resolveProject: resolveCurrentProject
+   });
+-  info("registered /ctx-embed-history");
++  info("registered /ctx-embed");
+   const dreamerConfig = resolveDreamerFromConfig(config2);
+   if (dreamerConfig) {
+     registerPiDreamerProject({

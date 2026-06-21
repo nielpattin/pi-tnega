@@ -5,9 +5,9 @@ minimumReleaseAgeExclude:
   - "@earendil-works/*"
   - "@nielpattin/*"
   - "@mariozechner/*"
-  - pi-codex-goal@0.1.18
-  - '@observal/pi-insights@1.2.3'
   - '@plannotator/pi-extension'
+  - '@plannotator/webtui@0.1.0'
+  - '@cortexkit/*'
 allowBuilds:
   "@google/genai": true
   esbuild: true

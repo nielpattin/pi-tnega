@@ -1,30 +1,29 @@
 {
-   "$schema": "file:///C:/Users/niel/.pi/agent/packages/packages/pi-magic-context/assets/magic-context.schema.json",
-   "enabled": true,
-   "historian_timeout_ms": 600000,
-   "historian": {
-      "thinking_level": "high",
-      "model": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
-      "fallback_models": [
-         "opencode-go/deepseek-v4-flash"
-      ]
-   },
-   "embedding": {
-      "provider": "local",
-      "model": "Xenova/all-MiniLM-L6-v2"
-   },
-   "dreamer": {
-      "thinking_level": "high",
-      "model": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
-      "fallback_models": [
-         "opencode-go/deepseek-v4-flash"
-      ]
-   },
-   "sidekick": {
-      "thinking_level": "high",
-      "model": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
-      "fallback_models": [
-         "opencode-go/deepseek-v4-flash"
-      ]
-   }
+  "$schema": "https://raw.githubusercontent.com/cortexkit/magic-context/master/assets/magic-context.schema.json",
+  "execute_threshold_tokens": {
+    "deepseek/deepseek-v4": 300000,
+    "opencode-go/deepseek-v4": 300000,
+    "cct/deepseek-v4": 300000,
+    "xiaomi-token-plan-sgp/mimo-v2.5": 300000
+  },
+  "historian": {
+    "model": "xiaomi-token-plan-sgp/mimo-v2.5",
+    "fallback_models": [
+      "xiaomi-token-plan-sgp/mimo-v2.5"
+    ],
+    "thinking_level": "high"
+  },
+  "dreamer": {
+    "disable": true,
+    "inject_docs": false
+  },
+  "sidekick": {
+    "disable": true
+  },
+  "keep_subagents": true,
+  "historian_timeout_ms": 600000,
+  "execute_threshold_percentage": 80,
+  "memory": {
+    "enabled": true
+  }
 }

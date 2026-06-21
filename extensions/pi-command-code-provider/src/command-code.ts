@@ -297,8 +297,7 @@ function buildHeaders(
       Accept: "text/event-stream, application/json",
       "x-command-code-version": config.commandCodeVersion,
       "x-cli-environment": commandCodeCliEnvironment(),
-      "x-taste-learning": "false",
-      "x-co-flag": "false"
+      "x-taste-learning": "false"
    };
    if (runtime?.sessionId) {
       headers["x-session-id"] = runtime.sessionId;
