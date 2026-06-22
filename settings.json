@@ -10,7 +10,8 @@
     "xiaomi-token-plan-sgp/mimo-v2.5-pro",
     "xiaomi-token-plan-sgp/mimo-v2.5",
     "deepseek/deepseek-v4-flash",
-    "opencode/deepseek-v4-flash-free"
+    "opencode/deepseek-v4-flash-free",
+    "cloudflare/@cf/zai-org/glm-5.2"
   ],
   "extensions": [
     "-extensions\\web-reader.ts",
@@ -34,7 +35,7 @@
     "-extensions\\pi-intercom\\index.ts",
     "-extensions\\pi-command-code-provider\\index.ts",
     "-extensions\\kinda\\index.ts",
-    "-extensions\\pi-exa\\src\\index.ts",
+    "+extensions\\pi-exa\\src\\index.ts",
     "-extensions\\startup-timer.ts",
     "-extensions\\treepluss\\index.ts",
     "-extensions\\pi-mcp-adapter\\index.ts",
@@ -75,7 +76,7 @@
     {
       "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-magic-context",
       "extensions": [
-        "-dist\\src\\index.js"
+        "+dist\\src\\index.js"
       ]
     },
     {
@@ -84,9 +85,24 @@
         "+index.ts"
       ]
     },
-    "npm:@plannotator/pi-extension",
-    "npm:@cortexkit/pi-magic-context@latest",
-    "npm:@cortexkit/aft-pi"
+    {
+      "source": "npm:@plannotator/pi-extension",
+      "extensions": [
+        "-"
+      ]
+    },
+    {
+      "source": "npm:@cortexkit/pi-magic-context@latest",
+      "extensions": [
+        "-dist\\index.js"
+      ]
+    },
+    {
+      "source": "npm:@cortexkit/aft-pi",
+      "extensions": [
+        "-dist\\index.js"
+      ]
+    }
   ],
   "prompts": [
     "-prompts\\commit.md"
@@ -147,6 +163,7 @@
   "showHardwareCursor": true,
   "autocompleteMaxVisible": 20,
   "defaultProjectTrust": "always",
-  "defaultProvider": "opencode",
-  "defaultModel": "deepseek-v4-flash-free"
+  "defaultProvider": "xiaomi-token-plan-sgp",
+  "defaultModel": "mimo-v2.5-pro",
+  "defaultThinkingLevel": "high"
 }
