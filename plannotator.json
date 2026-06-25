@@ -1,23 +1,19 @@
 {
-   "defaults": {
-      "model": { "provider": "opencode-go", "id": "deepseek-v4-flash" },
-      "thinking": "xhigh"
-   },
    "phases": {
       "planning": {
-         "model": { "provider": "lb", "id": "gpt-5.5" },
+         "model": { "provider": "cloudflare", "id": "@cf/zai-org/glm-5.2" },
          "thinking": "high",
          "activeTools": ["grep", "find", "ls", "plannotator_submit_plan"],
          "statusLabel": "⏸ plan"
       },
       "executing": {
-         "model": { "provider": "lb", "id": "gpt-5.5" },
+         "model": { "provider": "opencode", "id": "deepseek-v4-flash-free" },
          "thinking": "high",
          "statusLabel": "▶ exec"
       },
       "reviewing": {
-         "model": { "provider": "opencode-go", "id": "deepseek-v4-flash" },
-         "thinking": "xhigh",
+         "model": { "provider": "cloudflare", "id": "@cf/zai-org/glm-5.2" },
+         "thinking": "high",
          "statusLabel": "🔍 review"
       }
    }

@@ -35,6 +35,13 @@ export default function (pi: ExtensionAPI) {
       if (thinking.length < 10) return true;
       const lines = thinking.split("\n").filter((l) => l.trim());
       if (lines.length > 0 && THINKING_NOISE_PATTERN.test(lines[0])) return true;
+      // Detect degraded thinking: starts normal then becomes number/quote noise
+      // Check the last 30% of the text for excessive digits/quotes
+      const tail = thinking.slice(Math.floor(thinking.length * 0.7));
+      const digitCount = (tail.match(/\d/g) || []).length;
+      if (tail.length > 50 && digitCount / tail.length > 0.4) return true;
+      // Detect long runs of numbers with quotes: 55"56"57"58"59
+      if (/\d["'`\]]{1,2}\d["'`\]]{1,2}\d["'`\]]{1,2}\d/.test(thinking)) return true;
       return false;
    }
 

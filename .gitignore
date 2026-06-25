@@ -181,3 +181,4 @@ exa-mcp-cache
 plans/
 __pycache__/
 _*.py
+*.tmp

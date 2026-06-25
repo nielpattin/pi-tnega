@@ -53,7 +53,7 @@
     {
       "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-simplify",
       "extensions": [
-        "-src\\index.ts"
+        "+src\\index.ts"
       ]
     },
     {
@@ -65,7 +65,7 @@
     {
       "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-permission-system",
       "extensions": [
-        "-src\\index.ts"
+        "+src\\index.ts"
       ]
     },
     {
@@ -87,12 +87,6 @@
       ]
     },
     "npm:@plannotator/pi-extension",
-    {
-      "source": "C:\\Users\\niel\\.pi\\agent\\aft\\packages\\pi-plugin",
-      "extensions": [
-        "-dist\\index.js"
-      ]
-    },
     "npm:@ff-labs/pi-fff",
     {
       "source": "C:\\Users\\niel\\.pi\\agent\\pi-mcp-adapter",
