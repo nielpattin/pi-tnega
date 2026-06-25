@@ -7,6 +7,7 @@ export default defineConfig({
       "node_modules",
       "skills",
       "packages/**",
+      "aft/**",
       "tests",
       "test",
       "*.test.ts",

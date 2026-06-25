@@ -11,7 +11,9 @@
     "xiaomi-token-plan-sgp/mimo-v2.5",
     "deepseek/deepseek-v4-flash",
     "opencode/deepseek-v4-flash-free",
-    "cloudflare/@cf/zai-org/glm-5.2"
+    "cloudflare/@cf/zai-org/glm-5.2",
+    "ccp/deepseek/deepseek-v4-flash",
+    "cloudflare/@cf/moonshotai/kimi-k2.7-code"
   ],
   "extensions": [
     "-extensions\\web-reader.ts",
@@ -33,20 +35,20 @@
     "-extensions\\tool-selector\\index.ts",
     "-extensions\\temperature.ts",
     "-extensions\\pi-intercom\\index.ts",
-    "-extensions\\pi-command-code-provider\\index.ts",
     "-extensions\\kinda\\index.ts",
     "+extensions\\pi-exa\\src\\index.ts",
     "-extensions\\startup-timer.ts",
     "-extensions\\treepluss\\index.ts",
-    "-extensions\\pi-mcp-adapter\\index.ts",
-    "+extensions\\notification\\index.ts"
+    "+extensions\\notification\\index.ts",
+    "+extensions\\ccp\\index.ts",
+    "+extensions\\glm-garble-guard.ts"
   ],
   "followUpMode": "all",
   "hideThinkingBlock": true,
   "images": {
     "autoResize": true
   },
-  "lastChangelogVersion": "0.79.9",
+  "lastChangelogVersion": "0.80.2",
   "packages": [
     {
       "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-simplify",
@@ -57,7 +59,7 @@
     {
       "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-station",
       "extensions": [
-        "-index.ts"
+        "+index.ts"
       ]
     },
     {
@@ -69,14 +71,13 @@
     {
       "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-subagents",
       "extensions": [
-        "+dist\\src\\index.js",
         "-dist\\index.js"
       ]
     },
     {
-      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-magic-context",
+      "source": "C:\\Users\\niel\\.pi\\agent\\magic-context\\packages\\pi-plugin",
       "extensions": [
-        "+dist\\src\\index.js"
+        "+dist\\index.js"
       ]
     },
     {
@@ -85,22 +86,18 @@
         "+index.ts"
       ]
     },
+    "npm:@plannotator/pi-extension",
     {
-      "source": "npm:@plannotator/pi-extension",
-      "extensions": [
-        "-"
-      ]
-    },
-    {
-      "source": "npm:@cortexkit/pi-magic-context@latest",
+      "source": "C:\\Users\\niel\\.pi\\agent\\aft\\packages\\pi-plugin",
       "extensions": [
         "-dist\\index.js"
       ]
     },
+    "npm:@ff-labs/pi-fff",
     {
-      "source": "npm:@cortexkit/aft-pi",
+      "source": "C:\\Users\\niel\\.pi\\agent\\pi-mcp-adapter",
       "extensions": [
-        "-dist\\index.js"
+        "+index.ts"
       ]
     }
   ],
@@ -156,14 +153,18 @@
       "stash": "alt+s",
       "stashHistory": "alt+h"
     },
-    "readStyle": true,
-    "hashline": true
+    "hashline": false
   },
   "httpIdleTimeoutMs": 0,
-  "showHardwareCursor": true,
+  "showHardwareCursor": false,
   "autocompleteMaxVisible": 20,
   "defaultProjectTrust": "always",
   "defaultProvider": "xiaomi-token-plan-sgp",
   "defaultModel": "mimo-v2.5-pro",
-  "defaultThinkingLevel": "high"
+  "defaultThinkingLevel": "high",
+  "describeImage": {
+    "model": "google/gemini-3.1-flash-lite",
+    "fallbackModel": "xiaomi-token-plan-sgp/mimo-v2.5",
+    "timeout": 30000
+  }
 }

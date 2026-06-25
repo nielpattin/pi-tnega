@@ -1,5 +1,6 @@
 packages:
   - "extensions/*"
+  - "pi-mcp-adapter"
 
 minimumReleaseAgeExclude:
   - "@earendil-works/*"
@@ -8,6 +9,7 @@ minimumReleaseAgeExclude:
   - '@plannotator/pi-extension'
   - '@plannotator/webtui@0.1.0'
   - '@cortexkit/*'
+  - '@ff-labs/*'
 allowBuilds:
   "@google/genai": true
   esbuild: true
@@ -15,8 +17,8 @@ allowBuilds:
   protobufjs: true
   better-sqlite3: true
   tree-sitter-bash: true
-  onnxruntime-node: set this to true or false
-  sharp: set this to true or false
+  onnxruntime-node: true
+  sharp: true
 
 # Supply chain security
 minimumReleaseAge: 7200 # 5 days (or 1440 for 1 day)

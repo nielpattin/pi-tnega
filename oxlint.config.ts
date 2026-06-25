@@ -12,6 +12,7 @@ export default defineConfig({
    ignorePatterns: [
       "skills/**",
       "packages/**",
+      "aft/**",
       "**/pi-mcp-adapter/**",
       "**/test/**",
       "**/tests/**",

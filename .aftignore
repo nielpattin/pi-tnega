@@ -1,1 +1,7 @@
 skills/
+
+# Large submodules / vendored repos — don't index
+aft/
+magic-context/
+packages/
+
