@@ -1,13 +1,30 @@
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 
-export const COMMAND_CODE_API = "command-code-alpha" as const;
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+function loadEnv() {
+   const raw = readFileSync(join(__dirname, "..", "env.json"), "utf-8");
+   return JSON.parse(raw) as {
+      upstream: string;
+      version: string;
+      timeout: number;
+      headers: Record<string, string>;
+   };
+}
+
+const ENV = loadEnv();
+
+export const PROVIDER_API = "ccp-generate" as const;
 
 type ThinkingLevelKey = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 type ThinkingLevelMap = Partial<Record<ThinkingLevelKey, string | null>>;
 type OutputModality = "text" | "image" | "audio" | "video";
 type CapabilityFlags = Record<string, boolean>;
 
-export type CommandCodeProviderModelConfig = ProviderModelConfig & {
+export type CCPProviderModelConfig = ProviderModelConfig & {
    baseUrl?: string;
    description?: string;
    thinkingLevelMap?: ThinkingLevelMap;
@@ -47,7 +64,7 @@ const ANTHROPIC_REASONING_MAP = {
    xhigh: null
 } satisfies ThinkingLevelMap;
 const ANTHROPIC_OPUS_4_7_REASONING_MAP = { ...ANTHROPIC_REASONING_MAP, xhigh: "xhigh" } satisfies ThinkingLevelMap;
-const COMMAND_CODE_AUTO_REASONING_MAP = {
+const AUTO_REASONING_MAP = {
    off: null,
    minimal: null,
    low: null,
@@ -110,7 +127,7 @@ const RAW_MODELS = [
       id: "claude-haiku-4-5-20251001",
       name: "Claude Haiku 4.5",
       description: "fastest & most compact, great for quick tasks",
-      reasoning: false,
+      reasoning: true,
       thinkingLevelMap: ANTHROPIC_REASONING_MAP,
       contextWindow: 200000,
       maxTokens: 64000,
@@ -175,6 +192,15 @@ const RAW_MODELS = [
       cost: { input: 0.95, output: 4, cacheRead: 0.16, cacheWrite: 0 }
    },
    {
+      id: "moonshotai/Kimi-K2.7-Code-Highspeed",
+      name: "Kimi K2.7 Code Highspeed",
+      description: "high-speed code-specialized reasoning",
+      reasoning: true,
+      contextWindow: 262000,
+      maxTokens: 262144,
+      cost: { input: 0.95, output: 4, cacheRead: 0.16, cacheWrite: 0 }
+   },
+   {
       id: "moonshotai/Kimi-K2.5",
       name: "Kimi K2.5",
       description: "multimodal frontend coding",
@@ -182,6 +208,16 @@ const RAW_MODELS = [
       contextWindow: 256000,
       maxTokens: 262144,
       cost: { input: 0.6, output: 3, cacheRead: 0, cacheWrite: 0 }
+   },
+   {
+      id: "zai-org/GLM-5.2",
+      name: "GLM 5.2",
+      description: "frontier coding agent",
+      reasoning: false,
+      contextWindow: 1000000,
+      maxTokens: 131072,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      isFree: true
    },
    {
       id: "zai-org/GLM-5.1",
@@ -211,11 +247,22 @@ const RAW_MODELS = [
       cost: { input: 0.5, output: 2, cacheRead: 0, cacheWrite: 0 }
    },
    {
+      id: "MiniMaxAI/MiniMax-M3-Free",
+      name: "MiniMax M3 Free",
+      description: "free frontier reasoning model",
+      reasoning: true,
+      thinkingLevelMap: AUTO_REASONING_MAP,
+      contextWindow: 1000000,
+      maxTokens: 131072,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      isFree: true
+   },
+   {
       id: "MiniMaxAI/MiniMax-M3",
       name: "MiniMax M3",
       description: "frontier reasoning with long-horizon agent execution",
       reasoning: true,
-      thinkingLevelMap: COMMAND_CODE_AUTO_REASONING_MAP,
+      thinkingLevelMap: AUTO_REASONING_MAP,
       contextWindow: 1000000,
       maxTokens: 131072,
       cost: { input: 0.5, output: 2, cacheRead: 0, cacheWrite: 0 }
@@ -234,7 +281,7 @@ const RAW_MODELS = [
       name: "DeepSeek V4 Pro",
       description: "hybrid-attention long-context reasoning",
       reasoning: true,
-      thinkingLevelMap: COMMAND_CODE_AUTO_REASONING_MAP,
+      thinkingLevelMap: AUTO_REASONING_MAP,
       contextWindow: 1000000,
       maxTokens: 393216,
       cost: { input: 0.435, output: 0.87, cacheRead: 0.003625, cacheWrite: 0 }
@@ -244,7 +291,7 @@ const RAW_MODELS = [
       name: "DeepSeek V4 Flash",
       description: "fast hybrid-attention reasoning",
       reasoning: true,
-      thinkingLevelMap: COMMAND_CODE_AUTO_REASONING_MAP,
+      thinkingLevelMap: AUTO_REASONING_MAP,
       contextWindow: 1000000,
       maxTokens: 384000,
       cost: { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 }
@@ -254,7 +301,7 @@ const RAW_MODELS = [
       name: "Qwen 3.6 Max Preview",
       description: "vibe coding & efficient agent execution",
       reasoning: true,
-      thinkingLevelMap: COMMAND_CODE_AUTO_REASONING_MAP,
+      thinkingLevelMap: AUTO_REASONING_MAP,
       contextWindow: 1000000,
       maxTokens: 65536,
       cost: { input: 0.5, output: 3, cacheRead: 0.1, cacheWrite: 0 }
@@ -264,7 +311,7 @@ const RAW_MODELS = [
       name: "Qwen 3.6 Plus",
       description: "agentic coding & reasoning",
       reasoning: true,
-      thinkingLevelMap: COMMAND_CODE_AUTO_REASONING_MAP,
+      thinkingLevelMap: AUTO_REASONING_MAP,
       contextWindow: 1000000,
       maxTokens: 65536,
       cost: { input: 0.5, output: 3, cacheRead: 0.1, cacheWrite: 0 }
@@ -274,7 +321,7 @@ const RAW_MODELS = [
       name: "Qwen 3.7 Max",
       description: "frontier coding & long-horizon agent execution",
       reasoning: true,
-      thinkingLevelMap: COMMAND_CODE_AUTO_REASONING_MAP,
+      thinkingLevelMap: AUTO_REASONING_MAP,
       contextWindow: 1000000,
       maxTokens: 65536,
       cost: { input: 0.5, output: 3, cacheRead: 0.1, cacheWrite: 0 }
@@ -284,7 +331,7 @@ const RAW_MODELS = [
       name: "Qwen 3.7 Plus",
       description: "frontier coding & long-horizon agent execution",
       reasoning: true,
-      thinkingLevelMap: COMMAND_CODE_AUTO_REASONING_MAP,
+      thinkingLevelMap: AUTO_REASONING_MAP,
       contextWindow: 1000000,
       maxTokens: 65536,
       cost: { input: 0.5, output: 3, cacheRead: 0.1, cacheWrite: 0 }
@@ -294,7 +341,7 @@ const RAW_MODELS = [
       name: "Step 3.7 Flash",
       description: "multimodal sparse-MoE reasoning",
       reasoning: true,
-      thinkingLevelMap: COMMAND_CODE_AUTO_REASONING_MAP,
+      thinkingLevelMap: AUTO_REASONING_MAP,
       contextWindow: 256000,
       maxTokens: 131072,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
@@ -304,7 +351,7 @@ const RAW_MODELS = [
       name: "Step 3.5 Flash",
       description: "fast sparse-MoE agentic reasoning",
       reasoning: true,
-      thinkingLevelMap: COMMAND_CODE_AUTO_REASONING_MAP,
+      thinkingLevelMap: AUTO_REASONING_MAP,
       contextWindow: 1000000,
       maxTokens: 131072,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
@@ -352,27 +399,27 @@ const RAW_MODELS = [
       name: "Nemotron 3 Ultra",
       description: "frontier reasoning model",
       reasoning: true,
-      thinkingLevelMap: COMMAND_CODE_AUTO_REASONING_MAP,
+      thinkingLevelMap: AUTO_REASONING_MAP,
       contextWindow: 1000000,
       maxTokens: 131072,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
    }
-] satisfies Array<Omit<CommandCodeProviderModelConfig, "api" | "input">>;
+] satisfies Array<Omit<CCPProviderModelConfig, "api" | "input">>;
 
-export const COMMAND_CODE_DEFAULTS = {
-   providerId: "command-code",
-   displayName: "CommandCode",
-   upstreamUrl: "https://api.commandcode.ai",
-   apiKey: "$COMMAND_CODE_TOKEN",
-   commandCodeVersion: "0.37.2",
-   requestTimeoutMs: 300_000,
+export const PROVIDER_DEFAULTS = {
+   providerId: "ccp",
+   displayName: "CCP",
+   upstreamUrl: ENV.upstream,
+   apiKey: "$CCP_API_TOKEN",
+   apiVersion: ENV.version,
+   requestTimeoutMs: ENV.timeout,
    memory: "",
-   headers: {} as Record<string, string>
+   headers: ENV.headers
 };
 
-export const COMMAND_CODE_MODELS: CommandCodeProviderModelConfig[] = RAW_MODELS.map((model) => ({
+export const PROVIDER_MODELS: CCPProviderModelConfig[] = RAW_MODELS.map((model) => ({
    ...DEFAULT_MODEL_DEFAULTS,
    ...model,
-   api: COMMAND_CODE_API,
+   api: PROVIDER_API,
    cost: { ...DEFAULT_MODEL_DEFAULTS.cost, ...model.cost }
 }));

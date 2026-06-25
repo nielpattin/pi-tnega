@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
    calculateCost,
    createAssistantMessageEventStream,
@@ -16,21 +18,22 @@ import {
 
 import type { DebugLogger } from "./debug-logger";
 
-export interface CommandCodeProviderSettings {
+export interface ProviderSettings {
    upstreamUrl: string;
    apiKey: string;
-   commandCodeVersion: string;
+   apiVersion: string;
    requestTimeoutMs: number;
    memory: string;
    headers: Record<string, string>;
 }
 
-interface CommandCodeRuntimeState {
+interface RuntimeState {
    cwd?: string;
    sessionId?: string;
+   threadId?: string;
 }
 
-interface CommandCodeContentPart {
+interface ContentPart {
    type: string;
    text?: string;
    image?: string;
@@ -45,35 +48,35 @@ interface CommandCodeContentPart {
    isError?: boolean;
 }
 
-interface CommandCodeMessage {
+interface UpstreamMessage {
    role: "user" | "assistant" | "tool";
-   content: string | CommandCodeContentPart[];
+   content: string | ContentPart[];
 }
 
-interface CommandCodeTool {
+interface UpstreamTool {
    name: string;
    description: string;
    input_schema: unknown;
 }
 
-interface CommandCodeRequest {
+interface UpstreamRequest {
    memory: string;
    taste: null;
    skills: string;
    params: {
-      tools?: CommandCodeTool[];
+      tools?: UpstreamTool[];
       stream: true;
       max_tokens: number;
       temperature?: number;
       system?: string;
-      messages: CommandCodeMessage[];
+      messages: UpstreamMessage[];
       model: string;
    };
    config: Record<string, unknown>;
    threadId?: string;
 }
 
-interface CommandCodeResponse {
+interface UpstreamResponse {
    id?: unknown;
    role?: unknown;
    model?: unknown;
@@ -98,6 +101,7 @@ interface ToolInputAccumulator {
 const ENV_VAR_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
 const DEFAULT_MAX_OUTPUT_TOKENS = 64_000;
 const API_MAX_OUTPUT_TOKENS = 200_000;
+const PROVIDER_NAME = "CCP";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
    return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -111,13 +115,13 @@ function nowDate(): string {
    return new Date().toISOString().slice(0, 10);
 }
 
-function commandCodeCliEnvironment(): string {
+function cliEnvironment(): string {
    if (process.argv.includes("--local")) return "local";
    if (process.argv.includes("--staging")) return "staging";
    return "production";
 }
 
-function buildCommandConfig(runtime: CommandCodeRuntimeState): Record<string, unknown> {
+function buildCommandConfig(runtime: RuntimeState): Record<string, unknown> {
    return {
       workingDir: runtime.cwd ?? "",
       date: nowDate(),
@@ -131,11 +135,11 @@ function buildCommandConfig(runtime: CommandCodeRuntimeState): Record<string, un
    };
 }
 
-function textPart(text: string): CommandCodeContentPart {
+function textPart(text: string): ContentPart {
    return { type: "text", text };
 }
 
-function imagePlaceholder(_image: ImageContent): CommandCodeContentPart {
+function imagePlaceholder(_image: ImageContent): ContentPart {
    return textPart("[image omitted]");
 }
 
@@ -144,15 +148,15 @@ function textFromContent(content: string | (TextContent | ImageContent)[]): stri
    return content.map((part) => (part.type === "text" ? part.text : "[image omitted]")).join("");
 }
 
-function userContent(content: string | (TextContent | ImageContent)[]): string | CommandCodeContentPart[] {
+function userContent(content: string | (TextContent | ImageContent)[]): string | ContentPart[] {
    if (typeof content === "string") return content;
    const parts = content.map((part) => (part.type === "text" ? textPart(part.text) : imagePlaceholder(part)));
    if (parts.length === 1 && parts[0].type === "text") return parts[0].text ?? "";
    return parts.length > 0 ? parts : "";
 }
 
-function assistantContent(message: AssistantMessage): string | CommandCodeContentPart[] {
-   const parts: CommandCodeContentPart[] = [];
+function assistantContent(message: AssistantMessage): string | ContentPart[] {
+   const parts: ContentPart[] = [];
    for (const part of message.content) {
       if (part.type === "text") {
          parts.push(textPart(part.text));
@@ -171,9 +175,7 @@ function assistantContent(message: AssistantMessage): string | CommandCodeConten
    return parts.length > 0 ? parts : "";
 }
 
-function toolResultContent(
-   message: Extract<Context["messages"][number], { role: "toolResult" }>
-): CommandCodeContentPart[] {
+function toolResultContent(message: Extract<Context["messages"][number], { role: "toolResult" }>): ContentPart[] {
    return [
       {
          type: "tool-result",
@@ -187,8 +189,8 @@ function toolResultContent(
    ];
 }
 
-function buildMessages(context: Context): CommandCodeMessage[] {
-   const messages: CommandCodeMessage[] = [];
+function buildMessages(context: Context): UpstreamMessage[] {
+   const messages: UpstreamMessage[] = [];
    for (const message of context.messages) {
       if (message.role === "user") {
          messages.push({ role: "user", content: userContent(message.content) });
@@ -205,7 +207,7 @@ function toolSchemaForRequest(tool: Tool): unknown {
    return tool.parameters ?? { type: "object", properties: {} };
 }
 
-function buildTools(tools: Tool[] | undefined): CommandCodeTool[] | undefined {
+function buildTools(tools: Tool[] | undefined): UpstreamTool[] | undefined {
    if (!tools || tools.length === 0) return undefined;
    return tools.map((tool) => ({
       name: tool.name,
@@ -214,7 +216,7 @@ function buildTools(tools: Tool[] | undefined): CommandCodeTool[] | undefined {
    }));
 }
 
-function buildSystemPrompt(config: CommandCodeProviderSettings, context: Context): string | undefined {
+function buildSystemPrompt(config: ProviderSettings, context: Context): string | undefined {
    const prompt = [config.memory, context.systemPrompt]
       .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
       .join("\n\n")
@@ -236,10 +238,10 @@ function resolveReasoningEffort(model: Model<Api>, options?: SimpleStreamOptions
 function buildRequest(
    model: Model<Api>,
    context: Context,
-   config: CommandCodeProviderSettings,
-   runtime: CommandCodeRuntimeState,
+   config: ProviderSettings,
+   runtime: RuntimeState,
    options?: SimpleStreamOptions
-): CommandCodeRequest {
+): UpstreamRequest {
    const reasoningEffort = resolveReasoningEffort(model, options);
    return {
       memory: "",
@@ -256,15 +258,15 @@ function buildRequest(
          model: model.id
       },
       config: buildCommandConfig(runtime),
-      threadId: runtime.sessionId
+      threadId: runtime?.threadId ?? randomUUID()
    };
 }
 
-function normalizePayloadTemperature(payload: CommandCodeRequest): CommandCodeRequest {
+function normalizePayloadTemperature(payload: UpstreamRequest): UpstreamRequest {
    if (!Object.hasOwn(payload, "temperature")) return payload;
-   const temperature = (payload as CommandCodeRequest & { temperature?: unknown }).temperature;
+   const temperature = (payload as UpstreamRequest & { temperature?: unknown }).temperature;
    if (typeof temperature !== "number" || !Number.isFinite(temperature)) return payload;
-   const { temperature: _temperature, ...rest } = payload as CommandCodeRequest & { temperature: number };
+   const { temperature: _temperature, ...rest } = payload as UpstreamRequest & { temperature: number };
    return {
       ...rest,
       params: {
@@ -274,30 +276,27 @@ function normalizePayloadTemperature(payload: CommandCodeRequest): CommandCodeRe
    };
 }
 
-function resolveApiKey(config: CommandCodeProviderSettings, options?: SimpleStreamOptions): string {
+function resolveApiKey(config: ProviderSettings, options?: SimpleStreamOptions): string {
    const apiKey = options?.apiKey;
-   if (!apiKey || (apiKey === config.apiKey && ENV_VAR_PATTERN.test(config.apiKey) && !process.env[config.apiKey])) {
-      throw new Error(
-         `No CommandCode API token configured. Set COMMAND_CODE_TOKEN before using the Command Code provider.`
-      );
+   const envVarName = config.apiKey.replace(/^\$/, "");
+   if (!apiKey || (apiKey === config.apiKey && ENV_VAR_PATTERN.test(envVarName) && !process.env[envVarName])) {
+      throw new Error(`No API token configured. Set CCP_API_TOKEN before using the CCP provider.`);
    }
-   return apiKey;
+   return apiKey === config.apiKey ? (process.env[envVarName] ?? apiKey) : apiKey;
 }
 
 function buildHeaders(
-   config: CommandCodeProviderSettings,
+   config: ProviderSettings,
    apiKey: string,
    options?: SimpleStreamOptions,
-   runtime?: CommandCodeRuntimeState
+   runtime?: RuntimeState
 ): Record<string, string> {
    const headers: Record<string, string> = {
       ...config.headers,
       ...options?.headers,
       "Content-Type": "application/json",
       Accept: "text/event-stream, application/json",
-      "x-command-code-version": config.commandCodeVersion,
-      "x-cli-environment": commandCodeCliEnvironment(),
-      "x-taste-learning": "false"
+      "x-cli-environment": cliEnvironment()
    };
    if (runtime?.sessionId) {
       headers["x-session-id"] = runtime.sessionId;
@@ -310,7 +309,7 @@ function buildHeaders(
    if (ossPrimary) {
       headers["x-oss-primary-provider"] = ossPrimary;
    }
-   if (process.env.CMD_ZDR === "1") {
+   if (process.env.CMD_ZDR === "1" || process.env.CCT_ZDR === "1" || process.env.CCP_ZDR === "1") {
       headers["x-cmd-zdr"] = "1";
    }
    if (!headers.Authorization && !headers.authorization) {
@@ -326,10 +325,10 @@ function createRequestSignal(
    const controller = new AbortController();
    let disposed = false;
    const timeout = setTimeout(() => {
-      if (!disposed) controller.abort(new Error(`CommandCode request timed out after ${timeoutMs}ms.`));
+      if (!disposed) controller.abort(new Error(`${PROVIDER_NAME} request timed out after ${timeoutMs}ms.`));
    }, timeoutMs);
    const abortFromParent = (): void => {
-      if (!disposed) controller.abort(options?.signal?.reason ?? new Error("CommandCode request aborted."));
+      if (!disposed) controller.abort(options?.signal?.reason ?? new Error(`${PROVIDER_NAME} request aborted.`));
    };
    if (options?.signal?.aborted) abortFromParent();
    options?.signal?.addEventListener("abort", abortFromParent, { once: true });
@@ -351,24 +350,24 @@ function responseHeadersToRecord(headers: Headers): Record<string, string> {
    return output;
 }
 
-async function readJsonResponse(response: Response): Promise<CommandCodeResponse> {
+async function readJsonResponse(response: Response): Promise<UpstreamResponse> {
    const text = await response.text();
    if (!text.trim()) return {};
    try {
       const parsed = JSON.parse(text);
-      return isRecord(parsed) ? parsed : { message: "CommandCode returned a non-object JSON response." };
+      return isRecord(parsed) ? parsed : { message: "Upstream returned a non-object JSON response." };
    } catch {
       return { message: text };
    }
 }
 
-function extractErrorMessage(payload: CommandCodeResponse, status: number): string {
+function extractErrorMessage(payload: UpstreamResponse, status: number): string {
    if (typeof payload.message === "string" && payload.message.trim()) return payload.message.trim();
    if (typeof payload.error === "string" && payload.error.trim()) return payload.error.trim();
    if (isRecord(payload.error) && typeof payload.error.message === "string" && payload.error.message.trim()) {
       return payload.error.message.trim();
    }
-   return `CommandCode request failed with HTTP ${status}.`;
+   return `${PROVIDER_NAME} request failed with HTTP ${status}.`;
 }
 
 function numberFrom(value: unknown): number {
@@ -467,7 +466,7 @@ function parseDsmlToolCalls(dsml: string, baseIndex: number): ToolCall[] {
       }
       toolCalls.push({
          type: "toolCall",
-         id: `command-code-tool-${baseIndex + toolCalls.length}`,
+         id: `ccp-tool-${baseIndex + toolCalls.length}`,
          name,
          arguments: args
       });
@@ -493,7 +492,7 @@ function parseXmlToolCalls(xml: string, baseIndex: number): ToolCall[] {
       }
       toolCalls.push({
          type: "toolCall",
-         id: `command-code-tool-${baseIndex + toolCalls.length}`,
+         id: `ccp-tool-${baseIndex + toolCalls.length}`,
          name,
          arguments: args
       });
@@ -539,7 +538,7 @@ function parseToolCall(part: Record<string, unknown>, index: number): ToolCall |
    const type = typeof part.type === "string" ? part.type : "";
    if (type !== "tool_use" && type !== "toolUse" && type !== "toolCall" && type !== "tool-call") return null;
    const name = optionalString(part.name) ?? optionalString(part.toolName) ?? "tool";
-   const id = optionalString(part.id) ?? optionalString(part.toolCallId) ?? `command-code-tool-${index}`;
+   const id = optionalString(part.id) ?? optionalString(part.toolCallId) ?? `ccp-tool-${index}`;
    const rawArguments = part.input ?? part.arguments ?? {};
    return {
       type: "toolCall",
@@ -595,7 +594,7 @@ function mapStopReason(
       case "tool_calls":
          return { stopReason: "toolUse" };
       case "content_filter":
-         return { stopReason: "error", errorMessage: "CommandCode stop_reason: content_filter" };
+         return { stopReason: "error", errorMessage: `${PROVIDER_NAME} stop_reason: content_filter` };
       default:
          return { stopReason: hasToolCalls ? "toolUse" : "stop" };
    }
@@ -685,7 +684,7 @@ function hasTool(context: Context, name: string): boolean {
    return context.tools?.some((tool) => tool.name === name) ?? false;
 }
 
-const COMMAND_CODE_TOOL_ALIASES: Record<string, string> = {
+const TOOL_ALIASES: Record<string, string> = {
    read_file: "read",
    write_file: "write",
    edit_file: "edit",
@@ -736,7 +735,7 @@ function normalizeToolArguments(name: string, args: Record<string, unknown>): Re
 }
 
 function normalizeToolCallForContext(toolCall: ToolCall, context: Context): ToolCall {
-   const alias = COMMAND_CODE_TOOL_ALIASES[toolCall.name];
+   const alias = TOOL_ALIASES[toolCall.name];
    const name = alias && hasTool(context, alias) && !hasTool(context, toolCall.name) ? alias : toolCall.name;
    return { ...toolCall, name, arguments: normalizeToolArguments(name, toolCall.arguments) };
 }
@@ -768,7 +767,7 @@ function emitToolCall(
 function emitResponse(
    stream: AssistantMessageEventStream,
    output: AssistantMessage,
-   response: CommandCodeResponse,
+   response: UpstreamResponse,
    model: Model<Api>,
    context: Context
 ): void {
@@ -903,10 +902,7 @@ async function consumeEventStream(
          return;
       }
       if (type === "tool-call") {
-         const id =
-            optionalString(event.toolCallId) ??
-            optionalString(event.id) ??
-            `command-code-tool-${output.content.length}`;
+         const id = optionalString(event.toolCallId) ?? optionalString(event.id) ?? `ccp-tool-${output.content.length}`;
          const accumulator = toolInputs.get(id);
          const rawInput = event.input ?? accumulator?.inputText ?? {};
          let args: Record<string, unknown>;
@@ -953,16 +949,16 @@ async function consumeEventStream(
             optionalString(event.error) ??
             (isRecord(event.error) ? optionalString(event.error.message) : undefined) ??
             (typeof event.statusCode === "number"
-               ? `CommandCode stream error (HTTP ${event.statusCode})`
+               ? `${PROVIDER_NAME} stream error (HTTP ${event.statusCode})`
                : undefined) ??
-            "CommandCode stream returned an error.";
+            `${PROVIDER_NAME} stream returned an error.`;
          logger.error("sse_stream_error", { model: model.id, rawError: event.error, resolvedMessage: finalError });
       }
    };
 
    const decoder = new TextDecoder();
    let buffered = "";
-   if (!response.body) throw new Error("CommandCode response did not include a readable body.");
+   if (!response.body) throw new Error(`${PROVIDER_NAME} response did not include a readable body.`);
    for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
       buffered += decoder.decode(chunk, { stream: true });
       const lines = buffered.split(/\r?\n/);
@@ -991,13 +987,13 @@ async function consumeEventStream(
    stream.end(output);
 }
 
-async function executeCommandCodeRequest(
+async function executeRequest(
    stream: AssistantMessageEventStream,
    output: AssistantMessage,
    model: Model<Api>,
    context: Context,
-   config: CommandCodeProviderSettings,
-   runtime: CommandCodeRuntimeState,
+   config: ProviderSettings,
+   runtime: RuntimeState,
    logger: DebugLogger,
    options?: SimpleStreamOptions
 ): Promise<void> {
@@ -1006,7 +1002,7 @@ async function executeCommandCodeRequest(
    try {
       const request = buildRequest(model, context, config, runtime, options);
       const rawPayload = options?.onPayload ? ((await options.onPayload(request, model)) ?? request) : request;
-      const payload = normalizePayloadTemperature(rawPayload as CommandCodeRequest);
+      const payload = normalizePayloadTemperature(rawPayload as UpstreamRequest);
       const url = `${config.upstreamUrl.replace(/\/+$/, "")}/alpha/generate`;
       const headers = buildHeaders(config, apiKey, options, runtime);
       logger.trace("provider_request", { model: model.id, method: "POST", url, headers, body: payload });
@@ -1053,7 +1049,7 @@ async function executeCommandCodeRequest(
    } catch (error) {
       const aborted = signal.signal.aborted || (error instanceof DOMException && error.name === "AbortError");
       output.stopReason = aborted ? "aborted" : "error";
-      output.errorMessage = error instanceof Error ? error.message : "Unknown CommandCode request error.";
+      output.errorMessage = error instanceof Error ? error.message : `Unknown ${PROVIDER_NAME} request error.`;
       logger.error("request_failed", {
          model: model.id,
          stopReason: output.stopReason,
@@ -1067,15 +1063,11 @@ async function executeCommandCodeRequest(
    }
 }
 
-export function createCommandCodeStream(
-   config: CommandCodeProviderSettings,
-   runtime: CommandCodeRuntimeState,
-   logger: DebugLogger
-) {
+export function createCCPStream(config: ProviderSettings, runtime: RuntimeState, logger: DebugLogger) {
    return (model: Model<Api>, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream => {
       const stream = createAssistantMessageEventStream();
       const output = createOutput(model);
-      void executeCommandCodeRequest(stream, output, model, context, config, runtime, logger, options);
+      void executeRequest(stream, output, model, context, config, runtime, logger, options);
       return stream;
    };
 }

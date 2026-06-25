@@ -72,7 +72,7 @@ export class DebugLogger {
       if (!this.options.debug) return;
       try {
          this.ensureDebugDir();
-         const line = `${JSON.stringify({ timestamp: new Date().toISOString(), level, extension: "pi-command-code-provider", event })}${stringifyDetails(details)}\n`;
+         const line = `${JSON.stringify({ timestamp: new Date().toISOString(), level, extension: "ccp", event })}${stringifyDetails(details)}\n`;
          appendFileSync(this.logPath, line, "utf-8");
       } catch {
          // Debug logging must never affect provider behavior or terminal output.
@@ -82,7 +82,7 @@ export class DebugLogger {
    private writeTraffic(event: string, details?: unknown): void {
       try {
          this.ensureDebugDir();
-         const line = `${JSON.stringify({ timestamp: new Date().toISOString(), level: "trace", extension: "pi-command-code-provider", event })}${stringifyDetails(details)}\n`;
+         const line = `${JSON.stringify({ timestamp: new Date().toISOString(), level: "trace", extension: "ccp", event })}${stringifyDetails(details)}\n`;
          appendFileSync(this.trafficLogPath, line, "utf-8");
       } catch {
          // Traffic logging must never affect provider behavior or terminal output.
