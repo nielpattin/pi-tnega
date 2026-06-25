@@ -58,9 +58,11 @@ export default function (pi: ExtensionAPI) {
 
       if (!garbled) return;
 
-      // sendUserMessage always triggers a turn. sendMessage with followUp doesn't.
+      // deliverAs: "steer" is REQUIRED when agent is streaming (which it is during message_end).
+      // Without it, the call is silently ignored.
       pi.sendUserMessage(
-         "Your previous response was corrupted/garbled. Please redo it — continue your work from the last clean state."
+         "Your previous response was corrupted/garbled. Please redo it — continue your work from the last clean state.",
+         { deliverAs: "steer" }
       );
    });
 }

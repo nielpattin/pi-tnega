@@ -180,3 +180,4 @@ pi-agent.code-workspace
 exa-mcp-cache
 plans/
 __pycache__/
+_*.py
