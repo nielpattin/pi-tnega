@@ -1,25 +1,35 @@
 /**
  * describe-image — Vision bridge extension for Pi
  *
- * Provides a `describe_image` tool that sends images to a vision API
- * (Gemini primary, HTTP fallback) and returns text descriptions.
+ * Provides a `describe_image` tool that sends images to a vision-capable model
+ * resolved through Pi's model registry and returns text descriptions.
  *
- * Resolves images from:
- * - Filesystem paths (absolute, relative, bare filename)
- * - Session entries ("clipboard" → most recent ImageContent in user messages)
+ * Models are driven entirely by settings.json (no hardcoded endpoints). The
+ * extension resolves a primary model and a fallback model, both as
+ * "provider/modelId" strings, runs the call via pi-ai's `completeSimple`
+ * (which uses each model's `api` field to pick the wire format), and uses the
+ * registry for auth (API keys, OAuth subscriptions, command-backed keys).
  *
- * API keys are resolved from the Pi model registry (Google provider).
- * Fallback uses SEE_IMAGE_API_KEY env var if set.
+ * settings.json:
+ *   "describeImage": {
+ *     "model": "google/gemini-3.1-flash-lite",              // primary
+ *     "fallbackModel": "xiaomi-token-plan-sgp/mimo-v2.5",   // fallback
+ *     "timeout": 30000                                      // request timeout in ms
+ *   }
  *
- * Env vars:
- *   SEE_IMAGE_API_KEY      — HTTP fallback API key
- *   SEE_IMAGE_ENDPOINT     — HTTP fallback endpoint (default: https://opencode.ai/zen/go/v1/messages)
- *   SEE_IMAGE_MODEL        — HTTP fallback model (default: minimax-m3)
- *   DESCRIBE_IMAGE_TIMEOUT — Request timeout in ms (default: 30000)
+ * Defaults (applied when a key is absent):
+ *   model          → google/gemini-3.1-flash-lite
+ *   fallbackModel  → xiaomi-token-plan-sgp/mimo-v2.5
+ *   timeout        → 30000
+ *
+ * Set a key to "" to disable that model. At least one of {model, fallbackModel}
+ * must resolve to a registered, image-capable model with auth configured. If
+ * neither is usable, the extension logs an error at session start.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { ImageContent } from "@earendil-works/pi-ai";
+import type { Api, ImageContent, Model } from "@earendil-works/pi-ai";
+import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { Type } from "typebox";
 import { Text } from "@earendil-works/pi-tui";
 import { readFileSync, existsSync } from "node:fs";
@@ -27,10 +37,66 @@ import { homedir } from "node:os";
 import { join, resolve, isAbsolute, extname } from "node:path";
 
 // ---------------------------------------------------------------------------
-// Constants
+// Config (settings.json)
 // ---------------------------------------------------------------------------
 
-const TIMEOUT = parseInt(process.env.DESCRIBE_IMAGE_TIMEOUT || "30000", 10);
+interface DescribeImageConfig {
+   /** "provider/modelId", or "" to disable the primary model. */
+   model: string;
+   /** "provider/modelId", or "" to disable the fallback model. */
+   fallbackModel: string;
+   /** Request timeout in ms. */
+   timeout: number;
+}
+
+const DEFAULT_MODEL = "google/gemini-3.1-flash-lite";
+const DEFAULT_FALLBACK_MODEL = "xiaomi-token-plan-sgp/mimo-v2.5";
+const DEFAULT_TIMEOUT = 30000;
+
+function agentDir(): string {
+   return process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
+}
+
+function settingsFilePath(): string {
+   return join(agentDir(), "settings.json");
+}
+
+function loadDescribeImageConfig(): DescribeImageConfig {
+   const config: DescribeImageConfig = {
+      model: DEFAULT_MODEL,
+      fallbackModel: DEFAULT_FALLBACK_MODEL,
+      timeout: DEFAULT_TIMEOUT
+   };
+
+   const path = settingsFilePath();
+   if (!existsSync(path)) return config;
+
+   try {
+      const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return config;
+      const cfg = (parsed as { describeImage?: unknown }).describeImage;
+      if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) return config;
+      const c = cfg as {
+         model?: unknown;
+         fallbackModel?: unknown;
+         timeout?: unknown;
+      };
+      // Absent → default. Present string (incl. "") → use as-is ("" disables).
+      if (typeof c.model === "string") config.model = c.model;
+      if (typeof c.fallbackModel === "string") config.fallbackModel = c.fallbackModel;
+      if (typeof c.timeout === "number" && Number.isFinite(c.timeout) && c.timeout > 0) {
+         config.timeout = c.timeout;
+      }
+   } catch {
+      // ignore malformed settings.json; keep defaults
+   }
+
+   return config;
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 
 const HEARTBEAT_FRAMES = ["░", "▒", "▓", "█", "▓", "▒", "░"];
 
@@ -146,7 +212,7 @@ function resolveImage(name: string, ctx: ExtensionContext): ResolvedImage {
 }
 
 // ---------------------------------------------------------------------------
-// Vision API calls
+// Model resolution + vision call
 // ---------------------------------------------------------------------------
 
 type VisionResult = {
@@ -156,111 +222,128 @@ type VisionResult = {
    tokens?: { input: number; output: number };
 };
 
-async function analyzeWithGemini(
-   apiKey: string,
+type ModelCheck = { ok: true; model: Model<Api> } | { ok: false; reason: string };
+
+/** Split "provider/modelId" on the first slash (modelIds may contain slashes). */
+function parseModelRef(ref: string): { provider: string; modelId: string } | null {
+   const idx = ref.indexOf("/");
+   if (idx <= 0) return null;
+   const provider = ref.slice(0, idx);
+   const modelId = ref.slice(idx + 1);
+   if (!provider || !modelId) return null;
+   return { provider, modelId };
+}
+
+/**
+ * Cheap, sync usability check: model exists, supports image input, and has auth
+ * configured (does not refresh OAuth tokens). Safe to call at startup.
+ */
+function checkModel(ref: string, registry: ExtensionContext["modelRegistry"]): ModelCheck {
+   if (!ref.trim()) return { ok: false, reason: "not configured (empty)" };
+   const parsed = parseModelRef(ref);
+   if (!parsed) return { ok: false, reason: `invalid "provider/modelId" ref "${ref}"` };
+   const model = registry.find(parsed.provider, parsed.modelId);
+   if (!model) return { ok: false, reason: `model "${ref}" not found in registry` };
+   if (!model.input || !model.input.includes("image")) {
+      return { ok: false, reason: `model "${ref}" does not support image input` };
+   }
+   if (!registry.hasConfiguredAuth(model)) {
+      return { ok: false, reason: `no auth configured for "${ref}"` };
+   }
+   return { ok: true, model };
+}
+
+async function analyzeWithModel(
+   model: Model<Api>,
+   registry: ExtensionContext["modelRegistry"],
    base64: string,
    mimeType: string,
    prompt: string,
-   signal?: AbortSignal
+   signal: AbortSignal,
+   timeoutMs: number
 ): Promise<VisionResult> {
-   const model = "gemini-3.1-flash-lite";
-   const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-      {
-         method: "POST",
-         headers: { "Content-Type": "application/json" },
-         body: JSON.stringify({
-            contents: [
-               {
-                  parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64 } }]
-               }
-            ]
-         }),
-         signal
-      }
-   );
-
-   if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`Gemini API error ${res.status}: ${err}`);
+   const auth = await registry.getApiKeyAndHeaders(model);
+   if (!auth.ok) {
+      throw new Error(`auth resolution failed: ${auth.error}`);
    }
 
-   const data = (await res.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-      usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
-   };
-   const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "No description generated";
-   const usage = data.usageMetadata;
-   return {
-      text,
+   const result = await completeSimple(
       model,
-      provider: "gemini",
-      tokens: usage ? { input: usage.promptTokenCount ?? 0, output: usage.candidatesTokenCount ?? 0 } : undefined
-   };
-}
-
-async function analyzeWithHttp(
-   b64: string,
-   mediaType: string,
-   prompt: string,
-   signal?: AbortSignal
-): Promise<VisionResult> {
-   const endpoint = process.env.SEE_IMAGE_ENDPOINT || "https://opencode.ai/zen/go/v1/messages";
-   const model = process.env.SEE_IMAGE_MODEL || "minimax-m3";
-   const apiVersion = process.env.SEE_IMAGE_API_VERSION || "2023-06-01";
-   const userAgent = process.env.SEE_IMAGE_USER_AGENT || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
-
-   const apiKey = process.env.SEE_IMAGE_API_KEY;
-   if (!apiKey) {
-      throw new Error("SEE_IMAGE_API_KEY is not set. Cannot use HTTP fallback.");
-   }
-
-   const res = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-         "x-api-key": apiKey,
-         "anthropic-version": apiVersion,
-         "content-type": "application/json",
-         "user-agent": userAgent
-      },
-      body: JSON.stringify({
-         model,
-         max_tokens: 2048,
+      {
          messages: [
             {
                role: "user",
                content: [
-                  { type: "image", source: { type: "base64", media_type: mediaType, data: b64 } },
+                  { type: "image", data: base64, mimeType },
                   { type: "text", text: prompt }
-               ]
+               ],
+               timestamp: Date.now()
             }
          ]
-      }),
-      signal
-   });
+      },
+      {
+         apiKey: auth.apiKey,
+         headers: auth.headers,
+         signal,
+         timeoutMs,
+         maxTokens: 2048
+      }
+   );
 
-   if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`HTTP vision call failed: HTTP ${res.status}, ${errText.slice(0, 300)}`);
+   if (result.errorMessage) {
+      throw new Error(`vision call failed (${result.stopReason}): ${result.errorMessage}`);
    }
 
-   const data = (await res.json()) as { content?: Array<{ type?: string; text?: string }> };
-   const text = data?.content
-      ?.map((c) => c.text)
-      .filter((t): t is string => typeof t === "string" && t.length > 0)
+   const text = result.content
+      .filter((c): c is { type: "text"; text: string } => c.type === "text")
+      .map((c) => c.text)
       .join("\n")
       .trim();
 
-   if (!text) throw new Error(`Model returned no text. Response: ${JSON.stringify(data).slice(0, 300)}`);
-   return { text, model, provider: "http-fallback" };
+   if (!text) throw new Error("model returned no text");
+
+   return {
+      text,
+      model: result.responseModel ?? result.model,
+      provider: String(result.provider),
+      tokens: { input: result.usage.input, output: result.usage.output }
+   };
 }
 
 // ---------------------------------------------------------------------------
+// Startup validation
+// ---------------------------------------------------------------------------
+
+let startupChecked = false;
+
+function validateAtStartup(ctx: ExtensionContext): void {
+   if (startupChecked) return;
+   startupChecked = true;
+
+   const config = loadDescribeImageConfig();
+   const primary = checkModel(config.model, ctx.modelRegistry);
+   const fallback = checkModel(config.fallbackModel, ctx.modelRegistry);
+
+   if (primary.ok || fallback.ok) return;
+
+   const msg =
+      `[describe-image] No usable vision model configured. ` +
+      `Set "describeImage.model" (and optionally "describeImage.fallbackModel") ` +
+      `in settings.json to a "provider/modelId" that supports image input and has auth. ` +
+      `Primary "${config.model}": ${primary.reason}. ` +
+      `Fallback "${config.fallbackModel}": ${fallback.reason}.`;
+   console.error(msg);
+}
+
 // ---------------------------------------------------------------------------
 // Extension entry point
 // ---------------------------------------------------------------------------
 
 export default function describeImageExtension(pi: ExtensionAPI) {
+   pi.on("session_start", (_event, ctx) => {
+      validateAtStartup(ctx);
+   });
+
    pi.registerTool({
       name: "describe_image",
       label: "Describe Image",
@@ -268,7 +351,7 @@ export default function describeImageExtension(pi: ExtensionAPI) {
          "Analyze an image using a vision API. Use for screenshots, photos, diagrams, " +
          "or any visual content. Pass filePath as an absolute path, a bare filename, " +
          "or 'clipboard' for the most recent pasted image.",
-      promptSnippet: "Analyze an image using a vision API (Gemini primary, HTTP fallback)",
+      promptSnippet: "Analyze an image using a vision model resolved from Pi's model registry",
       promptGuidelines: [
          "Use describe_image when the user asks to describe, analyze, or interpret an image.",
          "For clipboard pastes, use filePath='clipboard' — the tool finds the most recent image automatically.",
@@ -310,8 +393,32 @@ export default function describeImageExtension(pi: ExtensionAPI) {
             ? params.prompt
             : "Describe this image in detail. If it is a screenshot, describe the UI, text content, and layout precisely.";
 
-         // Resolve Gemini API key from Pi's model registry
-         const googleApiKey = await ctx.modelRegistry.getApiKeyForProvider("google");
+         const config = loadDescribeImageConfig();
+
+         // Combine the caller's signal with a timeout-derived abort
+         const timeoutController = new AbortController();
+         const timeoutTimer = setTimeout(() => timeoutController.abort(), config.timeout);
+         const combinedSignal = signal ? AbortSignal.any([signal, timeoutController.signal]) : timeoutController.signal;
+
+         // Resolve which models are usable (cheap sync check), then try in order.
+         const primaryCheck = checkModel(config.model, ctx.modelRegistry);
+         const fallbackCheck = checkModel(config.fallbackModel, ctx.modelRegistry);
+
+         const attempts: { label: string; model: Model<Api> }[] = [];
+         const primaryReason = primaryCheck.ok ? "" : primaryCheck.reason;
+         const fallbackReason = fallbackCheck.ok ? "" : fallbackCheck.reason;
+         if (primaryCheck.ok) attempts.push({ label: config.model, model: primaryCheck.model });
+         if (fallbackCheck.ok) attempts.push({ label: config.fallbackModel, model: fallbackCheck.model });
+
+         if (attempts.length === 0) {
+            clearTimeout(timeoutTimer);
+            throw new Error(
+               `describe_image: no usable vision model. ` +
+                  `Primary "${config.model}": ${primaryReason}. ` +
+                  `Fallback "${config.fallbackModel}": ${fallbackReason}. ` +
+                  `Configure "describeImage.model" / "describeImage.fallbackModel" in settings.json.`
+            );
+         }
 
          const started = Date.now();
          let tick = 0;
@@ -326,21 +433,28 @@ export default function describeImageExtension(pi: ExtensionAPI) {
          const heartbeat = setInterval(render, 500);
 
          try {
-            // Try Gemini first
-            if (googleApiKey) {
+            let lastError: Error | null = null;
+            for (const attempt of attempts) {
                try {
-                  const result = await analyzeWithGemini(
-                     googleApiKey,
+                  const result = await analyzeWithModel(
+                     attempt.model,
+                     ctx.modelRegistry,
                      resolved.data,
                      resolved.mimeType,
                      prompt,
-                     signal
+                     combinedSignal,
+                     config.timeout
                   );
                   const tokenInfo = result.tokens ? ` | ${result.tokens.input}+${result.tokens.output} tokens` : "";
                   const meta = `[${result.provider}/${result.model}${tokenInfo}]`;
                   onUpdate?.({
                      content: [{ type: "text", text: `describe_image: ${params.filePath}` }],
-                     details: { source: resolved.source, provider: result.provider, model: result.model }
+                     details: {
+                        source: resolved.source,
+                        provider: result.provider,
+                        model: result.model,
+                        via: attempt.label
+                     }
                   });
                   return {
                      content: [{ type: "text", text: `${result.text}\n\n${meta}` }],
@@ -348,41 +462,19 @@ export default function describeImageExtension(pi: ExtensionAPI) {
                         source: resolved.source,
                         provider: result.provider,
                         model: result.model,
+                        via: attempt.label,
                         tokens: result.tokens
                      }
                   };
-               } catch (geminiErr) {
-                  // If Gemini fails and we have a fallback, try it
-                  if (!process.env.SEE_IMAGE_API_KEY) throw geminiErr;
+               } catch (err) {
+                  lastError = err instanceof Error ? err : new Error(String(err));
+                  // try the next model
                }
             }
-
-            // HTTP fallback
-            if (process.env.SEE_IMAGE_API_KEY) {
-               const result = await analyzeWithHttp(resolved.data, resolved.mimeType, prompt, signal);
-               const tokenInfo = result.tokens ? ` | ${result.tokens.input}+${result.tokens.output} tokens` : "";
-               const meta = `[${result.provider}/${result.model}${tokenInfo}]`;
-               onUpdate?.({
-                  content: [{ type: "text", text: `describe_image: ${params.filePath}` }],
-                  details: { source: resolved.source, provider: result.provider, model: result.model }
-               });
-               return {
-                  content: [{ type: "text", text: `${result.text}\n\n${meta}` }],
-                  details: {
-                     source: resolved.source,
-                     provider: result.provider,
-                     model: result.model,
-                     tokens: result.tokens
-                  }
-               };
-            }
-
-            throw new Error(
-               "No vision API available. Configure a Google provider in Pi settings, " +
-                  "or set SEE_IMAGE_API_KEY for HTTP fallback."
-            );
+            throw lastError ?? new Error("describe_image: all vision models failed");
          } finally {
             clearInterval(heartbeat);
+            clearTimeout(timeoutTimer);
          }
       },
 
