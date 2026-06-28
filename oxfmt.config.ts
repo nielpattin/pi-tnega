@@ -16,7 +16,9 @@ export default defineConfig({
       "pnpm-workspace.yaml",
       "*yml",
       "**/pi-mcp-adapter/**",
-      ".pi/**"
+      ".pi/**",
+      "aft/**",
+      "magic-context/**"
    ],
    trailingComma: "none",
    printWidth: 120,

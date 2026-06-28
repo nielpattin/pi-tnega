@@ -1,32 +1,27 @@
-import { realpathSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+   AssistantMessageComponent,
+   BashExecutionComponent,
+   BranchSummaryMessageComponent,
+   CompactionSummaryMessageComponent,
+   CustomMessageComponent,
+   InteractiveMode,
+   ToolExecutionComponent,
+   UserMessageComponent
+} from "@earendil-works/pi-coding-agent";
 
 import { installTreeXNativePatches } from "./treex-component.js";
 
-function getHostDistDir() {
-   return dirname(realpathSync(process.argv[1]));
-}
-
-function getHostModuleUrl(relativePath) {
-   return pathToFileURL(resolve(getHostDistDir(), relativePath)).href;
-}
-
-export default async function treeXExtension(pi) {
-   const [{ InteractiveMode }, components] = await Promise.all([
-      import(getHostModuleUrl("index.js")),
-      import(getHostModuleUrl("modes/interactive/components/index.js"))
-   ]);
-
+export default function treeXExtension(pi: ExtensionAPI): void {
    const unpatch = installTreeXNativePatches(InteractiveMode, {
-      assistantMessageComponent: components.AssistantMessageComponent,
-      bashExecutionComponent: components.BashExecutionComponent,
-      branchSummaryMessageComponent: components.BranchSummaryMessageComponent,
-      compactionSummaryMessageComponent: components.CompactionSummaryMessageComponent,
-      customMessageComponent: components.CustomMessageComponent,
-      toolExecutionComponent: components.ToolExecutionComponent,
-      userMessageComponent: components.UserMessageComponent
+      assistantMessageComponent: AssistantMessageComponent,
+      bashExecutionComponent: BashExecutionComponent,
+      branchSummaryMessageComponent: BranchSummaryMessageComponent,
+      compactionSummaryMessageComponent: CompactionSummaryMessageComponent,
+      customMessageComponent: CustomMessageComponent,
+      toolExecutionComponent: ToolExecutionComponent,
+      userMessageComponent: UserMessageComponent
    });
 
-   pi.on("session_shutdown", unpatch);
+   pi.on("session_shutdown", () => unpatch());
 }

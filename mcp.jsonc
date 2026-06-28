@@ -1,32 +1,36 @@
 {
-  "settings": {
-    "toolPrefix": "short",
-    "idleTimeout": 10,
-    "directTools": false
-  },
-  "mcpServers": {
-    "playwright": {
-      "command": "npx",
-      "args": [
-        "@playwright/mcp@latest"
-      ],
+   "settings": {
+      "toolPrefix": "short",
+      "idleTimeout": 10,
       "directTools": false
-    },
-    "codegraph": {
-      "command": "codegraph",
-      "args": [
-        "serve",
-        "--mcp"
-      ],
-      "env": {
-        "CODEGRAPH_MCP_TOOLS": "explore,search,node,callers,callees,impact,files,status"
+   },
+   "mcpServers": {
+      "playwright": {
+         "command": "npx",
+         "args": ["@playwright/mcp@latest"],
+         "directTools": false
       },
-      "directTools": true
-    }
-  },
-  "imports": [
-    "cursor",
-    "codex",
-    "claude-code"
-  ]
+      "codegraph": {
+         "command": "codegraph",
+         "args": ["serve", "--mcp"],
+         "env": {
+            "CODEGRAPH_MCP_TOOLS": "explore,search,node,callers,callees,impact,files,status"
+         },
+         "directTools": true
+      }
+      // "drawio-ai-kit": {
+      //   "command": "node",
+      //   "args": [
+      //     "D:/repo/drawio-ai-kit/src/mcp-server.mjs"
+      //   ],
+      //   "cwd": "D:/repo/drawio-ai-kit",
+      //   "lifecycle": "lazy",
+      //   "idleTimeout": 10,
+      //   "directTools": false,
+      //   "env": {
+      //     "DRAWIO_CLI": "C:/Program Files/draw.io/draw.io.exe"
+      //   }
+      // }
+   },
+   "imports": ["cursor", "codex", "claude-code"]
 }

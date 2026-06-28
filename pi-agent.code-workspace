@@ -1,12 +1,15 @@
 {
-   "folders": [
-      {
-         "name": "agent",
-         "path": "."
-      },
-      {
-         "name": "packages",
-         "path": "packages"
-      }
-   ]
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../../.config/cortexkit"
+		}
+	],
+	"settings": {
+		"js/ts.tsdk.path": "node_modules/typescript/lib",
+		"oxc.path.tsgolint": "node_modules/.bin/tsgolint.cmd",
+		"oxc.enable.oxlint": true
+	}
 }

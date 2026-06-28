@@ -12,14 +12,14 @@
     "deepseek/deepseek-v4-flash",
     "opencode/deepseek-v4-flash-free",
     "cloudflare/@cf/zai-org/glm-5.2",
-    "ccp/deepseek/deepseek-v4-flash",
-    "cloudflare/@cf/moonshotai/kimi-k2.7-code"
+    "cloudflare/@cf/moonshotai/kimi-k2.7-code",
+    "zcode/GLM-5-Turbo",
+    "zcode/GLM-5.2"
   ],
   "extensions": [
     "-extensions\\web-reader.ts",
     "-extensions\\cute-minimal-mode.ts",
     "-extensions\\files.ts",
-    "-extensions\\stats.ts",
     "-extensions\\rg-guard.ts",
     "-extensions\\batch-read.ts",
     "-extensions\\pi-rtk\\index.ts",
@@ -32,16 +32,16 @@
     "-extensions\\pi-permission-system\\index.ts",
     "-extensions\\pi-explorer\\index.ts",
     "-extensions\\pi-event-monitor\\index.ts",
-    "-extensions\\tool-selector\\index.ts",
     "-extensions\\temperature.ts",
     "-extensions\\pi-intercom\\index.ts",
     "-extensions\\kinda\\index.ts",
     "+extensions\\pi-exa\\src\\index.ts",
     "-extensions\\startup-timer.ts",
-    "-extensions\\treepluss\\index.ts",
     "+extensions\\notification\\index.ts",
     "+extensions\\ccp\\index.ts",
-    "+extensions\\glm-garble-guard.ts"
+    "-extensions\\stats.ts",
+    "-extensions\\tool-selector\\index.ts",
+    "+extensions\\treepluss\\index.ts"
   ],
   "followUpMode": "all",
   "hideThinkingBlock": true,
@@ -59,7 +59,8 @@
     {
       "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-station",
       "extensions": [
-        "+index.ts"
+        "-index.ts",
+        "+dist\\index.js"
       ]
     },
     {
@@ -90,6 +91,12 @@
     "npm:@ff-labs/pi-fff",
     {
       "source": "C:\\Users\\niel\\.pi\\agent\\pi-mcp-adapter",
+      "extensions": [
+        "+index.ts"
+      ]
+    },
+    {
+      "source": "C:\\Users\\niel\\.pi\\agent\\packages\\packages\\pi-reference",
       "extensions": [
         "+index.ts"
       ]
@@ -147,18 +154,96 @@
       "stash": "alt+s",
       "stashHistory": "alt+h"
     },
-    "hashline": false
+    "hashline": true
   },
   "httpIdleTimeoutMs": 0,
   "showHardwareCursor": false,
   "autocompleteMaxVisible": 20,
   "defaultProjectTrust": "always",
-  "defaultProvider": "xiaomi-token-plan-sgp",
-  "defaultModel": "mimo-v2.5-pro",
+  "defaultProvider": "cloudflare",
+  "defaultModel": "@cf/moonshotai/kimi-k2.7-code",
   "defaultThinkingLevel": "high",
   "describeImage": {
     "model": "google/gemini-3.1-flash-lite",
     "fallbackModel": "xiaomi-token-plan-sgp/mimo-v2.5",
     "timeout": 30000
+  },
+  "references": {
+    "opencode-source": {
+      "repository": "anomalyco/opencode",
+      "description": "OpenCode source code for config schemas, tool definitions, permission system, MCP, and agent internals"
+    },
+    "magic-context": {
+      "repository": "cortexkit/magic-context",
+      "description": "Magic Context plugin for session management and memory"
+    },
+    "aft": {
+      "repository": "cortexkit/aft",
+      "description": "AFT (AST Fast Tooling) — code analysis, structural editing, and import management for opencode"
+    },
+    "zustand": {
+      "repository": "pmndrs/zustand",
+      "description": "Small, fast state management for React"
+    },
+    "tanstack-router": {
+      "repository": "TanStack/router",
+      "description": "Type-safe routing for React (and more)"
+    },
+    "tanstack-query": {
+      "repository": "TanStack/query",
+      "description": "Async state management for data fetching and caching"
+    },
+    "tanstack-table": {
+      "repository": "TanStack/table",
+      "description": "Headless UI for building tables and datagrids"
+    },
+    "tanstack-form": {
+      "repository": "TanStack/form",
+      "description": "Headless form validation and state management"
+    },
+    "zod": {
+      "repository": "colinhacks/zod",
+      "description": "TypeScript-first schema validation with static type inference"
+    },
+    "recharts": {
+      "repository": "recharts/recharts",
+      "description": "Composable charting library for React"
+    },
+    "casl": {
+      "repository": "stalniy/casl",
+      "description": "Isomorphic authorization library for JavaScript applications"
+    },
+    "react-pdf": {
+      "repository": "wojtekmaj/react-pdf",
+      "description": "Display PDFs in React apps"
+    },
+    "pi": {
+      "repository": "earendil-works/pi",
+      "description": "Pi agent — autonomous coding agent framework"
+    },
+    "json-render": {
+      "repository": "vercel-labs/json-render",
+      "description": "The Generative UI framework — safe, guardrailed UI generation from AI"
+    },
+    "agent-skills": {
+      "path": "C:/Users/niel/.agents/skills",
+      "description": "Custom agent skill definitions and workflows"
+    },
+    "opencode-data": {
+      "path": "C:/Users/niel/.local/share/opencode",
+      "description": "OpenCode local data directory"
+    },
+    "pi-agent": {
+      "path": "C:/Users/niel/.pi/agent",
+      "description": "Pi agent configuration directory"
+    },
+    "pi-packages": {
+      "path": "C:/Users/niel/.pi/agent/packages",
+      "description": "Pi agent packages directory"
+    },
+    "flue": {
+      "repository": "withastro/flue",
+      "description": "Flue — The sandbox agent framework by Astro. TypeScript harness for building autonomous agents with sessions, tools, skills, sandboxes, and durable execution"
+    }
   }
 }

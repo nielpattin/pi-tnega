@@ -1,10 +1,28 @@
 import {
+   AgentSession,
+   AssistantMessageComponent,
+   BashExecutionComponent,
+   BranchSummaryMessageComponent,
    buildSessionContext,
    calculateContextTokens,
+   CompactionSummaryMessageComponent,
+   CustomMessageComponent,
    estimateTokens,
    getLastAssistantUsage,
-   getLatestCompactionEntry
+   getLatestCompactionEntry,
+   InteractiveMode,
+   ToolExecutionComponent,
+   TreeSelectorComponent,
+   UserMessageComponent,
+   type MessageRenderer,
+   type SessionEntry,
+   type SessionManager,
+   type Theme,
+   type ToolDefinition,
+   type TruncationResult
 } from "@earendil-works/pi-coding-agent";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { Component, MarkdownTheme, TUI } from "@earendil-works/pi-tui";
 import { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 const DETAIL_BODY_LINES = 3;
@@ -20,11 +38,12 @@ const METADATA_SEPARATOR = " · ";
 const METADATA_GROUP_SEPARATOR = "  │  ";
 const REVIEW_DETAIL_KEY = Key.ctrl("r");
 const TRUNCATED_DETAIL_HINT = "… Ctrl+R full";
-const FILTER_LABELS = {
+const FILTER_LABELS: Record<FilterMode, string> = {
    "no-tools": "[no-tools]",
    "user-only": "[user]",
    "labeled-only": "[labeled]",
-   all: "[all]"
+   all: "[all]",
+   default: "[default]"
 };
 const THEME_KEY = Symbol.for("@earendil-works/pi-coding-agent:theme");
 const SHOW_SELECTOR_PATCH = Symbol.for("pi-treex:show-selector-patch");
@@ -33,29 +52,167 @@ const BELL_CODE = 7;
 const TREE_STICKY_STATUS_LINE_INDEX = 6;
 const NATIVE_TREE_STATUS_LINE_FROM_END = 2;
 
-function getTheme() {
-   return globalThis[THEME_KEY];
+type FilterMode = "default" | "no-tools" | "user-only" | "labeled-only" | "all";
+
+interface SessionTreeNode {
+   entry: SessionEntry;
+   children: SessionTreeNode[];
+   label?: string;
+   labelTimestamp?: string;
 }
 
-function normalizeDetail(text) {
+interface Gutter {
+   position: number;
+}
+
+interface FlatNode {
+   node: SessionTreeNode;
+   indent: number;
+   gutters: Gutter[];
+}
+
+interface ToolCall {
+   arguments: Record<string, unknown>;
+}
+
+interface TreeListLike extends Component {
+   filteredNodes: FlatNode[];
+   selectedIndex: number;
+   maxVisibleLines: number;
+   multipleRoots: boolean;
+   currentLeafId: string | null;
+   flatNodes: FlatNode[];
+   foldedNodes: Set<string>;
+   filterMode: FilterMode;
+   showLabelTimestamps: boolean;
+   toolCallMap: Map<string, ToolCall>;
+   findNearestVisibleIndex(leafId: string): number;
+   formatToolCall(name: string, args: unknown): string;
+   render(width: number): string[];
+}
+
+interface TreeSelectorResult {
+   component: Component;
+   focus: Component;
+}
+
+type AgentSessionWithInternals = AgentSession & {
+   extensionRunner?: {
+      getMessageRenderer?(customType: string): MessageRenderer | undefined;
+   };
+};
+
+interface InteractiveModeWithInternals {
+   readonly ui: TUI;
+   readonly session: AgentSessionWithInternals;
+   readonly hideThinkingBlock: boolean;
+   readonly hiddenThinkingLabel: string | undefined;
+   readonly sessionManager: SessionManager;
+   getMarkdownThemeWithSettings(): MarkdownTheme;
+   getUserMessageText(message: AgentMessage): string;
+   getRegisteredToolDefinition(name: string): ToolDefinition | undefined;
+}
+
+interface NativeComponents {
+   assistantMessageComponent: typeof AssistantMessageComponent;
+   bashExecutionComponent: typeof BashExecutionComponent;
+   branchSummaryMessageComponent: typeof BranchSummaryMessageComponent;
+   compactionSummaryMessageComponent: typeof CompactionSummaryMessageComponent;
+   customMessageComponent: typeof CustomMessageComponent;
+   toolExecutionComponent: typeof ToolExecutionComponent;
+   userMessageComponent: typeof UserMessageComponent;
+}
+
+type ContentBlock =
+   | { type: "text"; text: string }
+   | { type: "toolCall"; name: string; arguments: Record<string, unknown> }
+   | { type: "image" };
+
+interface ExtractOptions {
+   includeToolCalls?: boolean;
+   verboseToolCalls?: boolean;
+}
+
+interface EntryInfo {
+   kind: string;
+   full?: string;
+   toolName?: string;
+}
+
+interface ContextUsageInfo {
+   percent: number | null;
+   contextWindow: number;
+}
+
+interface ModelIdentity {
+   provider: string;
+   modelId: string;
+}
+
+interface ExpandableEntryComponent extends Component {
+   setExpanded(expanded: boolean): void;
+   render(width: number): string[];
+}
+
+interface ExpandableEntryComponentConstructor {
+   new (message: SessionEntry, markdownTheme?: MarkdownTheme): ExpandableEntryComponent;
+}
+
+interface CustomMessageLike {
+   role: "custom";
+   customType: string;
+   content: string | unknown[];
+   display: boolean;
+   details?: unknown;
+   timestamp?: number;
+}
+
+type BashExecutionMessageLike = AgentMessage & {
+   role: "bashExecution";
+   command: string;
+   output: string;
+   exitCode: number | undefined;
+   cancelled: boolean;
+   truncated?: boolean;
+   fullOutputPath?: string;
+   excludeFromContext: boolean;
+};
+
+interface ShowSelectorPatch {
+   original: (create: (done: () => void) => TreeSelectorResult) => void;
+   patched: (create: (done: () => void) => TreeSelectorResult) => void;
+}
+
+interface InteractiveModePrototype {
+   showSelector(create: (done: () => void) => TreeSelectorResult): void;
+   [SHOW_SELECTOR_PATCH]?: ShowSelectorPatch | undefined;
+}
+
+type SessionMessageEntry = Extract<SessionEntry, { type: "message" }>;
+
+function getTheme(): Theme {
+   return (globalThis as unknown as Record<symbol, Theme>)[THEME_KEY];
+}
+
+function normalizeDetail(text: unknown): string {
    return String(text ?? "")
       .replace(/\r/g, "")
       .replace(/\t/g, "    ")
       .trim();
 }
 
-function isAnsiFinalByte(char) {
+function isAnsiFinalByte(char: string): boolean {
    const code = char.charCodeAt(0);
    return code >= 0x40 && code <= 0x7e;
 }
 
-function getAnsiSequenceLength(text, startIndex) {
+function getAnsiSequenceLength(text: string, startIndex: number): number {
    if (text.charCodeAt(startIndex) !== ESCAPE_CODE) return 0;
 
    const marker = text[startIndex + 1];
    if (marker === "[") {
       let index = startIndex + 2;
-      while (index < text.length && !isAnsiFinalByte(text[index])) {
+      while (index < text.length && !isAnsiFinalByte(text[index] ?? "")) {
          index++;
       }
       return index < text.length ? index - startIndex + 1 : 0;
@@ -72,7 +229,7 @@ function getAnsiSequenceLength(text, startIndex) {
    return 0;
 }
 
-function stripAnsi(text) {
+function stripAnsi(text: string): string {
    let result = "";
    for (let index = 0; index < text.length; ) {
       const ansiLength = getAnsiSequenceLength(text, index);
@@ -86,23 +243,23 @@ function stripAnsi(text) {
    return result;
 }
 
-function hasVisibleText(line) {
+function hasVisibleText(line: string): boolean {
    return visibleWidth(stripAnsi(line).trim()) > 0;
 }
 
-function stringifyJson(value, spacing = 0) {
+function stringifyJson(value: unknown, spacing = 0): string {
    return JSON.stringify(value, null, spacing) ?? "";
 }
 
-function formatCustomEntryData(data) {
+function formatCustomEntryData(data: unknown): string {
    return typeof data === "string" ? normalizeDetail(data) : stringifyJson(data, 2);
 }
 
-function formatAgo(value, singular, plural = `${singular}S`) {
+function formatAgo(value: number, singular: string, plural = `${singular}S`): string {
    return `${value} ${value === 1 ? singular : plural} AGO`;
 }
 
-function formatRelativeTime(timestamp) {
+function formatRelativeTime(timestamp: string): string {
    const then = new Date(timestamp).getTime();
    if (!Number.isFinite(then)) return "UNKNOWN TIME";
 
@@ -122,19 +279,24 @@ function formatRelativeTime(timestamp) {
    return formatAgo(Math.floor(diffMonths / 12), "YR");
 }
 
-function fitLine(line, width) {
+function fitLine(line: string, width: number): string {
    return truncateToWidth(line, width, "...", true);
 }
 
-function getDisplayIndent(treeList, flatNode) {
+function getDisplayIndent(treeList: TreeListLike, flatNode: FlatNode): number {
    return treeList.multipleRoots ? Math.max(0, flatNode.indent - 1) : flatNode.indent;
 }
 
-function getDisplayDepth(treeList, flatNode) {
+function getDisplayDepth(treeList: TreeListLike, flatNode: FlatNode): number {
    return getDisplayIndent(treeList, flatNode) + 1;
 }
 
-function getVisibleWindow(treeList) {
+interface VisibleWindow {
+   startIndex: number;
+   endIndex: number;
+}
+
+function getVisibleWindow(treeList: TreeListLike): VisibleWindow {
    if (treeList.filteredNodes.length === 0) {
       return { startIndex: 0, endIndex: 0 };
    }
@@ -153,7 +315,12 @@ function getVisibleWindow(treeList) {
    };
 }
 
-function getStickyLeftState(treeList) {
+interface StickyLeftState extends VisibleWindow {
+   stickyLeftShift: number;
+   stickyLeftDepth: number | null;
+}
+
+function getStickyLeftState(treeList: TreeListLike): StickyLeftState {
    const { startIndex, endIndex } = getVisibleWindow(treeList);
    if (startIndex === endIndex) {
       return {
@@ -167,6 +334,7 @@ function getStickyLeftState(treeList) {
    let minVisibleDisplayIndent = Number.POSITIVE_INFINITY;
    for (let index = startIndex; index < endIndex; index++) {
       const flatNode = treeList.filteredNodes[index];
+      if (!flatNode) continue;
       minVisibleDisplayIndent = Math.min(minVisibleDisplayIndent, getDisplayIndent(treeList, flatNode));
    }
 
@@ -180,14 +348,14 @@ function getStickyLeftState(treeList) {
    };
 }
 
-function shiftGutters(gutters, stickyLeftShift) {
+function shiftGutters(gutters: Gutter[], stickyLeftShift: number): Gutter[] {
    if (stickyLeftShift === 0) return gutters;
    return gutters
       .map((gutter) => ({ ...gutter, position: gutter.position - stickyLeftShift }))
       .filter((gutter) => gutter.position >= 0);
 }
 
-function getLeadingAnsiLength(line) {
+function getLeadingAnsiLength(line: string): number {
    let length = 0;
    while (length < line.length) {
       const ansiLength = getAnsiSequenceLength(line, length);
@@ -197,17 +365,17 @@ function getLeadingAnsiLength(line) {
    return length;
 }
 
-function replaceCursorSlot(line, replacement) {
+function replaceCursorSlot(line: string, replacement: string): string {
    const prefixLength = getLeadingAnsiLength(line);
    // Native tree rows start with a 2-cell cursor slot ("› " or "  "), possibly after ANSI styling.
    return `${line.slice(0, prefixLength)}${replacement}${line.slice(prefixLength + 2)}`;
 }
 
-function markCurrentLine(treeList, lines) {
+function markCurrentLine(treeList: TreeListLike, lines: string[]): string[] {
    if (!treeList.currentLeafId) return lines;
 
    const { startIndex, endIndex } = getVisibleWindow(treeList);
-   let currentIndex = treeList.filteredNodes.findIndex((node) => node.node.entry.id === treeList.currentLeafId);
+   let currentIndex = treeList.filteredNodes.findIndex((node) => node?.node.entry.id === treeList.currentLeafId);
    if (currentIndex === -1) {
       if (treeList.foldedNodes.size === 0) return lines;
       currentIndex = treeList.findNearestVisibleIndex(treeList.currentLeafId);
@@ -216,19 +384,24 @@ function markCurrentLine(treeList, lines) {
 
    const theme = getTheme();
    const marker = `${theme.bold(theme.fg("accent", CURRENT_ROW_MARKER))} `;
-   lines[currentIndex - startIndex] = replaceCursorSlot(lines[currentIndex - startIndex], marker);
+   lines[currentIndex - startIndex] = replaceCursorSlot(lines[currentIndex - startIndex] ?? "", marker);
    return lines;
 }
 
-function renderWithStickyLeft(treeList, width, originalRender) {
+function renderWithStickyLeft(
+   treeList: TreeListLike,
+   width: number,
+   originalRender: (width: number) => string[]
+): string[] {
    const { startIndex, endIndex, stickyLeftShift } = getStickyLeftState(treeList);
    if (stickyLeftShift === 0) {
       return originalRender(width);
    }
 
-   const originalNodes = [];
+   const originalNodes: { flatNode: FlatNode; indent: number; gutters: Gutter[] }[] = [];
    for (let index = startIndex; index < endIndex; index++) {
       const flatNode = treeList.filteredNodes[index];
+      if (!flatNode) continue;
       const shiftedIndent = Math.max(0, getDisplayIndent(treeList, flatNode) - stickyLeftShift);
 
       originalNodes.push({
@@ -251,25 +424,25 @@ function renderWithStickyLeft(treeList, width, originalRender) {
    }
 }
 
-function patchTreeListRender(treeList) {
-   if (treeList.__treexStickyLeftPatched) return;
+function patchTreeListRender(treeList: TreeListLike): void {
+   if ((treeList as unknown as { __treexStickyLeftPatched?: boolean }).__treexStickyLeftPatched) return;
 
    const originalRender = treeList.render.bind(treeList);
-   treeList.__treexStickyLeftPatched = true;
+   (treeList as unknown as { __treexStickyLeftPatched: boolean }).__treexStickyLeftPatched = true;
 
-   treeList.render = function renderStickyLeft(width) {
-      const lines = renderWithStickyLeft(this, width, originalRender);
+   treeList.render = function renderStickyLeft(width: number): string[] {
+      const lines = renderWithStickyLeft(this as unknown as TreeListLike, width, originalRender);
       lines.pop();
-      return markCurrentLine(this, lines);
+      return markCurrentLine(this as unknown as TreeListLike, lines);
    };
 }
 
-function formatToolCallVerbose(name, args) {
+function formatToolCallVerbose(name: string, args: unknown): string {
    const json = stringifyJson(args, 2);
    return json ? `${name}\n${json}` : name;
 }
 
-function extractDetailContent(treeList, content, options = {}) {
+function extractDetailContent(treeList: TreeListLike, content: unknown, options: ExtractOptions = {}): string {
    const { includeToolCalls = false, verboseToolCalls = false } = options;
 
    if (typeof content === "string") {
@@ -278,8 +451,8 @@ function extractDetailContent(treeList, content, options = {}) {
 
    if (!Array.isArray(content)) return "";
 
-   const parts = [];
-   for (const block of content) {
+   const parts: string[] = [];
+   for (const block of content as ContentBlock[]) {
       if (!block || typeof block !== "object") continue;
 
       if (block.type === "text") {
@@ -304,7 +477,7 @@ function extractDetailContent(treeList, content, options = {}) {
    return parts.filter(Boolean).join("\n\n");
 }
 
-function describeEntry(treeList, node) {
+function describeEntry(treeList: TreeListLike, node: SessionTreeNode): EntryInfo {
    const entry = node.entry;
 
    switch (entry.type) {
@@ -323,29 +496,30 @@ function describeEntry(treeList, node) {
                kind: "ASSISTANT",
                full:
                   extractDetailContent(treeList, message.content, { includeToolCalls: true, verboseToolCalls: true }) ||
-                  message.errorMessage ||
-                  (message.stopReason === "aborted" ? "(aborted)" : "(no content)")
+                  (message as { errorMessage?: string }).errorMessage ||
+                  ((message as { stopReason?: string }).stopReason === "aborted" ? "(aborted)" : "(no content)")
             };
          }
 
          if (message.role === "toolResult") {
             return {
                kind: "TOOL RESULT",
-               toolName: message.toolName
+               toolName: (message as { toolName?: string }).toolName
             };
          }
 
-         if (message.role === "bashExecution") {
+         if ((message as { role: string }).role === "bashExecution") {
+            const bashMessage = message as unknown as BashExecutionMessageLike;
             return {
                kind: "BASH",
-               full: normalizeDetail(message.command ?? "") || "(empty)",
+               full: normalizeDetail(bashMessage.command ?? "") || "(empty)",
                toolName: "bash"
             };
          }
 
          return {
-            kind: String(message.role ?? "MESSAGE").toUpperCase(),
-            full: `[${message.role ?? "message"}]`
+            kind: String((message as { role?: string }).role ?? "MESSAGE").toUpperCase(),
+            full: `[${(message as { role?: string }).role ?? "message"}]`
          };
       }
 
@@ -408,7 +582,7 @@ function describeEntry(treeList, node) {
    }
 }
 
-function getExpandedDetailLayout(tui) {
+function getExpandedDetailLayout(tui: TUI): { treeRows: number; detailBodyRows: number } {
    const availableRows = Math.max(1, tui.terminal.rows - TREE_SELECTOR_CHROME_LINES);
    const treeRows = Math.min(
       EXPANDED_DETAIL_PREFERRED_TREE_ROWS,
@@ -419,11 +593,11 @@ function getExpandedDetailLayout(tui) {
    return { treeRows, detailBodyRows };
 }
 
-function getExpandedDetailBodyLines(tui) {
+function getExpandedDetailBodyLines(tui: TUI): number {
    return getExpandedDetailLayout(tui).detailBodyRows;
 }
 
-function getVisibleTreeRows(tui, detailExpanded) {
+function getVisibleTreeRows(tui: TUI, detailExpanded: boolean): number {
    if (detailExpanded) {
       return getExpandedDetailLayout(tui).treeRows;
    }
@@ -432,7 +606,7 @@ function getVisibleTreeRows(tui, detailExpanded) {
 }
 
 // Detail pane context helpers
-function getDetailContextUsage(session, entry) {
+function getDetailContextUsage(session: AgentSessionWithInternals, entry: SessionEntry): ContextUsageInfo | null {
    const branchEntries = session.sessionManager.getBranch(entry.id);
    const sessionContext = buildSessionContext(session.sessionManager.getEntries(), entry.id);
    const modelIdentity = sessionContext.model ?? findLastAssistantModel(branchEntries);
@@ -456,7 +630,7 @@ function getDetailContextUsage(session, entry) {
    };
 }
 
-function findLastAssistantModel(branchEntries) {
+function findLastAssistantModel(branchEntries: SessionEntry[]): ModelIdentity | null {
    for (let index = branchEntries.length - 1; index >= 0; index--) {
       const entry = branchEntries[index];
       if (entry.type !== "message" || entry.message.role !== "assistant") continue;
@@ -470,15 +644,22 @@ function findLastAssistantModel(branchEntries) {
    return null;
 }
 
-function estimateContextTokensFromMessages(messages) {
+function estimateContextTokensFromMessages(messages: AgentMessage[]): number {
    for (let index = messages.length - 1; index >= 0; index--) {
       const message = messages[index];
       if (message.role !== "assistant") continue;
-      if (message.stopReason === "aborted" || message.stopReason === "error" || !message.usage) continue;
+      if (
+         (message as { stopReason?: string }).stopReason === "aborted" ||
+         (message as { stopReason?: string }).stopReason === "error" ||
+         !message.usage
+      )
+         continue;
 
       let trailingTokens = 0;
       for (let trailingIndex = index + 1; trailingIndex < messages.length; trailingIndex++) {
-         trailingTokens += estimateTokens(messages[trailingIndex]);
+         const trailingMessage = messages[trailingIndex];
+         if (!trailingMessage) continue;
+         trailingTokens += estimateTokens(trailingMessage);
       }
 
       return calculateContextTokens(message.usage) + trailingTokens;
@@ -491,7 +672,7 @@ function estimateContextTokensFromMessages(messages) {
    return estimatedTokens;
 }
 
-function formatShortTokenCount(count) {
+function formatShortTokenCount(count: number): string {
    if (count < 1000) return count.toString();
    if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
    if (count < 1000000) return `${Math.round(count / 1000)}k`;
@@ -499,7 +680,7 @@ function formatShortTokenCount(count) {
    return `${Math.round(count / 1000000)}M`;
 }
 
-function formatDetailContextUsage(theme, contextUsage) {
+function formatDetailContextUsage(theme: Theme, contextUsage: ContextUsageInfo | null): string | null {
    if (!contextUsage) return null;
 
    const display =
@@ -519,15 +700,15 @@ function formatDetailContextUsage(theme, contextUsage) {
    return theme.fg("muted", display);
 }
 
-function getCurrentDirection(treeList, selected) {
+function getCurrentDirection(treeList: TreeListLike, selected: FlatNode): "up" | "down" | null {
    if (!treeList.currentLeafId || selected.node.entry.id === treeList.currentLeafId) return null;
 
-   const currentFlatIndex = treeList.flatNodes.findIndex((node) => node.node.entry.id === treeList.currentLeafId);
-   const selectedFlatIndex = treeList.flatNodes.findIndex((node) => node.node.entry.id === selected.node.entry.id);
+   const currentFlatIndex = treeList.flatNodes.findIndex((node) => node?.node.entry.id === treeList.currentLeafId);
+   const selectedFlatIndex = treeList.flatNodes.findIndex((node) => node?.node.entry.id === selected.node.entry.id);
    return currentFlatIndex < selectedFlatIndex ? "up" : "down";
 }
 
-function getCurrentPositionPart(treeList, selected, theme) {
+function getCurrentPositionPart(treeList: TreeListLike, selected: FlatNode, theme: Theme): string | null {
    if (selected.node.entry.id === treeList.currentLeafId) {
       return theme.fg("accent", "CURRENT");
    }
@@ -538,7 +719,7 @@ function getCurrentPositionPart(treeList, selected, theme) {
    return theme.bold(theme.fg("accent", currentDirection === "up" ? "↑ CURRENT" : "↓ CURRENT"));
 }
 
-function getTreeFilterParts(treeList, theme) {
+function getTreeFilterParts(treeList: TreeListLike, theme: Theme): string[] {
    const filterLabel = FILTER_LABELS[treeList.filterMode];
    const labels = filterLabel ? [filterLabel] : [];
 
@@ -549,37 +730,43 @@ function getTreeFilterParts(treeList, theme) {
    return labels.map((label) => theme.fg("muted", label));
 }
 
-function joinMetadataParts(theme, parts) {
+function joinMetadataParts(theme: Theme, parts: (string | null | undefined)[]): string {
    return parts.filter(Boolean).join(theme.fg("muted", METADATA_SEPARATOR));
 }
 
-function getTreeSelector(result) {
-   if (typeof result?.focus?.getTreeList === "function") return result.focus;
-   if (typeof result?.component?.getTreeList === "function") return result.component;
+function getTreeSelector(result: TreeSelectorResult | null): TreeSelectorComponent | null {
+   const focus = result?.focus as TreeSelectorComponent | undefined;
+   if (typeof focus?.getTreeList === "function") {
+      return focus;
+   }
+   const component = result?.component as TreeSelectorComponent | undefined;
+   if (typeof component?.getTreeList === "function") {
+      return component;
+   }
    return null;
 }
 
-function isToolResultEntry(entry) {
+function isToolResultEntry(entry: SessionEntry): boolean {
    return entry.type === "message" && entry.message.role === "toolResult";
 }
 
-function compactDetailLines(lines) {
+function compactDetailLines(lines: string[]): string[] {
    return lines.filter(hasVisibleText);
 }
 
-function removeSharedPrefix(baseLines, lines) {
+function removeSharedPrefix(baseLines: string[], lines: string[]): string[] {
    let index = 0;
    while (
       index < baseLines.length &&
       index < lines.length &&
-      stripAnsi(lines[index]).trimEnd() === stripAnsi(baseLines[index]).trimEnd()
+      stripAnsi(lines[index] ?? "").trimEnd() === stripAnsi(baseLines[index] ?? "").trimEnd()
    ) {
       index++;
    }
    return lines.slice(index);
 }
 
-function appendTruncatedDetailHint(line, width, theme) {
+function appendTruncatedDetailHint(line: string, width: number, theme: Theme): string {
    const hintWidth = visibleWidth(TRUNCATED_DETAIL_HINT);
    const hint = theme.fg("muted", TRUNCATED_DETAIL_HINT);
 
@@ -590,12 +777,12 @@ function appendTruncatedDetailHint(line, width, theme) {
    return truncateToWidth(line, Math.max(1, width - hintWidth), "") + hint;
 }
 
-function getDetailBodyLines(lines, width, theme) {
+function getDetailBodyLines(lines: string[], width: number, theme: Theme): string[] {
    const bodyLines = lines.slice(0, DETAIL_BODY_LINES);
 
    if (lines.length > DETAIL_BODY_LINES) {
       const lastLineIndex = bodyLines.length - 1;
-      bodyLines[lastLineIndex] = appendTruncatedDetailHint(bodyLines[lastLineIndex], width, theme);
+      bodyLines[lastLineIndex] = appendTruncatedDetailHint(bodyLines[lastLineIndex] ?? "", width, theme);
    }
 
    while (bodyLines.length < DETAIL_BODY_LINES) {
@@ -605,7 +792,7 @@ function getDetailBodyLines(lines, width, theme) {
    return bodyLines;
 }
 
-function formatFullDetailTitle(info) {
+function formatFullDetailTitle(info: EntryInfo): string {
    if (info.kind === "USER" || info.kind === "ASSISTANT") {
       return `FULL ${info.kind} MESSAGE`;
    }
@@ -615,32 +802,36 @@ function formatFullDetailTitle(info) {
    return titleParts.join(" · ");
 }
 
-function renderCompactComponentLines(component, width) {
+function renderCompactComponentLines(component: Component, width: number): string[] {
    return compactDetailLines(component.render(width));
 }
 
-function renderPlainTextLines(text, width) {
+function renderPlainTextLines(text: unknown, width: number): string[] {
    return wrapTextWithAnsi(normalizeDetail(text) || "(no text)", width);
 }
 
-function renderCompactPlainTextLines(text, width) {
+function renderCompactPlainTextLines(text: unknown, width: number): string[] {
    return compactDetailLines(renderPlainTextLines(text, width));
 }
 
-function removeNativeTreeStatusLine(lines) {
+function removeNativeTreeStatusLine(lines: string[]): string[] {
    const result = [...lines];
    result.splice(result.length - NATIVE_TREE_STATUS_LINE_FROM_END, 1);
    return result;
 }
 
 class ExpandedDetailPane {
-   constructor(tui) {
+   private tui: TUI;
+   expanded: boolean;
+   private scrollOffset: number;
+
+   constructor(tui: TUI) {
       this.tui = tui;
       this.expanded = false;
       this.scrollOffset = 0;
    }
 
-   toggle() {
+   toggle(): void {
       if (this.expanded) {
          this.collapse();
       } else {
@@ -649,12 +840,12 @@ class ExpandedDetailPane {
       }
    }
 
-   collapse() {
+   collapse(): void {
       this.expanded = false;
       this.scrollOffset = 0;
    }
 
-   handleInput(keyData) {
+   handleInput(keyData: string): void {
       if (matchesKey(keyData, Key.escape) || matchesKey(keyData, Key.ctrl("c"))) {
          this.collapse();
          return;
@@ -684,7 +875,7 @@ class ExpandedDetailPane {
       }
    }
 
-   renderEmpty(theme, width) {
+   renderEmpty(theme: Theme, width: number): string[] {
       const bodyHeight = getExpandedDetailBodyLines(this.tui);
 
       return [
@@ -696,7 +887,7 @@ class ExpandedDetailPane {
       ];
    }
 
-   render(theme, width, title, contentLines) {
+   render(theme: Theme, width: number, title: string, contentLines: string[]): string[] {
       const bodyHeight = getExpandedDetailBodyLines(this.tui);
       const lines = contentLines.length ? contentLines : [theme.fg("muted", "(no text)")];
       const maxOffset = Math.max(0, lines.length - bodyHeight);
@@ -730,14 +921,21 @@ class ExpandedDetailPane {
 }
 
 class DetailContentRenderer {
-   constructor(mode, treeList, components) {
+   private mode: InteractiveModeWithInternals;
+   private treeList: TreeListLike;
+   private tui: TUI;
+   private components: NativeComponents;
+
+   constructor(mode: InteractiveModeWithInternals, treeList: TreeListLike, components: NativeComponents) {
       this.mode = mode;
       this.treeList = treeList;
       this.tui = mode.ui;
       this.components = components;
    }
 
-   createToolExecutionComponent(entry) {
+   createToolExecutionComponent(
+      entry: SessionMessageEntry & { message: { role: "toolResult"; toolName: string; toolCallId: string } }
+   ): ToolExecutionComponent {
       const message = entry.message;
       const toolCall = this.treeList.toolCallMap.get(message.toolCallId);
       return new this.components.toolExecutionComponent(
@@ -751,21 +949,26 @@ class DetailContentRenderer {
       );
    }
 
-   createUserMessageComponent(entry) {
+   createUserMessageComponent(entry: SessionMessageEntry & { message: { role: "user" } }): UserMessageComponent {
       const text = this.mode.getUserMessageText(entry.message);
       return new this.components.userMessageComponent(text, this.mode.getMarkdownThemeWithSettings());
    }
 
-   createAssistantMessageComponent(entry) {
+   createAssistantMessageComponent(
+      entry: SessionMessageEntry & { message: { role: "assistant" } }
+   ): AssistantMessageComponent {
       return new this.components.assistantMessageComponent(
-         entry.message,
+         entry.message as unknown as ConstructorParameters<typeof AssistantMessageComponent>[0],
          this.mode.hideThinkingBlock,
          this.mode.getMarkdownThemeWithSettings(),
          this.mode.hiddenThinkingLabel
       );
    }
 
-   renderBashExecutionLines(entry, width) {
+   renderBashExecutionLines(
+      entry: SessionMessageEntry & { message: BashExecutionMessageLike },
+      width: number
+   ): string[] {
       const message = entry.message;
       const component = new this.components.bashExecutionComponent(
          message.command,
@@ -779,13 +982,13 @@ class DetailContentRenderer {
       component.setComplete(
          message.exitCode,
          message.cancelled,
-         message.truncated ? { truncated: true } : undefined,
+         message.truncated ? ({ truncated: true } as TruncationResult) : undefined,
          message.fullOutputPath
       );
       return component.render(width);
    }
 
-   renderBashPreviewLines(entry, width) {
+   renderBashPreviewLines(entry: SessionMessageEntry & { message: BashExecutionMessageLike }, width: number): string[] {
       const message = entry.message;
       const output = normalizeDetail(message.output);
       const text = output || normalizeDetail(message.command) || "(no output)";
@@ -793,16 +996,20 @@ class DetailContentRenderer {
       return compactDetailLines(wrapTextWithAnsi(theme.fg("muted", text), width));
    }
 
-   renderExpandableEntryLines(Component, message, width) {
+   renderExpandableEntryLines(
+      Component: ExpandableEntryComponentConstructor,
+      message: SessionEntry,
+      width: number
+   ): string[] {
       const component = new Component(message, this.mode.getMarkdownThemeWithSettings());
       component.setExpanded(true);
       return component.render(width);
    }
 
-   renderCustomMessageLines(entry, width) {
+   renderCustomMessageLines(entry: SessionEntry & { type: "custom_message" }, width: number): string[] {
       const renderer = this.mode.session.extensionRunner?.getMessageRenderer?.(entry.customType);
       const component = new this.components.customMessageComponent(
-         entry,
+         entry as unknown as ConstructorParameters<typeof CustomMessageComponent>[0],
          renderer,
          this.mode.getMarkdownThemeWithSettings()
       );
@@ -810,63 +1017,109 @@ class DetailContentRenderer {
       return component.render(width);
    }
 
-   renderToolLines(entry, width, result) {
+   renderToolLines(
+      entry: SessionMessageEntry & { message: { role: "toolResult"; toolName: string; toolCallId: string } },
+      width: number,
+      result?: AgentMessage
+   ): string[] {
       const component = this.createToolExecutionComponent(entry);
       component.setExpanded(true);
       if (result) {
-         component.updateResult(result);
+         component.updateResult(
+            result as unknown as {
+               content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+               details?: unknown;
+               isError: boolean;
+            }
+         );
       }
       return component.render(width);
    }
 
-   renderToolResultPreviewLines(entry, width) {
+   renderToolResultPreviewLines(
+      entry: SessionMessageEntry & { message: { role: "toolResult"; toolName: string; toolCallId: string } },
+      width: number
+   ): string[] {
       const callLines = compactDetailLines(this.renderToolLines(entry, width));
       const fullLines = compactDetailLines(this.renderToolLines(entry, width, entry.message));
       const resultLines = removeSharedPrefix(callLines, fullLines);
       return resultLines.length > 0 ? resultLines : fullLines;
    }
 
-   renderPreview(entry, info, width) {
+   renderPreview(entry: SessionEntry, info: EntryInfo, width: number): string[] {
       if (isToolResultEntry(entry)) {
-         return this.renderToolResultPreviewLines(entry, width);
+         return this.renderToolResultPreviewLines(
+            entry as SessionMessageEntry & { message: { role: "toolResult"; toolName: string; toolCallId: string } },
+            width
+         );
       }
 
       if (entry.type === "message") {
          switch (entry.message.role) {
             case "user":
-               return renderCompactComponentLines(this.createUserMessageComponent(entry), width);
+               return renderCompactComponentLines(
+                  this.createUserMessageComponent(entry as SessionMessageEntry & { message: { role: "user" } }),
+                  width
+               );
             case "assistant":
-               return renderCompactComponentLines(this.createAssistantMessageComponent(entry), width);
+               return renderCompactComponentLines(
+                  this.createAssistantMessageComponent(
+                     entry as SessionMessageEntry & { message: { role: "assistant" } }
+                  ),
+                  width
+               );
             case "bashExecution":
-               return this.renderBashPreviewLines(entry, width);
+               return this.renderBashPreviewLines(
+                  entry as SessionMessageEntry & { message: BashExecutionMessageLike },
+                  width
+               );
          }
       }
 
       return renderCompactPlainTextLines(info.full, width);
    }
 
-   renderExpanded(entry, info, width) {
+   renderExpanded(entry: SessionEntry, info: EntryInfo, width: number): string[] {
       if (isToolResultEntry(entry)) {
-         return this.renderToolLines(entry, width, entry.message);
+         return this.renderToolLines(
+            entry as SessionMessageEntry & { message: { role: "toolResult"; toolName: string; toolCallId: string } },
+            width,
+            (entry as SessionMessageEntry).message
+         );
       }
 
       if (entry.type === "message") {
          switch (entry.message.role) {
             case "user":
-               return this.createUserMessageComponent(entry).render(width);
+               return this.createUserMessageComponent(
+                  entry as SessionMessageEntry & { message: { role: "user" } }
+               ).render(width);
             case "assistant":
-               return this.createAssistantMessageComponent(entry).render(width);
+               return this.createAssistantMessageComponent(
+                  entry as SessionMessageEntry & { message: { role: "assistant" } }
+               ).render(width);
             case "bashExecution":
-               return this.renderBashExecutionLines(entry, width);
+               return this.renderBashExecutionLines(
+                  entry as SessionMessageEntry & { message: BashExecutionMessageLike },
+                  width
+               );
          }
       }
 
       if (entry.type === "compaction") {
-         return this.renderExpandableEntryLines(this.components.compactionSummaryMessageComponent, entry, width);
+         return this.renderExpandableEntryLines(
+            this.components.compactionSummaryMessageComponent as unknown as ExpandableEntryComponentConstructor,
+            entry,
+            width
+         );
       }
 
       if (entry.type === "branch_summary") {
-         return this.renderExpandableEntryLines(this.components.branchSummaryMessageComponent, entry, width);
+         return this.renderExpandableEntryLines(
+            this.components.branchSummaryMessageComponent as unknown as ExpandableEntryComponentConstructor,
+            entry,
+            width
+         );
       }
 
       if (entry.type === "custom_message") {
@@ -877,37 +1130,47 @@ class DetailContentRenderer {
    }
 }
 
-class TreeXWrapper {
-   constructor(selector, mode, nativeComponents) {
+class TreeXWrapper implements Component {
+   private selector: TreeSelectorComponent;
+   private treeList: TreeListLike;
+   private mode: InteractiveModeWithInternals;
+   private tui: TUI;
+   private detailContent: DetailContentRenderer;
+   private expandedDetail: ExpandedDetailPane;
+
+   constructor(selector: TreeSelectorComponent, mode: InteractiveMode, nativeComponents: NativeComponents) {
       this.selector = selector;
-      this.treeList = selector.getTreeList();
-      this.mode = mode;
-      this.tui = mode.ui;
-      this.detailContent = new DetailContentRenderer(mode, this.treeList, nativeComponents);
+      this.treeList = selector.getTreeList() as unknown as TreeListLike;
+      this.mode = mode as unknown as InteractiveModeWithInternals;
+      this.tui = this.mode.ui;
+      this.detailContent = new DetailContentRenderer(this.mode, this.treeList, nativeComponents);
       this.expandedDetail = new ExpandedDetailPane(this.tui);
       patchTreeListRender(this.treeList);
    }
 
-   updateVisibleRows() {
+   updateVisibleRows(): void {
       this.treeList.maxVisibleLines = getVisibleTreeRows(this.tui, this.expandedDetail.expanded);
    }
 
-   get focused() {
+   get focused(): boolean {
       return this.selector.focused;
    }
 
-   set focused(value) {
+   set focused(value: boolean) {
       this.selector.focused = value;
    }
 
-   invalidate() {
+   invalidate(): void {
       this.selector.invalidate();
    }
 
-   handleInput(keyData) {
+   handleInput(keyData: string): void {
       this.updateVisibleRows();
 
-      if (!this.selector.labelInput && matchesKey(keyData, REVIEW_DETAIL_KEY)) {
+      if (
+         !(this.selector as unknown as { labelInput?: boolean }).labelInput &&
+         matchesKey(keyData, REVIEW_DETAIL_KEY)
+      ) {
          this.expandedDetail.toggle();
       } else if (this.expandedDetail.expanded) {
          this.expandedDetail.handleInput(keyData);
@@ -919,7 +1182,7 @@ class TreeXWrapper {
       this.tui.requestRender();
    }
 
-   renderStickyLeftLine(theme, width, stickyLeftDepth) {
+   renderStickyLeftLine(theme: Theme, width: number, stickyLeftDepth: number): string {
       const badge = theme.bg(
          "selectedBg",
          ` ${theme.bold(theme.fg("accent", "⇤"))} ${theme.bold(theme.fg("accent", `depth ${stickyLeftDepth}`))} `
@@ -928,11 +1191,11 @@ class TreeXWrapper {
       return fitLine(`  ${badge}`, width);
    }
 
-   getSelectedNode() {
+   getSelectedNode(): FlatNode | null {
       return this.treeList.filteredNodes[this.treeList.selectedIndex] ?? null;
    }
 
-   getDetailMetadata(theme, selected, info) {
+   getDetailMetadata(theme: Theme, selected: FlatNode, info: EntryInfo): string {
       const entry = selected.node.entry;
       const contextUsage = getDetailContextUsage(this.mode.session, entry);
       const treeParts = [
@@ -942,7 +1205,10 @@ class TreeXWrapper {
          getCurrentPositionPart(this.treeList, selected, theme)
       ];
 
-      const entryParts = [theme.bold(info.kind), theme.fg("muted", formatRelativeTime(entry.timestamp))];
+      const entryParts: (string | null | undefined)[] = [
+         theme.bold(info.kind),
+         theme.fg("muted", formatRelativeTime(entry.timestamp))
+      ];
       if (info.toolName) entryParts.push(theme.fg("muted", String(info.toolName).toUpperCase()));
       if (selected.node.label) entryParts.push(theme.fg("warning", `[${selected.node.label}]`));
 
@@ -955,7 +1221,7 @@ class TreeXWrapper {
       return metadataGroups.join(theme.fg("muted", METADATA_GROUP_SEPARATOR));
    }
 
-   renderDetailPane(theme, width) {
+   renderDetailPane(theme: Theme, width: number): string[] {
       const selected = this.getSelectedNode();
       if (!selected) {
          return [
@@ -976,7 +1242,7 @@ class TreeXWrapper {
       ];
    }
 
-   renderExpandedDetailPane(theme, width) {
+   renderExpandedDetailPane(theme: Theme, width: number): string[] {
       const selected = this.getSelectedNode();
       if (!selected) {
          return this.expandedDetail.renderEmpty(theme, width);
@@ -993,7 +1259,7 @@ class TreeXWrapper {
       );
    }
 
-   render(width) {
+   render(width: number): string[] {
       const theme = getTheme();
       const renderWidth = Math.max(20, width);
 
@@ -1013,8 +1279,8 @@ class TreeXWrapper {
    }
 }
 
-function uninstallTreeXNativePatches(InteractiveMode) {
-   const proto = InteractiveMode.prototype;
+function uninstallTreeXNativePatches(InteractiveModeClass: typeof InteractiveMode): void {
+   const proto = InteractiveModeClass.prototype as unknown as InteractiveModePrototype;
    const patch = proto[SHOW_SELECTOR_PATCH];
    if (!patch) return;
 
@@ -1024,12 +1290,18 @@ function uninstallTreeXNativePatches(InteractiveMode) {
    delete proto[SHOW_SELECTOR_PATCH];
 }
 
-export function installTreeXNativePatches(InteractiveMode, nativeComponents) {
-   const proto = InteractiveMode.prototype;
-   uninstallTreeXNativePatches(InteractiveMode);
+export function installTreeXNativePatches(
+   InteractiveModeClass: typeof InteractiveMode,
+   nativeComponents: NativeComponents
+): () => void {
+   const proto = InteractiveModeClass.prototype as unknown as InteractiveModePrototype;
+   uninstallTreeXNativePatches(InteractiveModeClass);
 
    const originalShowSelector = proto.showSelector;
-   const patchedShowSelector = function treexShowSelector(create) {
+   const patchedShowSelector = function treexShowSelector(
+      this: InteractiveMode,
+      create: (done: () => void) => TreeSelectorResult
+   ): void {
       return originalShowSelector.call(this, (done) => {
          const result = create(done);
          const selector = getTreeSelector(result);
@@ -1047,5 +1319,5 @@ export function installTreeXNativePatches(InteractiveMode, nativeComponents) {
       original: originalShowSelector,
       patched: patchedShowSelector
    };
-   return () => uninstallTreeXNativePatches(InteractiveMode);
+   return () => uninstallTreeXNativePatches(InteractiveModeClass);
 }
