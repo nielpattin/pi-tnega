@@ -7,14 +7,13 @@
   "editorPaddingX": 0,
   "enableSkillCommands": true,
   "enabledModels": [
-    "xiaomi-token-plan-sgp/mimo-v2.5-pro",
-    "xiaomi-token-plan-sgp/mimo-v2.5",
     "deepseek/deepseek-v4-flash",
     "opencode/deepseek-v4-flash-free",
     "cloudflare/@cf/zai-org/glm-5.2",
     "cloudflare/@cf/moonshotai/kimi-k2.7-code",
-    "zcode/GLM-5-Turbo",
-    "zcode/GLM-5.2"
+    "ccp/deepseek/deepseek-v4-pro",
+    "ccp/deepseek/deepseek-v4-flash",
+    "deepseek/deepseek-v4-pro"
   ],
   "extensions": [
     "-extensions\\web-reader.ts",
@@ -160,9 +159,9 @@
   "showHardwareCursor": false,
   "autocompleteMaxVisible": 20,
   "defaultProjectTrust": "always",
-  "defaultProvider": "cloudflare",
-  "defaultModel": "@cf/moonshotai/kimi-k2.7-code",
-  "defaultThinkingLevel": "high",
+  "defaultProvider": "opencode",
+  "defaultModel": "deepseek-v4-flash-free",
+  "defaultThinkingLevel": "xhigh",
   "describeImage": {
     "model": "google/gemini-3.1-flash-lite",
     "fallbackModel": "xiaomi-token-plan-sgp/mimo-v2.5",
