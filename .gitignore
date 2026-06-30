@@ -183,3 +183,4 @@ __pycache__/
 _*.py
 *.tmp
 models.json
+settings.json
