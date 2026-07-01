@@ -190,12 +190,32 @@ function toolResultContent(message: Extract<Context["messages"][number], { role:
 }
 
 function buildMessages(context: Context): UpstreamMessage[] {
+   // Collect all tool result IDs to detect orphaned tool calls
+   // (tool calls without matching results — causes upstream API validation errors
+   // like "Tool result is missing for tool call ...", especially after model switches
+   // where the session tree branches orphan the result)
+   const toolResultIds = new Set<string>();
+   for (const message of context.messages) {
+      if (message.role === "toolResult") {
+         toolResultIds.add(message.toolCallId);
+      }
+   }
+
    const messages: UpstreamMessage[] = [];
    for (const message of context.messages) {
       if (message.role === "user") {
          messages.push({ role: "user", content: userContent(message.content) });
       } else if (message.role === "assistant") {
-         messages.push({ role: "assistant", content: assistantContent(message) });
+         // Filter out orphaned tool call blocks (no matching tool result)
+         const filteredContent = message.content.filter((part) => {
+            if (part.type === "toolCall" && !toolResultIds.has(part.id)) {
+               return false;
+            }
+            return true;
+         });
+         if (filteredContent.length === 0) continue; // Skip entirely empty messages
+         const filteredMessage = { ...message, content: filteredContent };
+         messages.push({ role: "assistant", content: assistantContent(filteredMessage) });
       } else if (message.role === "toolResult") {
          messages.push({ role: "tool", content: toolResultContent(message) });
       }
