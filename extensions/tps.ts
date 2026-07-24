@@ -1,23 +1,28 @@
 /**
  * pi-tps — Tokens-per-second tracker for pi
  *
- * Tracks LLM generation speed (tokens/second) after every agent turn,
- * shows TTFT (time to first token) and TPS metrics, and restores
- * notifications on session resume.
+ * Tracks LLM token usage and timing after every assistant run and renders a
+ * compact usage row inline in the chat transcript.
  *
- * Originally from: https://github.com/badlogic/pi-mono/blob/main/.pi/extensions/tps.ts
+ * Toggle icon style with `/tps <text|nerdfont>`. Default is text-only icons.
  */
 
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, AgentEndEvent, ExtensionContext, CustomEntry } from "@earendil-works/pi-coding-agent";
+import type {
+   ExtensionAPI,
+   AgentEndEvent,
+   AgentStartEvent,
+   ExtensionCommandContext,
+   ExtensionContext,
+   Theme,
+   ContextEvent
+} from "@earendil-works/pi-coding-agent";
+import type { AutocompleteItem, Component } from "@earendil-works/pi-tui";
 
 // Event types not exported from main package - define locally
-interface TurnStartEvent {
-   type: "turn_start";
-   turnIndex: number;
-   timestamp: number;
-}
-
 interface MessageStartEvent {
    type: "message_start";
    message: unknown;
@@ -28,18 +33,76 @@ interface MessageEndEvent {
    message: unknown;
 }
 
-interface TPSData {
-   message: string;
+interface UsageStats {
+   input: number;
+   output: number;
+   cacheRead: number;
+   cacheWrite: number;
+   agentStartMs: number;
+   firstContextMs?: number;
+   firstTokenMs: number;
+   lastTokenMs: number;
+}
+
+interface TPSRowData extends UsageStats {
    timestamp: number;
 }
 
 interface TurnTiming {
-   turnStartMs: number;
+   agentStartMs: number;
+   firstContextMs?: number; // Right before the first provider request; more precise than agentStartMs
    firstTokenMs: number | null;
    lastTokenMs: number | null;
-   assistantMessages: AssistantMessage[]; // Messages generated in THIS turn only
+   assistantMessages: AssistantMessage[]; // Messages generated in this agent run
    totalGenerationMs: number; // Accumulated streaming time (excludes gaps)
    currentMessageStartMs: number | null; // When the current message started streaming
+}
+
+type IconMode = "text" | "nerdfont";
+
+const ICONS: Record<IconMode, { input: string; output: string; cache: string; time: string; throughput: string }> = {
+   nerdfont: {
+      input: "\uf090", // 
+      output: "\uf08b", // 
+      cache: "\uf1c0", // 
+      time: "\uf017", // 
+      throughput: "\uf0e4" // 
+   },
+   text: {
+      input: "in:",
+      output: "out:",
+      cache: "cache:",
+      time: "ttft:",
+      throughput: "tok/s:"
+   }
+};
+
+const CONFIG_DIR = join(homedir(), ".pi");
+const CONFIG_FILE = join(CONFIG_DIR, "tps-mode.json");
+const TPS_CUSTOM_TYPE = "tps";
+
+/** Below this the rate is mostly noise (cached / near-instant responses). */
+const MIN_DURATION_MS = 100;
+
+function loadMode(): IconMode {
+   try {
+      const data = JSON.parse(readFileSync(CONFIG_FILE, "utf8")) as { mode?: unknown };
+      if (data.mode === "nerdfont" || data.mode === "text") {
+         return data.mode;
+      }
+   } catch {
+      // Missing or unreadable config falls back to default.
+   }
+   return "text";
+}
+
+function saveMode(mode: IconMode): void {
+   try {
+      mkdirSync(CONFIG_DIR, { recursive: true });
+      writeFileSync(CONFIG_FILE, JSON.stringify({ mode }, null, 2), "utf8");
+   } catch {
+      // Config write failure is non-fatal.
+   }
 }
 
 function isAssistantMessage(message: unknown): message is AssistantMessage {
@@ -48,14 +111,29 @@ function isAssistantMessage(message: unknown): message is AssistantMessage {
    return role === "assistant";
 }
 
-function isTpsEntry(entry: unknown): entry is CustomEntry<TPSData> {
-   if (!entry || typeof entry !== "object") return false;
-   const candidate = entry as { type?: unknown; customType?: unknown };
-   return candidate.type === "custom" && candidate.customType === "tps";
+function isTpsMessage(message: { role?: unknown; customType?: unknown }): boolean {
+   return message.role === "custom" && message.customType === TPS_CUSTOM_TYPE;
 }
 
-function formatNumber(num: number): string {
-   return num.toLocaleString();
+/**
+ * Compact number formatter for token counts:
+ *   < 1_000   -> 606
+ *   < 1_000_000 -> 1.2K / 126K
+ *   >= 1_000_000 -> 1.5M
+ */
+function formatNumberCompact(num: number): string {
+   const abs = Math.abs(num);
+   if (abs < 1_000) {
+      return num.toLocaleString();
+   }
+   if (abs < 1_000_000) {
+      const value = num / 1_000;
+      const fixed = value.toFixed(1);
+      return `${fixed.endsWith(".0") ? Math.round(value) : fixed}K`;
+   }
+   const value = num / 1_000_000;
+   const fixed = value.toFixed(1);
+   return `${fixed.endsWith(".0") ? Math.round(value) : fixed}M`;
 }
 
 /**
@@ -81,7 +159,6 @@ export function formatDuration(totalSeconds: number): string {
    const parts: { value: number; label: string }[] = [];
    let remaining = seconds;
 
-   // First pass: extract all units with non-zero values
    for (const unit of units) {
       if (remaining >= unit.seconds) {
          const value = Math.floor(remaining / unit.seconds);
@@ -90,15 +167,12 @@ export function formatDuration(totalSeconds: number): string {
       }
    }
 
-   // If we only found one unit, add the next smaller unit as zero
-   // Skip 'w' (weeks) when the primary unit is 'mo' (months) for better readability
    const firstPart = parts[0];
    if (parts.length === 1 && firstPart) {
       const firstUnitIndex = units.findIndex((u) => u.label === firstPart.label);
       if (firstUnitIndex < units.length - 1) {
          let nextIndex = firstUnitIndex + 1;
          let nextUnit = units[nextIndex];
-         // Skip weeks when showing months - go directly to days
          if (firstPart.label === "mo" && nextUnit?.label === "w") {
             nextIndex++;
             nextUnit = units[nextIndex];
@@ -109,44 +183,99 @@ export function formatDuration(totalSeconds: number): string {
       }
    }
 
-   // Return up to 2 most significant units
    const top2 = parts.slice(0, 2);
    return top2.map((p) => `${p.value}${p.label}`).join(" ");
 }
 
-function calculateStats(event: AgentEndEvent, timing: TurnTiming): string | null {
-   // Aggregate token usage ONLY from assistant messages generated in this turn
-   // (not all messages from the session history)
+function buildUsageStats(timing: TurnTiming): UsageStats | null {
    let input = 0;
    let output = 0;
    let cacheRead = 0;
    let cacheWrite = 0;
-   let totalTokens = 0;
 
    for (const message of timing.assistantMessages) {
       input += message.usage.input || 0;
       output += message.usage.output || 0;
       cacheRead += message.usage.cacheRead || 0;
       cacheWrite += message.usage.cacheWrite || 0;
-      totalTokens += message.usage.totalTokens || 0;
    }
 
    if (output <= 0) return null;
    if (!timing.firstTokenMs || !timing.lastTokenMs) return null;
 
-   const ttftMs = timing.firstTokenMs - timing.turnStartMs;
-   const totalMs = timing.lastTokenMs - timing.turnStartMs;
+   return {
+      input,
+      output,
+      cacheRead,
+      cacheWrite,
+      agentStartMs: timing.agentStartMs,
+      firstContextMs: timing.firstContextMs,
+      firstTokenMs: timing.firstTokenMs,
+      lastTokenMs: timing.lastTokenMs
+   };
+}
 
-   // True generation TPS: only counts actual streaming time (excludes TTFT and tool gaps)
-   if (timing.totalGenerationMs <= 0) return null;
+/**
+ * Build a compact usage row from aggregated stats.
+ * Returns null when there is nothing meaningful to show.
+ * Uses firstContextMs when available because it is captured right before the
+ * first provider request, which is more precise than agentStartMs for TTFT.
+ */
+function formatUsageStats(stats: UsageStats, mode: IconMode): string | null {
+   if (stats.output <= 0) return null;
 
-   const generationSeconds = timing.totalGenerationMs / 1000;
-   const tps = output / generationSeconds;
+   const startMs = stats.firstContextMs ?? stats.agentStartMs;
+   const ttftMs = stats.firstTokenMs - startMs;
+   const totalMs = stats.lastTokenMs - startMs;
+   const icons = ICONS[mode];
 
-   const ttftFormatted = `${(ttftMs / 1000).toFixed(2)}s`;
-   const totalFormatted = `${(totalMs / 1000).toFixed(2)}s`;
+   const parts: string[] = [];
+   parts.push(`${icons.input} ${formatNumberCompact(stats.input + stats.cacheWrite)}`);
+   parts.push(`${icons.output} ${formatNumberCompact(stats.output)}`);
+   if (stats.cacheRead > 0) {
+      parts.push(`${icons.cache} ${formatNumberCompact(stats.cacheRead)}`);
+   }
+   if (ttftMs > 0) {
+      parts.push(`${icons.time} ${(ttftMs / 1000).toFixed(1)}s`);
+   }
+   if (totalMs > MIN_DURATION_MS) {
+      // Generation window is total wall time minus TTFT.
+      const genMs = totalMs - ttftMs;
+      if (genMs > MIN_DURATION_MS) {
+         const tokPerSec = (stats.output / genMs) * 1000;
+         parts.push(`${icons.throughput} ${tokPerSec.toFixed(1)}/s`);
+      }
+   }
 
-   return `TPS ${tps.toFixed(2)} tok/s · TTFT ${ttftFormatted} · ${totalFormatted} · out ${formatNumber(output)} · in ${formatNumber(input)}`;
+   return parts.join("  ");
+}
+
+/**
+ * Build a compact usage row for the current run.
+ * Returns null when there is nothing meaningful to show.
+ * Exported for testing.
+ */
+export function formatUsageRow(timing: TurnTiming, mode: IconMode): string | null {
+   const stats = buildUsageStats(timing);
+   return stats ? formatUsageStats(stats, mode) : null;
+}
+
+/**
+ * Custom transcript component that renders the usage row left-aligned (under the
+ * assistant bubble) and dim. The text is recomputed on every render so toggling
+ * `/tps` updates existing rows. Exported for testing.
+ */
+export class UsageRowComponent implements Component {
+   constructor(
+      private getText: () => string,
+      private theme: Theme
+   ) {}
+
+   invalidate(): void {}
+
+   render(_width: number): string[] {
+      return [this.theme.fg("dim", this.getText())];
+   }
 }
 
 export default function tpsExtension(pi: ExtensionAPI) {
@@ -154,31 +283,64 @@ export default function tpsExtension(pi: ExtensionAPI) {
    let currentTiming: TurnTiming | null = null;
    // Track if we've seen any assistant messages in this turn
    let hasSeenAssistantMessage = false;
+   // Icon style preference (loaded from ~/.pi/tps-mode.json, defaults to text)
+   let currentIconMode: IconMode = loadMode();
 
-   // Restore notification on session resume if we have saved stats
-   pi.on("session_start", (event, ctx) => {
-      if (!ctx.hasUI) return;
-      // Only restore for existing sessions (resume, fork, switch), not new ones
-      if (event.reason === "startup" || event.reason === "reload") return;
+   // Render the inline usage row in TUI mode.
+   pi.registerMessageRenderer<TPSRowData>(TPS_CUSTOM_TYPE, (message, _options, theme) => {
+      const details = message.details as TPSRowData | { message: string; timestamp: number } | undefined;
+      if (!details) return undefined;
+      // Legacy rows created before the dynamic renderer stored a precomputed string.
+      if ("message" in details) {
+         return new UsageRowComponent(() => details.message, theme);
+      }
+      if (!details.output) return undefined;
+      return new UsageRowComponent((): string => formatUsageStats(details, currentIconMode) ?? "", theme);
+   });
 
-      const entries = ctx.sessionManager.getEntries();
-      // Find the most recent TPS entry
-      for (let i = entries.length - 1; i >= 0; i--) {
-         const entry = entries[i];
-         if (isTpsEntry(entry)) {
-            const data = entry.data;
-            if (data?.message) {
-               ctx.ui.notify(data.message, "info");
-            }
-            break;
-         }
+   // Register /tps slash command to toggle icon style.
+   pi.registerCommand("tps", {
+      description: "Toggle TPS usage-row icon style (text or nerdfont)",
+      getArgumentCompletions: (argumentPrefix: string): AutocompleteItem[] => {
+         const options: IconMode[] = ["text", "nerdfont"];
+         const prefix = argumentPrefix.toLowerCase();
+         return options
+            .filter((option) => option.startsWith(prefix))
+            .map((option) => ({ value: option, label: option }));
+      },
+      handler: async (args: string, ctx: ExtensionCommandContext) => {
+         const requested = args.trim().toLowerCase();
+         const nextMode: IconMode =
+            requested === "text" || requested === "nerdfont"
+               ? requested
+               : currentIconMode === "text"
+                 ? "nerdfont"
+                 : "text";
+         currentIconMode = nextMode;
+         saveMode(nextMode);
+         ctx.ui.notify(`TPS icon mode set to ${nextMode}`, "info");
       }
    });
 
-   // Track when a turn starts (request sent to LLM)
-   pi.on("turn_start", (event: TurnStartEvent) => {
+   // Keep the TPS row out of LLM context. Custom messages participate by default,
+   // so we strip our own injected rows before every provider request.
+   // Also capture the moment right before the first provider request; this is a
+   // much better TTFT baseline than agent_start.
+   pi.on("context", (event: ContextEvent) => {
+      if (currentTiming && currentTiming.firstContextMs === undefined) {
+         currentTiming.firstContextMs = performance.now();
+      }
+      const messages = event.messages.filter(
+         (message) => !isTpsMessage(message as { role?: unknown; customType?: unknown })
+      );
+      return { messages };
+   });
+
+   // Track when the agent run starts (request sent to LLM).
+   // We aggregate across the whole run so multi-turn tool loops collapse into one row.
+   pi.on("agent_start", (_event: AgentStartEvent) => {
       currentTiming = {
-         turnStartMs: event.timestamp,
+         agentStartMs: performance.now(),
          firstTokenMs: null,
          lastTokenMs: null,
          assistantMessages: [],
@@ -193,15 +355,13 @@ export default function tpsExtension(pi: ExtensionAPI) {
       if (!currentTiming) return;
       if (!isAssistantMessage(event.message)) return;
 
-      const now = Date.now();
+      const now = performance.now();
 
-      // Only capture TTFT for the first assistant message
       if (!hasSeenAssistantMessage) {
          currentTiming.firstTokenMs = now;
          hasSeenAssistantMessage = true;
       }
 
-      // Track when THIS message started streaming (for generation TPS)
       currentTiming.currentMessageStartMs = now;
    });
 
@@ -210,24 +370,25 @@ export default function tpsExtension(pi: ExtensionAPI) {
       if (!currentTiming) return;
       if (!isAssistantMessage(event.message)) return;
 
-      const now = Date.now();
+      const now = performance.now();
 
-      // Update last token time for the overall turn
       currentTiming.lastTokenMs = now;
 
-      // Accumulate ACTUAL streaming time for this message (true generation time)
       if (currentTiming.currentMessageStartMs) {
          const messageGenerationMs = now - currentTiming.currentMessageStartMs;
          currentTiming.totalGenerationMs += messageGenerationMs;
-         currentTiming.currentMessageStartMs = null; // Reset for next message
+         currentTiming.currentMessageStartMs = null;
       }
 
-      // Store this message to count its tokens later (only current turn's messages)
       currentTiming.assistantMessages.push(event.message);
    });
 
-   // Calculate and display stats when agent loop ends
-   pi.on("agent_end", (event: AgentEndEvent, ctx: ExtensionContext) => {
+   // Inject the usage row as a custom message once the agent run is fully idle.
+   // During agent_end Pi still considers itself streaming, so calling sendMessage
+   // synchronously would be delivered as a steering message and loop forever.
+   // We defer to the next tick; by then finishRun() has cleared isStreaming and
+   // the message appends as a pure display row.
+   pi.on("agent_end", (_event: AgentEndEvent, ctx: ExtensionContext) => {
       if (!ctx.hasUI) return;
       if (!currentTiming) return;
 
@@ -235,13 +396,20 @@ export default function tpsExtension(pi: ExtensionAPI) {
       currentTiming = null;
       hasSeenAssistantMessage = false;
 
-      const message = calculateStats(event, timing);
-      if (!message) return;
+      const stats = buildUsageStats(timing);
+      if (!stats) return;
 
-      // Show notification immediately
-      ctx.ui.notify(message, "info");
-
-      // Save to session for restoration on resume
-      pi.appendEntry("tps", { message, timestamp: Date.now() });
+      setTimeout(() => {
+         if (!ctx.isIdle()) return;
+         pi.sendMessage(
+            {
+               customType: TPS_CUSTOM_TYPE,
+               content: "",
+               display: true,
+               details: { ...stats, timestamp: performance.now() }
+            },
+            { triggerTurn: false }
+         );
+      }, 0);
    });
 }
