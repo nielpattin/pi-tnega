@@ -65,10 +65,10 @@ If you want OpenCode-like permissiveness:
 
 ```jsonc
 {
-   "permission": {
-      "*": "allow",
-      "external_directory": "ask",
-   },
+    "permission": {
+        "*": "allow",
+        "external_directory": "ask"
+    }
 }
 ```
 
@@ -81,10 +81,10 @@ To replicate OpenCode's unified behavior, set both to the same action:
 
 ```jsonc
 {
-   "permission": {
-      "write": "ask",
-      "edit": "ask",
-   },
+    "permission": {
+        "write": "ask",
+        "edit": "ask"
+    }
 }
 ```
 
@@ -94,14 +94,14 @@ This extension provides a first-class `mcp` permission surface with granular ser
 
 ```jsonc
 {
-   "permission": {
-      "mcp": {
-         "*": "ask",
-         "mcp_status": "allow",
-         "myServer:*": "ask",
-         "dangerousServer": "deny",
-      },
-   },
+    "permission": {
+        "mcp": {
+            "*": "ask",
+            "mcp_status": "allow",
+            "myServer:*": "ask",
+            "dangerousServer": "deny"
+        }
+    }
 }
 ```
 
@@ -129,23 +129,23 @@ The result is broader coverage (paths detected in any command, not just a curate
 
 ```json
 {
-   "$schema": "https://opencode.ai/config.json",
-   "permission": {
-      "*": "allow",
-      "bash": {
-         "*": "ask",
-         "git *": "allow",
-         "npm *": "allow",
-         "rm *": "deny"
-      },
-      "edit": {
-         "*": "ask",
-         "src/*.ts": "allow"
-      },
-      "external_directory": {
-         "~/projects/*": "allow"
-      }
-   }
+    "$schema": "https://opencode.ai/config.json",
+    "permission": {
+        "*": "allow",
+        "bash": {
+            "*": "ask",
+            "git *": "allow",
+            "npm *": "allow",
+            "rm *": "deny"
+        },
+        "edit": {
+            "*": "ask",
+            "src/*.ts": "allow"
+        },
+        "external_directory": {
+            "~/projects/*": "allow"
+        }
+    }
 }
 ```
 
@@ -153,22 +153,22 @@ The result is broader coverage (paths detected in any command, not just a curate
 
 ```jsonc
 {
-   "$schema": "https://raw.githubusercontent.com/nielpattin/pi-packages/main/packages/pi-permission-system/schemas/permissions.schema.json",
-   "permission": {
-      "*": "allow",
-      "bash": {
-         "*": "ask",
-         "git *": "allow",
-         "npm *": "allow",
-         "rm *": "deny",
-      },
-      "write": "ask",
-      "edit": "ask",
-      "external_directory": {
-         "*": "ask",
-         "~/projects/*": "allow",
-      },
-   },
+    "$schema": "https://raw.githubusercontent.com/nielpattin/pi-packages/main/packages/pi-permission-system/schemas/permissions.schema.json",
+    "permission": {
+        "*": "allow",
+        "bash": {
+            "*": "ask",
+            "git *": "allow",
+            "npm *": "allow",
+            "rm *": "deny"
+        },
+        "write": "ask",
+        "edit": "ask",
+        "external_directory": {
+            "*": "ask",
+            "~/projects/*": "allow"
+        }
+    }
 }
 ```
 
@@ -181,33 +181,33 @@ The result is broader coverage (paths detected in any command, not just a curate
 4. **Add `.env` rules manually** if you relied on OpenCode's built-in protection.
    The `path` surface is the recommended approach — it covers all tools and bash in one rule:
 
-   ```jsonc
-   {
-      "permission": {
-         "path": {
-            "*": "allow",
-            "*.env": "deny",
-            "*.env.*": "deny",
-            "*.env.example": "allow",
-         },
-      },
-   }
-   ```
+    ```jsonc
+    {
+        "permission": {
+            "path": {
+                "*": "allow",
+                "*.env": "deny",
+                "*.env.*": "deny",
+                "*.env.example": "allow"
+            }
+        }
+    }
+    ```
 
-   Alternatively, use per-tool patterns if you only need to protect specific tools (e.g., `read`):
+    Alternatively, use per-tool patterns if you only need to protect specific tools (e.g., `read`):
 
-   ```jsonc
-   {
-      "permission": {
-         "read": {
-            "*": "allow",
-            "*.env": "deny",
-            "*.env.*": "deny",
-            "*.env.example": "allow",
-         },
-      },
-   }
-   ```
+    ```jsonc
+    {
+        "permission": {
+            "read": {
+                "*": "allow",
+                "*.env": "deny",
+                "*.env.*": "deny",
+                "*.env.example": "allow"
+            }
+        }
+    }
+    ```
 
 5. **Remove OpenCode-only surfaces** (`lsp`, `question`, `webfetch`, `websearch`, `todowrite`, `doom_loop`) — they have no effect in this extension.
 6. **Add `mcp` rules** if you use MCP servers — OpenCode has no equivalent, so this is new configuration.

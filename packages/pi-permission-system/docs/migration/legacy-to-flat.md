@@ -239,58 +239,58 @@ Other deprecated keys (`doom_loop`, `tool_call_limit`) are simply dropped.
 ```jsonc
 // Before (legacy format)
 {
-  "$schema": "...",
-  "debugLog": false,
-  "permissionReviewLog": true,
-  "yoloMode": false,
-  "defaultPolicy": {
-    "tools": "ask",
-    "bash": "ask",
-    "mcp": "ask",
-    "skills": "ask",
-    "special": "ask"
-  },
-  "tools": {
-    "read": "allow",
-    "write": "deny"
-  },
-  "bash": {
-    "git status": "allow",
-    "git *": "ask"
-  },
-  "mcp": {
-    "mcp_status": "allow"
-  },
-  "skills": {
-    "*": "ask"
-  },
-  "special": {
-    "external_directory": "ask"
-  }
+    "$schema": "...",
+    "debugLog": false,
+    "permissionReviewLog": true,
+    "yoloMode": false,
+    "defaultPolicy": {
+        "tools": "ask",
+        "bash": "ask",
+        "mcp": "ask",
+        "skills": "ask",
+        "special": "ask"
+    },
+    "tools": {
+        "read": "allow",
+        "write": "deny"
+    },
+    "bash": {
+        "git status": "allow",
+        "git *": "ask"
+    },
+    "mcp": {
+        "mcp_status": "allow"
+    },
+    "skills": {
+        "*": "ask"
+    },
+    "special": {
+        "external_directory": "ask"
+    }
 }
 ```
 
 ```jsonc
 // After (flat format)
 {
-  "$schema": "...",
-  "debugLog": false,
-  "permissionReviewLog": true,
-  "yoloMode": false,
-  "permission": {
-    "*": "ask",
-    "read": "allow",
-    "write": "deny",
-    "bash": {
-      "git status": "allow",
-      "git *": "ask"
-    },
-    "mcp": {
-      "mcp_status": "allow"
-    },
-    "skill": { "*": "ask" },
-    "external_directory": "ask"
-  }
+    "$schema": "...",
+    "debugLog": false,
+    "permissionReviewLog": true,
+    "yoloMode": false,
+    "permission": {
+        "*": "ask",
+        "read": "allow",
+        "write": "deny",
+        "bash": {
+            "git status": "allow",
+            "git *": "ask"
+        },
+        "mcp": {
+            "mcp_status": "allow"
+        },
+        "skill": { "*": "ask" },
+        "external_directory": "ask"
+    }
 }
 ```
 
@@ -302,16 +302,16 @@ Frontmatter in agent `.md` files uses the same flat shape under the `permission`
 # Before (legacy nested shape)
 ---
 permission:
-  defaultPolicy:
-    tools: allow
-  bash:
-    "git *": allow
-  tools:
-    mcp: deny
-  mcp:
-    exa_web_search_exa: allow
-  special:
-    external_directory: allow
+    defaultPolicy:
+        tools: allow
+    bash:
+        "git *": allow
+    tools:
+        mcp: deny
+    mcp:
+        exa_web_search_exa: allow
+    special:
+        external_directory: allow
 ---
 ```
 
@@ -319,13 +319,13 @@ permission:
 # After (flat shape)
 ---
 permission:
-  "*": allow
-  bash:
-    "git *": allow
-  mcp:
-    "*": deny
-    exa_web_search_exa: allow
-  external_directory: allow
+    "*": allow
+    bash:
+        "git *": allow
+    mcp:
+        "*": deny
+        exa_web_search_exa: allow
+    external_directory: allow
 ---
 ```
 

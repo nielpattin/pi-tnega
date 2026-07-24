@@ -36,31 +36,31 @@ Scalar fields (`debugLog`, `permissionReviewLog`, `yoloMode`) use simple replace
 
 ```jsonc
 {
-   "$schema": "https://raw.githubusercontent.com/nielpattin/pi-packages/main/packages/pi-permission-system/schemas/permissions.schema.json",
+    "$schema": "https://raw.githubusercontent.com/nielpattin/pi-packages/main/packages/pi-permission-system/schemas/permissions.schema.json",
 
-   // Runtime knobs
-   "debugLog": false,
-   "permissionReviewLog": true,
-   "permissionMode": "default", // "default" | "auto" | "yolo"
-   "piInfrastructureReadPaths": [],
+    // Runtime knobs
+    "debugLog": false,
+    "permissionReviewLog": true,
+    "permissionMode": "default", // "default" | "auto" | "yolo"
+    "piInfrastructureReadPaths": [],
 
-   // Flat permission policy
-   "permission": {
-      "*": "ask", // universal fallback
-      "path": {
-         "*": "allow",
-         "*.env": "deny",
-         "*.env.*": "deny",
-         "*.env.example": "allow",
-      },
-      "read": "allow",
-      "write": "deny",
-      "edit": "deny",
-      "bash": { "git status": "allow", "git *": "ask" },
-      "mcp": { "mcp_status": "allow" },
-      "skill": { "*": "ask" },
-      "external_directory": "ask",
-   },
+    // Flat permission policy
+    "permission": {
+        "*": "ask", // universal fallback
+        "path": {
+            "*": "allow",
+            "*.env": "deny",
+            "*.env.*": "deny",
+            "*.env.example": "allow"
+        },
+        "read": "allow",
+        "write": "deny",
+        "edit": "deny",
+        "bash": { "git status": "allow", "git *": "ask" },
+        "mcp": { "mcp_status": "allow" },
+        "skill": { "*": "ask" },
+        "external_directory": "ask"
+    }
 }
 ```
 
@@ -73,8 +73,8 @@ Scalar fields (`debugLog`, `permissionReviewLog`, `yoloMode`) use simple replace
 | --------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `debugLog`                  | `false`     | Enables verbose diagnostic logging to `logs/pi-permission-system-debug.jsonl`                                                                        |
 | `permissionReviewLog`       | `true`      | Enables the permission request/denial review log at `logs/pi-permission-system-permission-review.jsonl`                                              |
-| `permissionMode`            | `"default"` | Exclusive permission mode: `"default"` (static rules + prompts), `"auto"` (LLM guardian for bash ask checks), or `"yolo"` (auto-approve all ask).  |
-| `yoloMode` (legacy)         | `false`     | Legacy boolean toggle: auto-approves `ask` results (maps to `permissionMode: "yolo"` when `true`).                                                  |
+| `permissionMode`            | `"default"` | Exclusive permission mode: `"default"` (static rules + prompts), `"auto"` (LLM guardian for bash ask checks), or `"yolo"` (auto-approve all ask).    |
+| `yoloMode` (legacy)         | `false`     | Legacy boolean toggle: auto-approves `ask` results (maps to `permissionMode: "yolo"` when `true`).                                                   |
 | `piInfrastructureReadPaths` | `[]`        | Extra directories to auto-allow for reads, bypassing the `external_directory` gate. Supports `~`/`$HOME` expansion and wildcard patterns (`*`, `?`). |
 
 Both logs write to `~/.pi/agent/extensions/pi-permission-system/logs/`.
@@ -86,10 +86,10 @@ Permission prompt sounds are configured in Pi's agent settings file, not in `per
 
 ```json
 {
-   "piPermissionSystem": {
-      "sound": "assets/permission-request.mp3",
-      "volume": 100
-   }
+    "piPermissionSystem": {
+        "sound": "assets/permission-request.mp3",
+        "volume": 100
+    }
 }
 ```
 
@@ -106,7 +106,7 @@ Example — allow reads from a Homebrew-managed Pi install at any version:
 
 ```jsonc
 {
-   "piInfrastructureReadPaths": ["/opt/homebrew/**/@earendil-works/pi-coding-agent/**"],
+    "piInfrastructureReadPaths": ["/opt/homebrew/**/@earendil-works/pi-coding-agent/**"]
 }
 ```
 
@@ -120,9 +120,9 @@ The `"*"` key sets the action used when no surface-specific rule matches:
 
 ```jsonc
 {
-   "permission": {
-      "*": "ask",
-   },
+    "permission": {
+        "*": "ask"
+    }
 }
 ```
 
@@ -143,11 +143,11 @@ A string value is a catch-all for that surface.
 
 ```jsonc
 {
-   "permission": {
-      "read": "allow",
-      "write": "deny",
-      "third_party_tool": "ask",
-   },
+    "permission": {
+        "read": "allow",
+        "write": "deny",
+        "third_party_tool": "ask"
+    }
 }
 ```
 
@@ -163,23 +163,23 @@ There is no single-segment vs. multi-segment distinction; `**` is not a supporte
 
 ```jsonc
 {
-   "permission": {
-      "read": {
-         "*": "allow",
-         "*.env": "deny",
-         "*.env.*": "deny",
-         "*.env.example": "allow",
-      },
-      "write": {
-         "*": "deny",
-         "src/*": "allow",
-         "tests/*": "allow",
-      },
-      "edit": {
-         "*": "ask",
-         "*.lock": "deny",
-      },
-   },
+    "permission": {
+        "read": {
+            "*": "allow",
+            "*.env": "deny",
+            "*.env.*": "deny",
+            "*.env.example": "allow"
+        },
+        "write": {
+            "*": "deny",
+            "src/*": "allow",
+            "tests/*": "allow"
+        },
+        "edit": {
+            "*": "ask",
+            "*.lock": "deny"
+        }
+    }
 }
 ```
 
@@ -203,15 +203,15 @@ Use a more specific pattern before it to carve out exceptions.
 
 ```jsonc
 {
-   "permission": {
-      "bash": {
-         "*": "ask",
-         "git status": "allow",
-         "git diff": "allow",
-         "git *": "ask",
-         "rm -rf *": "deny",
-      },
-   },
+    "permission": {
+        "bash": {
+            "*": "ask",
+            "git status": "allow",
+            "git diff": "allow",
+            "git *": "ask",
+            "rm -rf *": "deny"
+        }
+    }
 }
 ```
 
@@ -219,7 +219,7 @@ String shorthand sets a catch-all for all bash commands:
 
 ```jsonc
 {
-   "permission": { "bash": "allow" },
+    "permission": { "bash": "allow" }
 }
 ```
 
@@ -236,15 +236,15 @@ MCP permissions match against derived targets from tool input:
 
 ```jsonc
 {
-   "permission": {
-      "mcp": {
-         "*": "ask",
-         "mcp_status": "allow",
-         "mcp_list": "allow",
-         "myServer:*": "ask",
-         "dangerousServer": "deny",
-      },
-   },
+    "permission": {
+        "mcp": {
+            "*": "ask",
+            "mcp_status": "allow",
+            "mcp_list": "allow",
+            "myServer:*": "ask",
+            "dangerousServer": "deny"
+        }
+    }
 }
 ```
 
@@ -257,7 +257,7 @@ String shorthand grants broad MCP access — useful for per-agent overrides:
 ---
 name: researcher
 permission:
-   mcp: allow
+    mcp: allow
 ---
 ```
 
@@ -267,13 +267,13 @@ Skill name patterns use `*` and `?` wildcards (note: surface is `skill`, not `sk
 
 ```jsonc
 {
-   "permission": {
-      "skill": {
-         "*": "ask",
-         "dangerous-*": "deny",
-         "librarian": "allow",
-      },
-   },
+    "permission": {
+        "skill": {
+            "*": "ask",
+            "dangerous-*": "deny",
+            "librarian": "allow"
+        }
+    }
 }
 ```
 
@@ -284,15 +284,15 @@ A `path` deny cannot be overridden by a per-tool allow.
 
 ```jsonc
 {
-   "permission": {
-      "path": {
-         "*": "allow",
-         "*.env": "deny",
-         "*.env.*": "deny",
-         "*.env.example": "allow",
-         "~/.ssh/*": "deny",
-      },
-   },
+    "permission": {
+        "path": {
+            "*": "allow",
+            "*.env": "deny",
+            "*.env.*": "deny",
+            "*.env.example": "allow",
+            "~/.ssh/*": "deny"
+        }
+    }
 }
 ```
 
@@ -325,14 +325,14 @@ Deny all env files but allow the example template:
 
 ```jsonc
 {
-   "permission": {
-      "path": {
-         "*": "allow",
-         "*.env": "deny",
-         "*.env.*": "deny",
-         "*.env.example": "allow",
-      },
-   },
+    "permission": {
+        "path": {
+            "*": "allow",
+            "*.env": "deny",
+            "*.env.*": "deny",
+            "*.env.example": "allow"
+        }
+    }
 }
 ```
 
@@ -346,10 +346,10 @@ Conversely, a per-tool deny still blocks even when the `path` surface allows:
 
 ```jsonc
 {
-   "permission": {
-      "path": { "*": "allow" },
-      "read": "deny",
-   },
+    "permission": {
+        "path": { "*": "allow" },
+        "read": "deny"
+    }
 }
 ```
 
@@ -362,12 +362,12 @@ Use a pattern map to allow specific directories without opening all external acc
 
 ```jsonc
 {
-   "permission": {
-      "external_directory": {
-         "*": "ask",
-         "~/development/*": "allow",
-      },
-   },
+    "permission": {
+        "external_directory": {
+            "*": "ask",
+            "~/development/*": "allow"
+        }
+    }
 }
 ```
 
@@ -400,12 +400,12 @@ They are expanded to the OS home directory at match time, so configs are portabl
 
 ```jsonc
 {
-   "permission": {
-      "external_directory": {
-         "*": "ask",
-         "~/development/*": "allow",
-      },
-   },
+    "permission": {
+        "external_directory": {
+            "*": "ask",
+            "~/development/*": "allow"
+        }
+    }
 }
 ```
 
@@ -459,19 +459,19 @@ Avoid arrays, multi-line scalars, and YAML anchors.
 
 ```jsonc
 {
-   "permission": {
-      "*": "ask",
-      "read": {
-         "*": "allow",
-         "*.env": "deny",
-         "*.env.*": "deny",
-         "*.env.example": "allow",
-      },
-      "write": {
-         "*": "ask",
-         "*.lock": "deny",
-      },
-   },
+    "permission": {
+        "*": "ask",
+        "read": {
+            "*": "allow",
+            "*.env": "deny",
+            "*.env.*": "deny",
+            "*.env.example": "allow"
+        },
+        "write": {
+            "*": "ask",
+            "*.lock": "deny"
+        }
+    }
 }
 ```
 
@@ -479,15 +479,15 @@ Avoid arrays, multi-line scalars, and YAML anchors.
 
 ```jsonc
 {
-   "permission": {
-      "*": "ask",
-      "read": "allow",
-      "grep": "allow",
-      "find": "allow",
-      "ls": "allow",
-      "write": "deny",
-      "edit": "deny",
-   },
+    "permission": {
+        "*": "ask",
+        "read": "allow",
+        "grep": "allow",
+        "find": "allow",
+        "ls": "allow",
+        "write": "deny",
+        "edit": "deny"
+    }
 }
 ```
 
@@ -495,15 +495,15 @@ Avoid arrays, multi-line scalars, and YAML anchors.
 
 ```jsonc
 {
-   "permission": {
-      "*": "ask",
-      "bash": {
-         "*": "deny",
-         "git status": "allow",
-         "git diff": "allow",
-         "git log *": "allow",
-      },
-   },
+    "permission": {
+        "*": "ask",
+        "bash": {
+            "*": "deny",
+            "git status": "allow",
+            "git diff": "allow",
+            "git log *": "allow"
+        }
+    }
 }
 ```
 
@@ -511,16 +511,16 @@ Avoid arrays, multi-line scalars, and YAML anchors.
 
 ```jsonc
 {
-   "permission": {
-      "*": "ask",
-      "mcp": {
-         "*": "ask",
-         "mcp_status": "allow",
-         "mcp_list": "allow",
-         "mcp_search": "allow",
-         "mcp_describe": "allow",
-      },
-   },
+    "permission": {
+        "*": "ask",
+        "mcp": {
+            "*": "ask",
+            "mcp_status": "allow",
+            "mcp_list": "allow",
+            "mcp_search": "allow",
+            "mcp_describe": "allow"
+        }
+    }
 }
 ```
 
@@ -531,9 +531,9 @@ In the global Pi agents directory (default: `~/.pi/agent/agents/reviewer.md`, re
 ```yaml
 ---
 permission:
-   write: deny
-   edit: deny
-   bash: deny
+    write: deny
+    edit: deny
+    bash: deny
 ---
 ```
 

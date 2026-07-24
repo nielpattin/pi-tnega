@@ -32,20 +32,20 @@ Create the global config file at `~/.pi/agent/permission.jsonc`:
 
 ```jsonc
 {
-   "permission": {
-      "*": "allow",
-      "path": {
-         "*": "allow",
-         "*.env": "deny",
-         "*.env.*": "deny",
-         "*.env.example": "allow",
-      },
-      "bash": {
-         "rm -rf *": "deny",
-         "sudo *": "ask",
-      },
-      "external_directory": "ask",
-   },
+    "permission": {
+        "*": "allow",
+        "path": {
+            "*": "allow",
+            "*.env": "deny",
+            "*.env.*": "deny",
+            "*.env.example": "allow"
+        },
+        "bash": {
+            "rm -rf *": "deny",
+            "sudo *": "ask"
+        },
+        "external_directory": "ask"
+    }
 }
 ```
 
@@ -82,10 +82,10 @@ When a permission prompt opens in the Pi UI, the package plays the configured no
 
 ```json
 {
-   "piPermissionSystem": {
-      "sound": "assets/permission-request.mp3",
-      "volume": 100
-   }
+    "piPermissionSystem": {
+        "sound": "assets/permission-request.mp3",
+        "volume": 100
+    }
 }
 ```
 

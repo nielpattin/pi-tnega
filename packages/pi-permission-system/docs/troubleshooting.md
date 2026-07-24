@@ -20,18 +20,18 @@ This makes it easy to verify which files the extension actually loaded:
 
 ```jsonc
 {
-   "event": "config.resolved",
-   "globalConfigPath": "/…/.pi/agent/permission.jsonc",
-   "globalConfigExists": true,
-   "projectConfigPath": "/…/my-project/.pi/extensions/pi-permission-system/config.json",
-   "projectConfigExists": false,
-   "agentsDir": "/…/.pi/agent/agents",
-   "agentsDirExists": true,
-   "projectAgentsDir": "/…/my-project/.pi/agent/agents",
-   "projectAgentsDirExists": false,
-   "legacyGlobalPolicyDetected": false,
-   "legacyProjectPolicyDetected": false,
-   "legacyExtensionConfigDetected": false,
+    "event": "config.resolved",
+    "globalConfigPath": "/…/.pi/agent/permission.jsonc",
+    "globalConfigExists": true,
+    "projectConfigPath": "/…/my-project/.pi/extensions/pi-permission-system/config.json",
+    "projectConfigExists": false,
+    "agentsDir": "/…/.pi/agent/agents",
+    "agentsDirExists": true,
+    "projectAgentsDir": "/…/my-project/.pi/agent/agents",
+    "projectAgentsDirExists": false,
+    "legacyGlobalPolicyDetected": false,
+    "legacyProjectPolicyDetected": false,
+    "legacyExtensionConfigDetected": false
 }
 ```
 

@@ -43,9 +43,9 @@ The special key `"*"` is the universal fallback.
 ```yaml
 ---
 permission:
-  "*": ask
-  read: allow
-  write: deny
+    "*": ask
+    read: allow
+    write: deny
 ---
 ```
 
@@ -56,20 +56,20 @@ This means: allow all read operations without prompting, deny all write operatio
 ```yaml
 ---
 permission:
-  "*": ask
-  read: allow
-  bash:
     "*": ask
-    "git status": allow
-    "git diff *": allow
-    "npm test": allow
-  mcp:
-    "*": deny
-  skill:
-    "*": ask
-  external_directory:
-    "*": deny
-    "~/projects/*": allow
+    read: allow
+    bash:
+        "*": ask
+        "git status": allow
+        "git diff *": allow
+        "npm test": allow
+    mcp:
+        "*": deny
+    skill:
+        "*": ask
+    external_directory:
+        "*": deny
+        "~/projects/*": allow
 ---
 ```
 
@@ -84,11 +84,11 @@ tools: bash,read_file,write_file
 
 # pi-permission-system: policy within the visible set
 permission:
-  "*": ask
-  read_file: allow
-  bash:
     "*": ask
-    "git *": allow
+    read_file: allow
+    bash:
+        "*": ask
+        "git *": allow
 ---
 ```
 
@@ -134,21 +134,18 @@ If your extension runs subagents in-process (e.g. via `createAgentSession()`), y
 ```typescript
 const requestId = crypto.randomUUID();
 
-pi.events.on(
-  `permissions:rpc:check:reply:${requestId}`,
-  (raw) => {
+pi.events.on(`permissions:rpc:check:reply:${requestId}`, (raw) => {
     const reply = raw as { success: boolean; data?: { result: string } };
     if (reply.success) {
-      console.log(reply.data?.result); // "allow" | "deny" | "ask"
+        console.log(reply.data?.result); // "allow" | "deny" | "ask"
     }
-  },
-);
+});
 
 pi.events.emit("permissions:rpc:check", {
-  requestId,
-  surface: "bash",
-  value: "git push",
-  agentName: "Worker",
+    requestId,
+    surface: "bash",
+    value: "git push",
+    agentName: "Worker"
 });
 ```
 
@@ -159,24 +156,21 @@ When a child agent encounters an `ask` permission and has no UI, the prompt can 
 ```typescript
 const requestId = crypto.randomUUID();
 
-pi.events.on(
-  `permissions:rpc:prompt:reply:${requestId}`,
-  (raw) => {
+pi.events.on(`permissions:rpc:prompt:reply:${requestId}`, (raw) => {
     const reply = raw as { success: boolean; data?: { approved: boolean } };
     if (reply.success && reply.data?.approved) {
-      // proceed
+        // proceed
     } else {
-      // deny
+        // deny
     }
-  },
-);
+});
 
 pi.events.emit("permissions:rpc:prompt", {
-  requestId,
-  surface: "bash",
-  value: "rm -rf /tmp/build",
-  message: "Allow rm -rf /tmp/build?",
-  agentName: "Worker",
+    requestId,
+    surface: "bash",
+    value: "rm -rf /tmp/build",
+    message: "Allow rm -rf /tmp/build?",
+    agentName: "Worker"
 });
 ```
 

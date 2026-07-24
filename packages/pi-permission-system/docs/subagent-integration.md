@@ -51,12 +51,12 @@ These compose correctly with the permission system because the two operate at di
 
 ### Known Subagent Extensions
 
-| Extension                                                                           | Type       | Permission integration           | Frontmatter key                    |
-| ----------------------------------------------------------------------------------- | ---------- | -------------------------------- | ---------------------------------- |
-| [@nielpattin/pi-subagents](https://github.com/nielpattin/pi-packages/tree/main/packages/pi-subagents)                  | in-process | ✓ Native (registry + forwarding) | `disallowed_tools:` (CSV denylist) |
-| [tintinweb/pi-subagents](https://github.com/tintinweb/pi-subagents)                 | in-process | ✗ No registration                | `disallowed_tools:` (CSV denylist) |
-| [nicobailon/pi-subagents](https://github.com/nicobailon/pi-subagents)               | subprocess | ✗ Missing env vars               | `tools:` (CSV allowlist)           |
-| [HazAT/pi-interactive-subagents](https://github.com/HazAT/pi-interactive-subagents) | subprocess | ✗ Missing env vars               | `deny-tools:` (CSV denylist)       |
+| Extension                                                                                             | Type       | Permission integration           | Frontmatter key                    |
+| ----------------------------------------------------------------------------------------------------- | ---------- | -------------------------------- | ---------------------------------- |
+| [@nielpattin/pi-subagents](https://github.com/nielpattin/pi-packages/tree/main/packages/pi-subagents) | in-process | ✓ Native (registry + forwarding) | `disallowed_tools:` (CSV denylist) |
+| [tintinweb/pi-subagents](https://github.com/tintinweb/pi-subagents)                                   | in-process | ✗ No registration                | `disallowed_tools:` (CSV denylist) |
+| [nicobailon/pi-subagents](https://github.com/nicobailon/pi-subagents)                                 | subprocess | ✗ Missing env vars               | `tools:` (CSV allowlist)           |
+| [HazAT/pi-interactive-subagents](https://github.com/HazAT/pi-interactive-subagents)                   | subprocess | ✗ Missing env vars               | `deny-tools:` (CSV denylist)       |
 
 Process-based subagent extensions (nicobailon, HazAT) spawn child processes but do not set the `PI_SUBAGENT_PARENT_SESSION` env var that the permission system needs for `ask`-state forwarding.
 Without that env var, `ask` permissions in child processes are auto-denied.
@@ -90,7 +90,7 @@ You can freely use both in the same agent file:
 tools: bash,read
 # pi-permission-system: still enforce ask on bash within those allowed tools
 permission:
-  bash: ask
+    bash: ask
 ---
 ```
 

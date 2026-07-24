@@ -16,16 +16,14 @@ It provides direct, synchronous, type-safe function calls — no async RPC envel
 
 ```typescript
 try {
-  const { getPermissionsService } = await import(
-    "@nielpattin/pi-permission-system"
-  );
-  const permissions = getPermissionsService();
-  if (permissions) {
-    const result = permissions.checkPermission("bash", "git push");
-    console.log(result.state); // "allow" | "deny" | "ask"
-  }
+    const { getPermissionsService } = await import("@nielpattin/pi-permission-system");
+    const permissions = getPermissionsService();
+    if (permissions) {
+        const result = permissions.checkPermission("bash", "git push");
+        console.log(result.state); // "allow" | "deny" | "ask"
+    }
 } catch {
-  // Not installed — graceful degradation
+    // Not installed — graceful degradation
 }
 ```
 
@@ -43,30 +41,26 @@ The `PermissionsService` interface:
 
 ```typescript
 interface PermissionsService {
-  /** Query the permission policy for a surface and value. */
-  checkPermission(
-    surface: string,
-    value?: string,
-    agentName?: string,
-  ): PermissionCheckResult;
+    /** Query the permission policy for a surface and value. */
+    checkPermission(surface: string, value?: string, agentName?: string): PermissionCheckResult;
 
-  /** Query tool-level permission state for pre-filtering before session creation. */
-  getToolPermission(toolName: string, agentName?: string): PermissionState;
+    /** Query tool-level permission state for pre-filtering before session creation. */
+    getToolPermission(toolName: string, agentName?: string): PermissionState;
 
-  /**
-   * Register an in-process subagent session.
-   * Call before bindExtensions(); always pair with unregisterSubagentSession() in a finally block.
-   * sessionKey should be the session directory path (unique per session).
-   */
-  registerSubagentSession(sessionKey: string, info: SubagentSessionInfo): void;
+    /**
+     * Register an in-process subagent session.
+     * Call before bindExtensions(); always pair with unregisterSubagentSession() in a finally block.
+     * sessionKey should be the session directory path (unique per session).
+     */
+    registerSubagentSession(sessionKey: string, info: SubagentSessionInfo): void;
 
-  /** Remove a previously registered in-process subagent session. Safe to call if never registered. */
-  unregisterSubagentSession(sessionKey: string): void;
+    /** Remove a previously registered in-process subagent session. Safe to call if never registered. */
+    unregisterSubagentSession(sessionKey: string): void;
 }
 
 interface SubagentSessionInfo {
-  agentName: string;
-  parentSessionId?: string; // needed for ask-state forwarding
+    agentName: string;
+    parentSessionId?: string; // needed for ask-state forwarding
 }
 ```
 
@@ -86,9 +80,7 @@ Returns `"allow"` | `"deny"` | `"ask"` for a tool name without considering comma
 Use this to pre-filter a tool list before creating a child session — it avoids calling `checkPermission` per tool and interpreting the full result.
 
 ```typescript
-const denied = tools.filter(
-  (t) => permissions.getToolPermission(t, agentName) === "deny",
-);
+const denied = tools.filter((t) => permissions.getToolPermission(t, agentName) === "deny");
 ```
 
 #### `registerSubagentSession` / `unregisterSubagentSession`
@@ -100,14 +92,14 @@ This enables `isSubagentExecutionContext()` to detect the child and `ask`-state 
 const sessionDir = ctx.sessionManager.getSessionDir();
 const svc = getPermissionsService();
 svc?.registerSubagentSession(sessionDir, {
-  agentName: "Explore",
-  parentSessionId: parentCtx.sessionManager.getSessionId(),
+    agentName: "Explore",
+    parentSessionId: parentCtx.sessionManager.getSessionId()
 });
 try {
-  await session.bindExtensions({});
-  // ... run the child session
+    await session.bindExtensions({});
+    // ... run the child session
 } finally {
-  svc?.unregisterSubagentSession(sessionDir);
+    svc?.unregisterSubagentSession(sessionDir);
 }
 ```
 
@@ -159,9 +151,9 @@ This is useful for dashboards, telemetry, or audit overlays.
 
 ```typescript
 pi.events.on("permissions:decision", (raw) => {
-  const event = raw as import("@nielpattin/pi-permission-system").PermissionDecisionEvent;
-  console.log(event.surface, event.result, event.resolution);
-  // e.g. "bash" "allow" "user_approved_for_session"
+    const event = raw as import("@nielpattin/pi-permission-system").PermissionDecisionEvent;
+    console.log(event.surface, event.result, event.resolution);
+    // e.g. "bash" "allow" "user_approved_for_session"
 });
 ```
 
@@ -205,25 +197,22 @@ The call is synchronous-style: emit a request, listen on a scoped reply channel.
 const requestId = crypto.randomUUID();
 
 // Listen for the reply first
-const unsub = pi.events.on(
-  `permissions:rpc:check:reply:${requestId}`,
-  (raw) => {
+const unsub = pi.events.on(`permissions:rpc:check:reply:${requestId}`, (raw) => {
     unsub();
     const reply = raw as import("@nielpattin/pi-permission-system").PermissionsRpcReply<
-      import("@nielpattin/pi-permission-system").PermissionsCheckReplyData
+        import("@nielpattin/pi-permission-system").PermissionsCheckReplyData
     >;
     if (reply.success) {
-      console.log(reply.data?.result); // "allow" | "deny" | "ask"
+        console.log(reply.data?.result); // "allow" | "deny" | "ask"
     }
-  },
-);
+});
 
 // Then emit the request
 pi.events.emit("permissions:rpc:check", {
-  requestId,
-  surface: "bash",
-  value: "git push",
-  agentName: "Worker", // optional
+    requestId,
+    surface: "bash",
+    value: "git push",
+    agentName: "Worker" // optional
 });
 ```
 
@@ -257,28 +246,25 @@ They can instead forward permission prompts to the parent session's UI via this 
 ```typescript
 const requestId = crypto.randomUUID();
 
-const unsub = pi.events.on(
-  `permissions:rpc:prompt:reply:${requestId}`,
-  (raw) => {
+const unsub = pi.events.on(`permissions:rpc:prompt:reply:${requestId}`, (raw) => {
     unsub();
     const reply = raw as import("@nielpattin/pi-permission-system").PermissionsRpcReply<
-      import("@nielpattin/pi-permission-system").PermissionsPromptReplyData
+        import("@nielpattin/pi-permission-system").PermissionsPromptReplyData
     >;
     if (reply.success && reply.data?.approved) {
-      // proceed
+        // proceed
     } else {
-      // deny — either user denied or no UI was available (error: "no_ui")
+        // deny — either user denied or no UI was available (error: "no_ui")
     }
-  },
-);
+});
 
 pi.events.emit("permissions:rpc:prompt", {
-  requestId,
-  surface: "bash",
-  value: "rm -rf /tmp/build",
-  message: "Allow rm -rf /tmp/build?",
-  agentName: "Explore",      // optional
-  sessionLabel: "Allow rm *", // optional — label for the "for this session" option
+    requestId,
+    surface: "bash",
+    value: "rm -rf /tmp/build",
+    message: "Allow rm -rf /tmp/build?",
+    agentName: "Explore", // optional
+    sessionLabel: "Allow rm *" // optional — label for the "for this session" option
 });
 ```
 
@@ -301,7 +287,7 @@ Consumers that start after the extension can check via a ping-style RPC check �
 
 ```typescript
 pi.events.on("permissions:ready", (raw) => {
-  const event = raw as import("@nielpattin/pi-permission-system").PermissionsReadyEvent;
-  console.log("Permission system loaded, protocol version:", event.protocolVersion);
+    const event = raw as import("@nielpattin/pi-permission-system").PermissionsReadyEvent;
+    console.log("Permission system loaded, protocol version:", event.protocolVersion);
 });
 ```

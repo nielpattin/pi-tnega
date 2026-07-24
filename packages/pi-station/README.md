@@ -39,11 +39,11 @@ Station bar runs as a custom editor with fixed layout compositor. Configure via 
 
 ```json
 {
-   "station": {
-      "fixedEditor": true,
-      "scrollBar": true,
-      "hashline": true
-   }
+    "station": {
+        "fixedEditor": true,
+        "scrollBar": true,
+        "hashline": true
+    }
 }
 ```
 
@@ -71,15 +71,15 @@ Override in `settings.json`:
 
 ```json
 {
-   "station": {
-      "shortcuts": {
-         "bashMode": "ctrl+shift+b",
-         "stash": "ctrl+shift+s",
-         "stashHistory": "ctrl+shift+h",
-         "undo": "ctrl+z",
-         "redo": "ctrl+y"
-      }
-   }
+    "station": {
+        "shortcuts": {
+            "bashMode": "ctrl+shift+b",
+            "stash": "ctrl+shift+s",
+            "stashHistory": "ctrl+shift+h",
+            "undo": "ctrl+z",
+            "redo": "ctrl+y"
+        }
+    }
 }
 ```
 
@@ -102,9 +102,9 @@ Toggle via `/station` settings or `settings.json`:
 
 ```json
 {
-   "station": {
-      "hashline": true
-   }
+    "station": {
+        "hashline": true
+    }
 }
 ```
 
@@ -155,10 +155,10 @@ Command output renders in full-screen overlay (fixed-editor mode) or widget (non
 
 ```json
 {
-   "bashMode": {
-      "transcriptMaxLines": 2000,
-      "transcriptMaxBytes": 524288
-   }
+    "bashMode": {
+        "transcriptMaxLines": 2000,
+        "transcriptMaxBytes": 524288
+    }
 }
 ```
 
@@ -176,17 +176,17 @@ Register custom status items from any extension via config:
 
 ```json
 {
-   "station": {
-      "customItems": [
-         {
-            "id": "ci",
-            "statusKey": "ci-status",
-            "position": "right",
-            "prefix": "CI",
-            "color": "warning"
-         }
-      ]
-   }
+    "station": {
+        "customItems": [
+            {
+                "id": "ci",
+                "statusKey": "ci-status",
+                "position": "right",
+                "prefix": "CI",
+                "color": "warning"
+            }
+        ]
+    }
 }
 ```
 
@@ -198,24 +198,24 @@ Settings merge from `~/.pi/agent/settings.json` and project `.pi/settings.json`:
 
 ```json
 {
-   "station": {
-      "fixedEditor": true,
-      "scrollBar": true,
-      "hashline": true,
-      "customItems": [],
-      "shortcuts": {
-         "bashMode": "ctrl+b",
-         "stash": "alt+s",
-         "stashHistory": "ctrl+alt+h",
-         "undo": "ctrl+z",
-         "redo": "ctrl+y"
-      }
-   },
-   "showLastPrompt": true,
-   "bashMode": {
-      "transcriptMaxLines": 2000,
-      "transcriptMaxBytes": 524288
-   }
+    "station": {
+        "fixedEditor": true,
+        "scrollBar": true,
+        "hashline": true,
+        "customItems": [],
+        "shortcuts": {
+            "bashMode": "ctrl+b",
+            "stash": "alt+s",
+            "stashHistory": "ctrl+alt+h",
+            "undo": "ctrl+z",
+            "redo": "ctrl+y"
+        }
+    },
+    "showLastPrompt": true,
+    "bashMode": {
+        "transcriptMaxLines": 2000,
+        "transcriptMaxBytes": 524288
+    }
 }
 ```
 

@@ -23,31 +23,31 @@ Add a `references` block to your Pi settings:
 
 ```jsonc
 {
-   "references": {
-      // String shorthand: local if starts with ".", "/", or "~"; otherwise git
-      "docs": "../product-docs",
-      "effect": "Effect-TS/effect",
+    "references": {
+        // String shorthand: local if starts with ".", "/", or "~"; otherwise git
+        "docs": "../product-docs",
+        "effect": "Effect-TS/effect",
 
-      // Local object
-      "design-system": {
-         "path": "../design-system",
-         "description": "Use for design system components and tokens",
-      },
+        // Local object
+        "design-system": {
+            "path": "../design-system",
+            "description": "Use for design system components and tokens"
+        },
 
-      // Git object
-      "sdk": {
-         "repository": "anomalyco/opencode-sdk-js",
-         "branch": "main",
-         "description": "Use for JavaScript SDK implementation details",
-      },
+        // Git object
+        "sdk": {
+            "repository": "anomalyco/opencode-sdk-js",
+            "branch": "main",
+            "description": "Use for JavaScript SDK implementation details"
+        },
 
-      // Hidden: accessible but not in system prompt guidance
-      "internal": {
-         "path": "~/internal-code",
-         "description": "Internal implementation details",
-         "hidden": true,
-      },
-   },
+        // Hidden: accessible but not in system prompt guidance
+        "internal": {
+            "path": "~/internal-code",
+            "description": "Internal implementation details",
+            "hidden": true
+        }
+    }
 }
 ```
 
