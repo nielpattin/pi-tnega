@@ -1,4 +1,6 @@
-import { AuthStorage, type ExtensionAPI, type ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ExtensionAPI, type ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { Type } from "typebox";
 import { getExa, resetExa } from "./exa";
 import { closeExaMcp, getExaMcp, getExaMcpTools } from "./exa_mcp";
@@ -7,9 +9,41 @@ import { abortPromise, renderCall, renderTruncatedResult } from "./utils";
 import { getPiExaConfig, setPiExaConfig } from "./config";
 
 const EXA_PROVIDER = "exa";
+const EXA_AUTH_PATH = join(getAgentDir(), "auth.json");
+
+type ExaCredential = { type: "api_key"; key: string };
+
+function readExaCredential(): ExaCredential | undefined {
+   try {
+      const data = JSON.parse(readFileSync(EXA_AUTH_PATH, "utf8")) as Record<string, unknown>;
+      const cred = data[EXA_PROVIDER];
+      if (
+         cred &&
+         typeof cred === "object" &&
+         (cred as ExaCredential).type === "api_key" &&
+         typeof (cred as ExaCredential).key === "string"
+      ) {
+         return cred as ExaCredential;
+      }
+   } catch {}
+   return undefined;
+}
+
+function writeExaCredential(credential: ExaCredential | undefined): void {
+   let data: Record<string, unknown> = {};
+   try {
+      data = JSON.parse(readFileSync(EXA_AUTH_PATH, "utf8")) as Record<string, unknown>;
+   } catch {}
+   if (credential) {
+      data[EXA_PROVIDER] = credential;
+   } else {
+      delete data[EXA_PROVIDER];
+   }
+   mkdirSync(dirname(EXA_AUTH_PATH), { recursive: true });
+   writeFileSync(EXA_AUTH_PATH, `${JSON.stringify(data, null, 2)}\n`);
+}
 
 export default async function (pi: ExtensionAPI) {
-   const authStorage = AuthStorage.create();
    let mcpToolsLoaded = false;
 
    async function getExaApiKey(mcp = false) {
@@ -19,7 +53,7 @@ export default async function (pi: ExtensionAPI) {
             return;
          }
       }
-      const cred = authStorage.get(EXA_PROVIDER);
+      const cred = readExaCredential();
       if (cred?.type === "api_key" && cred.key) {
          return cred.key;
       }
@@ -82,7 +116,7 @@ export default async function (pi: ExtensionAPI) {
          }
          const key = await ctx.ui.input("Exa API Key", "Enter your Exa API key");
          if (key) {
-            authStorage.set(EXA_PROVIDER, { type: "api_key", key });
+            writeExaCredential({ type: "api_key", key });
             resetExa();
             await closeExaMcp();
             await updateDeepSearchToolAvailability();
@@ -95,7 +129,7 @@ export default async function (pi: ExtensionAPI) {
    pi.registerCommand("exa-logout", {
       description: "Remove your Exa API key",
       handler: async (_args, ctx) => {
-         authStorage.remove(EXA_PROVIDER);
+         writeExaCredential(undefined);
          resetExa();
          await closeExaMcp();
          await updateDeepSearchToolAvailability();
@@ -112,7 +146,7 @@ export default async function (pi: ExtensionAPI) {
    pi.registerCommand("exa-status", {
       description: "Show Exa extension status",
       handler: async (_args, ctx) => {
-         const storedCred = authStorage.get(EXA_PROVIDER);
+         const storedCred = readExaCredential();
          const hasStoredKey = storedCred?.type === "api_key" && Boolean(storedCred.key);
          const hasEnvKey = Boolean(process.env.EXA_API_KEY);
 

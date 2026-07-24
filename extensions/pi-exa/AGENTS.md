@@ -1,11 +1,9 @@
-# AGENTS.md
-
+<agents_guidelines>
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
-## 1. Think Before Coding
-
+<think_before_coding>
 **Don't assume. Don't hide confusion. Surface tradeoffs.**
 
 Before implementing:
@@ -14,9 +12,9 @@ Before implementing:
 - If multiple interpretations exist, present them - don't pick silently.
 - If a simpler approach exists, say so. Push back when warranted.
 - If something is unclear, stop. Name what's confusing. Ask.
+  </think_before_coding>
 
-## 2. Simplicity First
-
+<simplicity_first>
 **Minimum code that solves the problem. Nothing speculative.**
 
 - No features beyond what was asked.
@@ -26,9 +24,9 @@ Before implementing:
 - If you write 200 lines and it could be 50, rewrite it.
 
 Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+</simplicity_first>
 
-## 3. Surgical Changes
-
+<surgical_changes>
 **Touch only what you must. Clean up only your own mess.**
 
 When editing existing code:
@@ -44,13 +42,13 @@ When your changes create orphans:
 - Don't remove pre-existing dead code unless asked.
 
 The test: Every changed line should trace directly to the user's request.
+</surgical_changes>
 
-## 4. Source of Truth for Status
-
+<source_of_truth_for_status>
 When showing whether something is available, enabled, disabled, registered, active, or healthy, always read from the runtime source of truth for that claim. Do not report persisted config as current availability unless config is itself the source of truth. If config is only a preference used to restore state, label it as configured/preferred, not currently enabled.
+</source_of_truth_for_status>
 
-## 5. Goal-Driven Execution
-
+<goal_driven_execution>
 **Define success criteria. Loop until verified.**
 
 Transform tasks into verifiable goals:
@@ -68,7 +66,9 @@ For multi-step tasks, state a brief plan:
 ```
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+</goal_driven_execution>
 
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+</agents_guidelines>
