@@ -31,8 +31,8 @@ const SESSION_CONFIG_PATH = join(getAgentDir(), "sessions.json");
 const SESSION_LOG_PATH = join(getAgentDir(), "pi-sessions.log");
 const DEFAULT_SUMMARY_CONFIG = {
    summary: {
-      provider: "xiaomi-token-plan-sgp",
-      model: "mimo-v2.5",
+      provider: "longCat",
+      model: "LongCat-2.0",
       thinking: "high"
    }
 };
