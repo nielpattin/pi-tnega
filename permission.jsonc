@@ -1,6 +1,6 @@
 {
-   "debugLog": true,
-   "permissionReviewLog": true,
+   "debugLog": false,
+   "permissionReviewLog": false,
    "yoloMode": false,
    "permission": {
       "*": "ask",
@@ -31,7 +31,8 @@
       "ls": "allow",
       "ffgrep": "allow",
       "fffind": "allow",
-      "codegraph*": "allow",
+      "aft_*": "allow",
+      "playwright_*": "allow",
       "ctx_*": "allow",
       "*exa": "allow",
       "describe_image": "allow",

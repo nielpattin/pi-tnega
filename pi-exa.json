@@ -1,3 +1,4 @@
 {
-   "deepSearchEnabled": true
+   "deepSearchEnabled": true,
+   "mcpUseApiKey": true
 }

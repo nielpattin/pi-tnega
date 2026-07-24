@@ -168,7 +168,6 @@ mcp-npx-cache.json
 generated-images
 tmp/
 *.bak
-docs/
 
 .pi/audit/
 .pi/taste/
@@ -184,3 +183,7 @@ _*.py
 *.tmp
 models.json
 settings.json
+multi-auth-config.json
+models-store.json
+agents.json
+*.workspace

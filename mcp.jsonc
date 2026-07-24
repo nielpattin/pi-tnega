@@ -1,34 +1,26 @@
 {
-  "settings": {
-    "toolPrefix": "short",
-    "idleTimeout": 10,
-    "directTools": false
-  },
-  "mcpServers": {
-    "playwright": {
-      "command": "npx",
-      "args": [
-        "@playwright/mcp@latest",
-        "--headless",
-        "--browser=chrome"
-      ],
+   "settings": {
+      "toolPrefix": "short",
+      "idleTimeout": 10,
       "directTools": false
-    },
-    "codegraph": {
-      "command": "codegraph",
-      "args": [
-        "serve",
-        "--mcp"
-      ],
-      "env": {
-        "CODEGRAPH_MCP_TOOLS": "explore,search,node,callers,callees,impact,files,status"
-      },
-      "directTools": false
-    }
-  },
-  "imports": [
-    "cursor",
-    "codex",
-    "claude-code"
-  ]
+   },
+   "mcpServers": {
+      "playwright": {
+         "command": "npx",
+         "args": ["@playwright/mcp@latest", "--headless", "--browser=chrome"],
+         "directTools": false
+      }
+      // "codegraph": {
+      //   "command": "codegraph",
+      //   "args": [
+      //     "serve",
+      //     "--mcp"
+      //   ],
+      //   "env": {
+      //     "CODEGRAPH_MCP_TOOLS": "explore,search,node,callers,callees,impact,files,status"
+      //   },
+      //   "directTools": false
+      // }
+   },
+   "imports": ["cursor", "codex", "claude-code"]
 }
