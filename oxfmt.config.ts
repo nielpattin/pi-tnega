@@ -5,9 +5,6 @@ export default defineConfig({
       "dist",
       "build",
       "node_modules",
-      "skills",
-      "packages/**",
-      "aft/**",
       "tests",
       "test",
       "*.test.ts",
@@ -16,9 +13,7 @@ export default defineConfig({
       "pnpm-workspace.yaml",
       "*yml",
       "**/pi-mcp-adapter/**",
-      ".pi/**",
-      "aft/**",
-      "magic-context/**"
+      ".pi/**"
    ],
    trailingComma: "none",
    printWidth: 120,

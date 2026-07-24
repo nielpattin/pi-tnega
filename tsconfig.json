@@ -20,6 +20,16 @@
       "noUnusedParameters": false,
       "noPropertyAccessFromIndexSignature": false
    },
-   "include": ["extensions/**/*.ts"],
-   "exclude": ["node_modules", "git", "tmp", "dist", "extensions/**/examples"]
+   "include": ["packages/**/*.ts", "extensions/**/*.ts"],
+   "exclude": [
+      "node_modules",
+      "git",
+      "tmp",
+      "dist",
+      "extensions/**/examples",
+      "packages/**/*.test.ts",
+      "packages/**/test/**",
+      "extensions/**/*.test.ts",
+      "extensions/**/test/**"
+   ]
 }

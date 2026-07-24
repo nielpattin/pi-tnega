@@ -171,7 +171,6 @@ tmp/
 .pi/taste/
 .pi/file-history/
 
-openspec/
 trust.json
 pi-agent.code-workspace
 exa-mcp-cache
@@ -185,3 +184,5 @@ multi-auth-config.json
 models-store.json
 agents.json
 *.workspace
+
+pi-mcp-adapter/
