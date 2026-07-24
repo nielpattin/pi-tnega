@@ -1,5 +1,5 @@
 ---
-description: General-purpose worker for delegated implementation tasks with full tool access.
+description: General-purpose worker for delegated implementation task that easy to do and doesn't required much thinking.
 display_name: task
 tools: read, write, edit, bg_start, bg_kill, bg_status, bg_list
 model: proxy/cfai/@cf/moonshotai/kimi-k2.7-code
