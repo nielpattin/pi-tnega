@@ -1,9 +1,9 @@
 {
    "private": true,
-   "type": "module",
    "workspaces": [
       "packages/*"
    ],
+   "type": "module",
    "scripts": {
       "check": "pnpm run fmt:check && pnpm run lint && pnpm run typecheck && pnpm run test",
       "test": "vitest run",
