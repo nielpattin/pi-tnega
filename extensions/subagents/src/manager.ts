@@ -45,6 +45,7 @@ interface MutableSnapshot {
    origin: SubagentOrigin;
    backend: BackendName;
    title: string;
+   agent?: string;
    prompt: string;
    cwd: string;
    status: SubagentStatus;
@@ -157,7 +158,7 @@ const makeManager = Effect.gen(function* () {
       const waiters = changeWaiters;
       changeWaiters = [];
       for (const waiter of waiters) waiter();
-      for (const listener of [...listeners]) {
+      for (const listener of listeners) {
          try {
             listener();
          } catch {
@@ -205,7 +206,7 @@ const makeManager = Effect.gen(function* () {
       if (entries.size <= MAX_TRACKED) return;
       const candidates = [...entries.values()]
          .filter((e) => e.snapshot.status !== "running" && !waitInterest.has(e.snapshot.id))
-         .sort(
+         .toSorted(
             (a, b) => (a.snapshot.settledAt ?? a.snapshot.createdAt) - (b.snapshot.settledAt ?? b.snapshot.createdAt)
          );
       for (const entry of candidates) {
@@ -385,6 +386,7 @@ const makeManager = Effect.gen(function* () {
                   origin,
                   backend: backendName,
                   title: task.title,
+                  agent: task.agent,
                   prompt: task.prompt,
                   cwd: task.cwd,
                   status: "running",

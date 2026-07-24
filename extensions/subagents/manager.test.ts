@@ -300,3 +300,14 @@ test("requestPopQueued pops last queued steer message", async () => {
   });
 });
 
+test("snapshot carries agent from SpawnTask", async () => {
+  await withManager(async (manager, runtime) => {
+    const snap = await runTool(
+      runtime,
+      manager.spawn("pi", { ...task("agent test"), agent: "high-task" }),
+    );
+    assert.equal(snap.agent, "high-task");
+    await runTool(runtime, manager.cancel([snap.id]));
+  });
+});
+

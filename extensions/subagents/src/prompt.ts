@@ -1,28 +1,24 @@
 /** All model-facing strings for the subagents tools. */
 
-import { AGY_BASE_MODELS, AGY_REASONING_EFFORTS, DEFAULT_AGY_MODEL } from "./backends/agy.ts";
+import { loadAllAgents } from "./agents/types.ts";
 
-const AGY_MODELS_LIST = AGY_BASE_MODELS.join(", ");
-const AGY_EFFORTS_LIST = AGY_REASONING_EFFORTS.join(", ");
-
-/** Describes subagent_spawn, including harnesses and the fixed concurrency cap. */
+/** Describes subagent_spawn, including agent selection and the fixed concurrency cap. */
 export const SUBAGENT_SPAWN_TOOL_DESCRIPTION =
-   "Spawn a background subagent: a fully autonomous, headless agent with its own context window. You choose the harness: pi (in-process pi session, inherits this environment's tools and config) or agy (Antigravity CLI print-mode process). Fire-and-forget: this returns immediately with an id. The subagent's final output is queued back to you as a message when it settles, or collect it explicitly with subagent_wait. Children cannot orchestrate more agents/workflows or ask the user, and cannot see this conversation, so the prompt must be self-contained. Max 4 subagents can be running at once.";
+   "Spawn a background subagent: a fully autonomous, headless agent with its own context window, configured by a named agent role (agent). Fire-and-forget: this returns immediately with an id. The subagent's final output is queued back to you as a message when it settles, or collect it explicitly with subagent_wait. Children cannot orchestrate more agents/workflows or ask the user, and cannot see this conversation, so the prompt must be self-contained. Max 4 subagents can be running at once.";
 
 /** Adds background subagent delegation to the parent model's available-tools prompt. */
 export const SUBAGENT_SPAWN_PROMPT_SNIPPET =
-   "Spawn a background subagent on a chosen harness (pi or agy; own context) for a self-contained task";
+   "Spawn a background subagent using a defined agent role (agent) for a self-contained task";
 
 /** Guides the parent model to delegate standalone tasks and avoid unnecessary blocking waits. */
 export function getSubagentSpawnPromptGuidelines(cwd?: string): string[] {
    const guidelines = [
-      "Use subagent_spawn to delegate self-contained tasks that can run in the background; give it a complete, standalone prompt.",
+      "Use subagent_spawn to delegate self-contained tasks that can run in the background. Always specify both `agent` (the agent role name) and `name` (a short title for the subagent) along with a complete, standalone prompt.",
+      "Always set `agent` to a valid agent role name (e.g. 'scout', 'task', 'high-task') and `name` to a short human-readable name. Do not attempt to specify harness, model, or effort parameters.",
       "After subagent_spawn, keep working; results arrive automatically. Only call subagent_wait when you cannot proceed without the result."
    ];
 
    try {
-      // Dynamic import / require of loadAllAgents
-      const { loadAllAgents } = require("./agents/types.ts");
       const agentsMap = loadAllAgents(cwd);
       const enabled = Array.from(agentsMap.values()).filter((a: any) => Boolean(a.enabled));
       if (enabled.length > 0) {
@@ -42,15 +38,11 @@ export const SUBAGENT_SPAWN_PROMPT_GUIDELINES = getSubagentSpawnPromptGuidelines
 
 /** Model-facing schema descriptions for subagent_spawn task and execution options. */
 export const SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS = {
-   agent: "Optional agent definition name (e.g. 'scout'). Drives system prompt, tools, harness, and model defaults.",
+   agent: "Required agent definition name (e.g. 'scout', 'task', 'high-task'). Defines harness, model, thinking, tools, and system prompt.",
    prompt:
       "Task prompt for the subagent. Must be self-contained: include all needed context, file paths, and what to report back.",
-   name: "Short human-readable name for this subagent, shown in listings and the UI",
-   harness:
-      'Harness to run the subagent on: "pi" (in-process pi session; inherits this environment) or "agy" (Antigravity CLI print mode).',
-   workingDir: "Working directory (default: current working directory)",
-   model: `Model hint. pi: "provider/model-id" or model id (omit to inherit parent). agy models: ${AGY_MODELS_LIST} (default: ${DEFAULT_AGY_MODEL}).`,
-   reasoningEffort: `Reasoning effort. pi: thinking level (off|minimal|low|medium|high|xhigh|max). agy: ${AGY_EFFORTS_LIST} (default: low). For agy, the final CLI model is {model}-{effort} (e.g. ${DEFAULT_AGY_MODEL}-medium).`
+   name: "Required short human-readable name for this subagent, shown in listings and the UI",
+   workingDir: "Working directory (default: current working directory)"
 };
 
 /** Builds the subagent_spawn result that tells the parent model how to continue or inspect the child. */

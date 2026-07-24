@@ -52,7 +52,7 @@ enabled: true
 
 Use `/agents` in TUI mode to manage, edit, and create agent definitions using a full-screen manager.
 
-Use `agent: "<name>"` in `subagent_spawn` to spawn a subagent using a defined role (e.g. `subagent_spawn(agent: "scout", prompt: "...")`).
+Use `agent: "<name>"` and `name: "<short-name>"` in `subagent_spawn` to spawn a subagent using a defined role (e.g. `subagent_spawn(agent: "scout", prompt: "...", name: "audit")`).
 
 ## Vibe Mode (`/vibe`)
 
@@ -113,23 +113,20 @@ Limits of `agy`:
 
 ```text
 subagent_spawn(
+  agent: "scout",
   prompt: "Audit extensions/workflows for race conditions and report findings.",
-  name: "workflow-audit",
-  harness: "pi"
+  name: "workflow-audit"
 )
 ```
 
-Or with agy:
+Or with task agent:
 
 ```text
 subagent_spawn(
+  agent: "task",
   prompt: "Implement the failing test fix and report what changed.",
-  name: "agy-fix",
-  harness: "agy",
-  model: "gemini-3.6-flash",
-  reasoning_effort: "medium"
+  name: "task-fix"
 )
-// resolves to agy --model gemini-3.6-flash-medium --effort medium
 ```
 
 Then keep working. When the child finishes, its result is injected as a follow-up message.

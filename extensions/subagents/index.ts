@@ -3,8 +3,7 @@
  * unified behind a single Effect service interface.
  *
  * Tools (for the parent LLM):
- * - subagent_spawn: fire-and-forget spawn (prompt, title, harness, working_dir,
- *   model, reasoning_effort). Max 4 running at once.
+ * - subagent_spawn: fire-and-forget spawn (agent, prompt, name, working_dir). Max 4 running at once.
  * - subagent_wait: block until the listed subagents settle, return results.
  * - subagent_cancel: stop one or more running subagents.
  * - subagent_check: peek at a subagent's status and recent activity.
@@ -41,7 +40,7 @@ import {
 import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { deriveBtwTitle, isModelVisible } from "./src/by-the-way.ts";
-import { BACKEND_NAMES, formatElapsed, latestText, REASONING_EFFORTS, type SubagentSnapshot } from "./src/domain.ts";
+import { formatElapsed, latestText, type SubagentSnapshot } from "./src/domain.ts";
 import { formatActivityStatus, formatContextUtilization } from "./src/format.ts";
 import { SubagentManager, type SubagentManagerShape } from "./src/manager.ts";
 import {
@@ -64,7 +63,7 @@ import { createSubagentRuntime, runTool, type SubagentRuntime } from "./src/runt
 import { openSubagentPicker, openSubagentTakeover } from "./src/ui/takeover.ts";
 import { loadAgentsConfig } from "./src/agents/store.ts";
 import { resolveProfileSpawnParams } from "./src/agents/resolve.ts";
-import type { ProfileName } from "./src/agents/types.ts";
+import { loadAgent, loadAllAgents, type ProfileName } from "./src/agents/types.ts";
 import type { BackendName } from "./src/domain.ts";
 import {
    getVibeActiveTools,
@@ -304,83 +303,67 @@ export default function (pi: ExtensionAPIHost) {
       promptSnippet: SUBAGENT_SPAWN_PROMPT_SNIPPET,
       promptGuidelines: SUBAGENT_SPAWN_PROMPT_GUIDELINES,
       parameters: Type.Object({
-         agent: Type.Optional(
-            Type.String({
-               description: SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS.agent
-            })
-         ),
+         agent: Type.String({
+            description: SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS.agent
+         }),
          prompt: Type.String({
             description: SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS.prompt
          }),
-         name: Type.Optional(
-            Type.String({
-               description: SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS.name
-            })
-         ),
-         harness: Type.Optional(
-            StringEnum(BACKEND_NAMES, {
-               description: SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS.harness
-            })
-         ),
+         name: Type.String({
+            description: SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS.name
+         }),
          working_dir: Type.Optional(
             Type.String({
                description: SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS.workingDir
-            })
-         ),
-         model: Type.Optional(
-            Type.String({
-               description: SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS.model
-            })
-         ),
-         reasoning_effort: Type.Optional(
-            StringEnum(REASONING_EFFORTS, {
-               description: SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS.reasoningEffort
             })
          )
       }),
       async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
          const manager = await getManager();
 
+         const agentName = params.agent?.trim();
+         if (!agentName) {
+            const all = loadAllAgents(ctx.cwd);
+            const enabled = Array.from(all.values()).filter((a) => Boolean(a.enabled));
+            const availableList = enabled.length > 0 ? enabled.map((a) => a.name).join(", ") : "none";
+            throw new Error(`Param 'agent' is required. Available enabled agents: ${availableList}`);
+         }
+
+         const titleStr = params.name?.trim();
+         if (!titleStr) {
+            throw new Error("Param 'name' is required and must be non-empty.");
+         }
+
+         const res = loadAgent(agentName, ctx.cwd);
+         if (res.error || !res.definition) {
+            throw new Error(res.error || `Agent "${agentName}" not found.`);
+         }
+         const def = res.definition;
+         if (!def.enabled) {
+            throw new Error(`Agent "${agentName}" is disabled.`);
+         }
+         if (!def.body || !def.body.trim()) {
+            throw new Error(
+               `Agent "${agentName}" has no system prompt body. Edit it in /agents and add instructions under the frontmatter.`
+            );
+         }
+
          const cwd = path.resolve(ctx.cwd, params.working_dir ?? ".");
          if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) {
             throw new Error(`working_dir is not a directory: ${cwd}`);
          }
 
-         let customPrompt: string | undefined = undefined;
-         let tools: string[] | undefined = undefined;
-         let harness: BackendName = params.harness ?? "pi";
-         let model: string | undefined = params.model;
-         let reasoningEffort: any = params.reasoning_effort;
-         let titleStr = (params.name ?? "").trim();
-
-         if (params.agent) {
-            const { loadAgent } = require("./src/agents/types.ts");
-            const res = loadAgent(params.agent, ctx.cwd);
-            if (res.error || !res.definition) {
-               throw new Error(res.error || `Agent "${params.agent}" not found.`);
-            }
-            const def = res.definition;
-            if (!def.enabled) {
-               throw new Error(`Agent "${params.agent}" is disabled.`);
-            }
-            if (!def.body || !def.body.trim()) {
-               throw new Error(
-                  `Agent "${params.agent}" has no system prompt body. Edit it in /agents and add instructions under the frontmatter.`
-               );
-            }
-
-            customPrompt = def.body;
-            tools = def.tools;
-            if (!params.harness) harness = def.harness;
-            if (!params.model && def.model) model = def.model;
-            if (!params.reasoning_effort && def.thinking) reasoningEffort = def.thinking;
-            if (!titleStr) titleStr = def.display_name || def.name;
-         }
+         const customPrompt = def.body;
+         const tools = def.tools;
+         const harness: BackendName = def.harness;
+         const model = def.model;
+         const reasoningEffort = def.thinking;
 
          const title = titleStr.slice(0, 160) || "subagent";
          const snap = await runTool(
             getRuntime(),
             manager.spawn(harness, {
+               agent: def.name,
                prompt: params.prompt,
                title,
                cwd,
@@ -418,6 +401,7 @@ export default function (pi: ExtensionAPIHost) {
             details: {
                id: snap.id,
                title: snap.title,
+               agent: def.name,
                cwd,
                harness,
                model: snap.meta.modelLabel
@@ -640,7 +624,7 @@ export default function (pi: ExtensionAPIHost) {
       const body = content.split("\n").slice(1).join("\n").trim();
 
       if (expanded) {
-         const md = new Markdown(`${body}`, 0, 0, getMarkdownTheme());
+         const md = new Markdown(body, 0, 0, getMarkdownTheme());
          const container = new Text(header, 0, 0);
          return {
             render: (width: number) => [...container.render(width), ...md.render(width)],

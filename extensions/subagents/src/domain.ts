@@ -40,6 +40,8 @@ export interface SpawnTask {
    readonly origin?: SubagentOrigin;
    readonly prompt: string;
    readonly title: string;
+   /** Agent definition name, e.g. "task", "high-task", "scout". */
+   readonly agent?: string;
    readonly cwd: string;
    /**
     * Generic model hint:
@@ -184,6 +186,7 @@ export interface SubagentSnapshot {
    readonly origin: SubagentOrigin;
    readonly backend: BackendName;
    readonly title: string;
+   readonly agent?: string;
    readonly prompt: string;
    readonly cwd: string;
    readonly status: SubagentStatus;

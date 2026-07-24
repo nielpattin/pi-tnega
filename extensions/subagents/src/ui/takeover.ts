@@ -275,10 +275,11 @@ class SubagentDashboard implements Component {
          const index = start + i;
          const isSelected = index === this.selection.index;
 
-         // Left: marker, status square, title, dim id
+         // Left: marker, status square, title, dim agent role, dim id
          const marker = isSelected ? theme.fg("accent", "❯") : " ";
          const title = isSelected ? theme.fg("accent", snap.title) : theme.fg("text", snap.title);
-         const left = ` ${marker} ${statusGlyph(snap, theme)} ${title} ${theme.fg("dim", snap.id)}`;
+         const agentStr = snap.agent ? theme.fg("dim", ` · ${snap.agent}`) : "";
+         const left = ` ${marker} ${statusGlyph(snap, theme)} ${title}${agentStr} ${theme.fg("dim", snap.id)}`;
 
          // Right: backend · model · context utilization · elapsed · status
          const utilization = formatContextUtilization(snap.usage);
@@ -466,9 +467,10 @@ class TakeoverView implements Component, Focusable {
 
       lines.push(border);
       const utilization = formatContextUtilization(snap.usage);
+      const headerTitle = snap.agent ? `${snap.id} · ${snap.agent} · ${snap.title}` : `${snap.id} · ${snap.title}`;
       const header =
          `${statusGlyph(snap, theme)} ` +
-         theme.fg("accent", theme.bold(`${snap.id} · ${snap.title}`)) +
+         theme.fg("accent", theme.bold(headerTitle)) +
          theme.fg("muted", ` · ${snap.status} · ${formatElapsed(snap)}`) +
          (this.options?.badge ? theme.fg("muted", ` · ${this.options.badge}`) : "") +
          theme.fg("dim", ` · ${snap.backend}: ${snap.meta.modelLabel ?? "?"}`) +
