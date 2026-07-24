@@ -1,0 +1,93 @@
+name: Publish npm package
+run-name: "Publish ${{ inputs.package }} ${{ inputs.tag }}"
+
+on:
+   workflow_dispatch:
+      inputs:
+         package:
+            description: Package directory to publish
+            required: true
+            type: choice
+            options:
+               - pi-permission-system
+               - pi-reference
+               - pi-station
+         tag:
+            description: Git tag to publish, for example @nielpattin/pi-station@0.9.0
+            required: true
+            type: string
+
+permissions:
+   contents: read
+   id-token: write
+
+jobs:
+   publish:
+      runs-on: ubuntu-latest
+      steps:
+         - name: Checkout
+           uses: actions/checkout@v6
+           with:
+              fetch-depth: 0
+
+         - name: Checkout tag
+           run: git checkout --detach "${{ inputs.tag }}"
+
+         - name: Setup pnpm
+           uses: pnpm/action-setup@v6
+           with:
+              version: 11
+
+         - name: Setup Node.js
+           uses: actions/setup-node@v6
+           with:
+              node-version: "24"
+              registry-url: https://registry.npmjs.org
+              cache: pnpm
+
+         - name: Install dependencies
+           run: pnpm install --frozen-lockfile
+
+         - name: Verify package and tag
+           shell: bash
+           run: |
+              set -euo pipefail
+
+              pkg="${{ inputs.package }}"
+              tag="${{ inputs.tag }}"
+              manifest="packages/$pkg/package.json"
+
+              if [ ! -f "$manifest" ]; then
+                echo "package not found: $pkg" >&2
+                exit 1
+              fi
+
+              actual_version="$(node -p "JSON.parse(require('fs').readFileSync('$manifest', 'utf8')).version")"
+              package_name="$(node -p "JSON.parse(require('fs').readFileSync('$manifest', 'utf8')).name")"
+              expected_tag="$package_name@$actual_version"
+
+              if [ "$tag" != "$expected_tag" ]; then
+                echo "tag mismatch: expected $expected_tag, got $tag" >&2
+                exit 1
+              fi
+
+         - name: Build package (if it has a build script)
+           shell: bash
+           run: |
+              set -euo pipefail
+              pkg="${{ inputs.package }}"
+              manifest="packages/$pkg/package.json"
+              if node -e "const s=require('./'+process.argv[1]).scripts; process.exit(s && s.build ? 0 : 1)" "$manifest"; then
+                echo "build script found, running pnpm build..."
+                pnpm --dir "packages/$pkg" run build
+              else
+                echo "no build script, skipping"
+              fi
+
+         - name: Pack dry run
+           run: pnpm --dir packages/${{ inputs.package }} pack --dry-run
+
+         - name: Publish
+           run: pnpm --dir packages/${{ inputs.package }} publish --access public --no-git-checks
+           env:
+              NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
