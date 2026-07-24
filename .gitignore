@@ -153,19 +153,17 @@ cache/
 auth.json
 *.jsonl
 git
-pi-magic-context/
 
 pi-mitm/
 bash-history/
 pi-station/stash-history.json
 mcp-onboarding.json
+mcp.jsonc
 
-intercom/
 mcp-cache.json
 pi-fff
 mcp-oauth/
 mcp-npx-cache.json
-generated-images
 tmp/
 *.bak
 
