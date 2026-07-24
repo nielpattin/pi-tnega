@@ -12,7 +12,8 @@ import {
    writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { appendProjectHistory, matchHistoryEntries, readGlobalShellHistory } from "../features/bash-mode/history.ts";
 import { BashTranscriptStore } from "../features/bash-mode/transcript.ts";
 import {
@@ -102,7 +103,7 @@ test("matchHistoryEntries returns newest entries when the prefix is empty", () =
 });
 
 test("theme.json can override icons without touching colors", () => {
-   const themePath = join(process.cwd(), "theme.json");
+   const themePath = join(dirname(fileURLToPath(import.meta.url)), "..", "theme.json");
    const originalTheme = existsSync(themePath) ? readFileSync(themePath, "utf8") : null;
    const originalNerdFonts = process.env.STATION_BAR_NERD_FONTS;
 

@@ -18,9 +18,12 @@
       "noImplicitOverride": true,
       "noUnusedLocals": false,
       "noUnusedParameters": false,
-      "noPropertyAccessFromIndexSignature": false
+      "noPropertyAccessFromIndexSignature": false,
+      "paths": {
+         "#src/*": ["./packages/pi-permission-system/src/*"]
+      }
    },
-   "include": ["packages/**/*.ts", "extensions/**/*.ts"],
+   "include": ["packages/**/*.ts"],
    "exclude": [
       "node_modules",
       "git",
