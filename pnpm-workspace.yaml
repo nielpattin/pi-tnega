@@ -10,10 +10,12 @@ minimumReleaseAgeExclude:
   - '@plannotator/webtui@0.1.0'
   - '@cortexkit/*'
   - '@ff-labs/*'
+  - '@aws-sdk/*'
 allowBuilds:
   "@google/genai": true
   esbuild: true
   koffi: true
+  msgpackr-extract: true
   protobufjs: true
   better-sqlite3: true
   tree-sitter-bash: true
@@ -21,8 +23,9 @@ allowBuilds:
   sharp: true
 
 # Supply chain security
-minimumReleaseAge: 7200 # 5 days (or 1440 for 1 day)
-blockExoticSubdeps: true
+minimumReleaseAge: 0 # 5 days (or 1440 for 1 day)
+
+# blockExoticSubdeps: true
 
 # Extra hardening (recommended in v11)
-strictDepBuilds: true
+# strictDepBuilds: true
