@@ -10,14 +10,15 @@
 
 Effect is used as the **async runtime core** for background processes, fiber orchestration, concurrency limiting, resource lifecycle management, and typed error handling.
 
-| Package | Key Usage |
-| :--- | :--- |
-| `extensions/subagents` | Subagent process lifecycle, background fibers, steering queue, event streaming (`Stream`), backend registry (`Context.Service`), concurrency caps. |
+| Package                           | Key Usage                                                                                                                                                                 |
+| :-------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `extensions/subagents`            | Subagent process lifecycle, background fibers, steering queue, event streaming (`Stream`), backend registry (`Context.Service`), concurrency caps.                        |
 | `extensions/background-terminals` | Background terminal shell processes, process tree SIGTERM/SIGKILL escalation (`Scope` + `Effect.addFinalizer`), output buffer streaming, `TerminalManager` service layer. |
-| `extensions/copy-all` | Async clipboard command execution, process exit code handling with `Effect.callback`, typed error wrapping (`Data.TaggedError`). |
-| `extensions/ask-user` | TUI popup prompt execution, interrupt signal handling with `Effect.tryPromise` & `Effect.runPromiseExit`. |
+| `extensions/copy-all`             | Async clipboard command execution, process exit code handling with `Effect.callback`, typed error wrapping (`Data.TaggedError`).                                          |
+| `extensions/ask-user`             | TUI popup prompt execution, interrupt signal handling with `Effect.tryPromise` & `Effect.runPromiseExit`.                                                                 |
 
 ### When NOT to Use Effect
+
 - **TUI & UI Rendering**: `@earendil-works/pi-tui` components, widgets, and synchronous render loops. Imperative TUI classes must remain synchronous and callback-driven.
 - **Pure Helpers**: String formatting, text wrapping, date formatting, pure state calculations.
 
@@ -57,21 +58,21 @@ import { Context, Effect, Layer } from "effect";
 
 // 1. Define Service Tag & Interface
 export interface TerminalManagerShape {
-   readonly start: (cmd: string) => Effect.Effect<string, Error>;
-   readonly disposeAll: Effect.Effect<void>;
+    readonly start: (cmd: string) => Effect.Effect<string, Error>;
+    readonly disposeAll: Effect.Effect<void>;
 }
 
 export class TerminalManager extends Context.Service<TerminalManager, TerminalManagerShape>()(
-   "background-terminals/TerminalManager"
+    "background-terminals/TerminalManager"
 ) {}
 
 // 2. Implementation Generator
 const makeManager = Effect.gen(function* () {
-   yield* Effect.addFinalizer(() => Effect.log("Cleaning up terminals..."));
-   return TerminalManager.of({
-      start: (cmd) => Effect.succeed(`Started ${cmd}`),
-      disposeAll: Effect.void
-   });
+    yield* Effect.addFinalizer(() => Effect.log("Cleaning up terminals..."));
+    return TerminalManager.of({
+        start: (cmd) => Effect.succeed(`Started ${cmd}`),
+        disposeAll: Effect.void
+    });
 });
 
 // 3. Construct Live Layer
@@ -87,25 +88,25 @@ import { Cause, Exit, ManagedRuntime, type Effect } from "effect";
 import { TerminalManagerLive } from "./manager.ts";
 
 export function createTerminalRuntime() {
-   return ManagedRuntime.make(TerminalManagerLive);
+    return ManagedRuntime.make(TerminalManagerLive);
 }
 
 export type TerminalRuntime = ReturnType<typeof createTerminalRuntime>;
 
 export async function runTool<A, E>(
-   runtime: TerminalRuntime,
-   effect: Effect.Effect<A, E>,
-   options: { signal?: AbortSignal; interruptMessage?: string } = {}
+    runtime: TerminalRuntime,
+    effect: Effect.Effect<A, E>,
+    options: { signal?: AbortSignal; interruptMessage?: string } = {}
 ) {
-   const exit = await runtime.runPromiseExit(effect, options.signal ? { signal: options.signal } : undefined);
-   if (Exit.isSuccess(exit)) return exit.value;
-   
-   if (Cause.hasInterruptsOnly(exit.cause)) {
-      throw new Error(options.interruptMessage ?? "Operation was aborted.");
-   }
-   
-   const [first] = Cause.prettyErrors(exit.cause);
-   throw new Error(first?.message ?? Cause.pretty(exit.cause));
+    const exit = await runtime.runPromiseExit(effect, options.signal ? { signal: options.signal } : undefined);
+    if (Exit.isSuccess(exit)) return exit.value;
+
+    if (Cause.hasInterruptsOnly(exit.cause)) {
+        throw new Error(options.interruptMessage ?? "Operation was aborted.");
+    }
+
+    const [first] = Cause.prettyErrors(exit.cause);
+    throw new Error(first?.message ?? Cause.pretty(exit.cause));
 }
 ```
 
@@ -117,8 +118,8 @@ Define structured domain errors with `Data.TaggedError`:
 import { Data } from "effect";
 
 export class ClipboardError extends Data.TaggedError("ClipboardError")<{
-   readonly message: string;
-   readonly cause: Error;
+    readonly message: string;
+    readonly cause: Error;
 }> {}
 ```
 
@@ -131,20 +132,20 @@ import { spawn } from "node:child_process";
 import { Effect } from "effect";
 
 export function executeCommand(cmd: string, args: string[]) {
-   return Effect.callback<void, Error>((resume) => {
-      const child = spawn(cmd, args);
-      
-      child.on("error", (err) => resume(Effect.fail(err)));
-      child.on("close", (code) => {
-         if (code === 0) resume(Effect.void);
-         else resume(Effect.fail(new Error(`Exited with code ${code}`)));
-      });
+    return Effect.callback<void, Error>((resume) => {
+        const child = spawn(cmd, args);
 
-      // Teardown logic if the effect fiber is interrupted
-      return Effect.sync(() => {
-         if (child.exitCode === null) child.kill();
-      });
-   });
+        child.on("error", (err) => resume(Effect.fail(err)));
+        child.on("close", (code) => {
+            if (code === 0) resume(Effect.void);
+            else resume(Effect.fail(new Error(`Exited with code ${code}`)));
+        });
+
+        // Teardown logic if the effect fiber is interrupted
+        return Effect.sync(() => {
+            if (child.exitCode === null) child.kill();
+        });
+    });
 }
 ```
 
@@ -156,11 +157,11 @@ Ensure child processes or file streams are closed on scope exit:
 import { Effect, Scope } from "effect";
 
 const scopedProcess = Effect.gen(function* () {
-   const scope = yield* Scope.make();
-   
-   yield* Effect.addFinalizer(() => Effect.sync(() => console.log("Scope closed")));
-   
-   return scope;
+    const scope = yield* Scope.make();
+
+    yield* Effect.addFinalizer(() => Effect.sync(() => console.log("Scope closed")));
+
+    return scope;
 });
 ```
 
@@ -175,7 +176,7 @@ const success = Result.success(42);
 const failure = Result.fail("error");
 
 if (Result.isSuccess(success)) {
-   console.log(success.value);
+    console.log(success.value);
 }
 ```
 
@@ -184,13 +185,13 @@ if (Result.isSuccess(success)) {
 ## 5. Summary of Key Effect v3 → v4 Changes
 
 1. **`@effect/platform` Merged into `effect` Core**:
-   - `FileSystem`, `Path`, `Terminal` are inside core `effect`.
+    - `FileSystem`, `Path`, `Terminal` are inside core `effect`.
 2. **`Either` Renamed to `Result`**:
-   - Use `Result.success()`, `Result.fail()`, `Result.isSuccess()`, etc.
+    - Use `Result.success()`, `Result.fail()`, `Result.isSuccess()`, etc.
 3. **`Context.Service` Syntax**:
-   - `export class MyService extends Context.Service<MyService, Shape>()("ServiceId") {}`
+    - `export class MyService extends Context.Service<MyService, Shape>()("ServiceId") {}`
 4. **`Effect.gen`**:
-   - Generator functions yield effects (`yield* Effect(...)`).
+    - Generator functions yield effects (`yield* Effect(...)`).
 
 ---
 
