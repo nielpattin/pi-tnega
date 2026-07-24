@@ -1,6 +1,6 @@
 packages:
+  - "packages/*"
   - "extensions/*"
-  - "pi-mcp-adapter"
 
 minimumReleaseAgeExclude:
   - "@earendil-works/*"
@@ -11,6 +11,12 @@ minimumReleaseAgeExclude:
   - '@cortexkit/*'
   - '@ff-labs/*'
   - '@aws-sdk/*'
+  - "@oxlint/*"
+  - "@oxfmt/*"
+  - "@rolldown/*"
+  - "@smithy/*"
+  - oxlint
+  - oxfmt
 allowBuilds:
   "@google/genai": true
   esbuild: true
@@ -23,7 +29,7 @@ allowBuilds:
   sharp: true
 
 # Supply chain security
-minimumReleaseAge: 0 # 5 days (or 1440 for 1 day)
+minimumReleaseAge: 0
 
 # blockExoticSubdeps: true
 
