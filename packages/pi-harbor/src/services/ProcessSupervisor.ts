@@ -3,6 +3,8 @@ import { ConcurrencyLimitError, type ProcessEntry, type ProcessReadyState } from
 import { ShellExecutor } from "./ShellExecutor.js";
 import { OutputBuffer } from "../utils/output-buffer.js";
 import { killTree } from "../utils/kill-tree.js";
+import { filterLogLines, paginateLogLines, formatMultiProcessLogLines, selectLogStream } from "../ui/log-viewer.js";
+import { defaultTelemetryReader, type ProcessTelemetry, type TelemetryReader } from "../utils/process-telemetry.js";
 import type { ChildProcess } from "node:child_process";
 
 export const MAX_RUNNING_PROCESSES = 8;
@@ -16,24 +18,29 @@ export interface ProcessSupervisorShape {
       cwd?: string;
       env?: Record<string, string>;
       ready?: { log?: string; port?: number; timeoutSec?: number };
+      stdin?: boolean;
    }) => Effect.Effect<ProcessEntry, ConcurrencyLimitError>;
 
-   readonly stop: (name: string, signal?: NodeJS.Signals) => Effect.Effect<ProcessEntry>;
-   readonly restart: (name: string) => Effect.Effect<ProcessEntry, ConcurrencyLimitError>;
+   readonly stop: (name: string, signal?: NodeJS.Signals) => Effect.Effect<ProcessEntry, Error>;
+   readonly restart: (name: string) => Effect.Effect<ProcessEntry, ConcurrencyLimitError | Error>;
    readonly ps: Effect.Effect<ReadonlyArray<ProcessEntry>>;
    readonly logs: (
-      name: string,
+      name: string | ReadonlyArray<string>,
       options?: {
          lines?: number;
          head?: boolean;
          grep?: string;
          cursor?: number;
+         stream?: "stdout" | "stderr" | "both";
          follow?: boolean;
          timeoutSec?: number;
       }
-   ) => Effect.Effect<{ lines: string[]; cursor: number }>;
+   ) => Effect.Effect<{ lines: string[]; cursor: number }, Error>;
 
-   readonly awaitExit: (name: string, timeoutMs?: number) => Effect.Effect<ProcessEntry>;
+   readonly awaitExit: (name: string, timeoutMs?: number) => Effect.Effect<ProcessEntry, Error>;
+   readonly writeStdin: (name: string, data: string | Buffer) => Effect.Effect<void, Error>;
+   readonly closeStdin: (name: string) => Effect.Effect<void, Error>;
+   readonly telemetry: (name: string, reader?: TelemetryReader) => Effect.Effect<ProcessTelemetry, Error>;
 }
 
 interface TrackedProcess {
@@ -104,7 +111,8 @@ export class ProcessSupervisor extends Context.Service<ProcessSupervisor, Proces
                const id = `bash-${processSeq}`;
                const child = yield* executor.spawnProcess(params.command, {
                   cwd: params.cwd,
-                  env: params.env
+                  env: params.env,
+                  stdin: params.stdin
                });
 
                const stdoutBuffer = new OutputBuffer(RETAINED_STREAM_BYTES);
@@ -206,21 +214,37 @@ export class ProcessSupervisor extends Context.Service<ProcessSupervisor, Proces
 
          const ps = Effect.sync(() => Array.from(processes.values()).map((p) => p.entry));
 
-         const logs = Effect.fn("ProcessSupervisor.logs")(function* (name, options) {
+         const logs = Effect.fn("ProcessSupervisor.logs")(function* (nameOrNames, options) {
             yield* Effect.void;
-            const tracked = processes.get(name);
-            if (!tracked) {
-               throw new Error(`Process not found: ${name}`);
+            const names = Array.isArray(nameOrNames) ? nameOrNames : [nameOrNames as string];
+
+            const processEntries: Array<{ name: string; lines: string[] }> = [];
+
+            for (const name of names) {
+               const tracked = processes.get(name);
+               if (!tracked) {
+                  if (!Array.isArray(nameOrNames)) {
+                     return yield* Effect.fail(new Error(`Process not found: ${name}`));
+                  }
+                  continue;
+               }
+               const stdoutText = tracked.stdoutBuffer.view().text;
+               const stderrText = tracked.stderrBuffer.view().text;
+               const rawLines = selectLogStream(stdoutText, stderrText, options?.stream);
+               processEntries.push({ name, lines: rawLines });
             }
-            const text = tracked.stdoutBuffer.view().text;
-            let lines = text.split("\n");
-            if (options?.grep) {
-               lines = lines.filter((l) => l.includes(options.grep!));
+
+            let allLines: string[];
+            if (Array.isArray(nameOrNames)) {
+               allLines = formatMultiProcessLogLines(processEntries);
+            } else {
+               allLines = processEntries[0]?.lines ?? [];
             }
-            if (options?.lines) {
-               lines = lines.slice(-options.lines);
-            }
-            return { lines, cursor: lines.length };
+
+            const filtered = filterLogLines(allLines, options?.grep);
+            const paginated = paginateLogLines(filtered, options);
+
+            return { lines: paginated.lines, cursor: paginated.cursor };
          });
 
          const awaitExit = Effect.fn("ProcessSupervisor.awaitExit")(function* (name, timeoutMs) {
@@ -255,13 +279,72 @@ export class ProcessSupervisor extends Context.Service<ProcessSupervisor, Proces
             );
          });
 
+         const writeStdin = Effect.fn("ProcessSupervisor.writeStdin")(function* (name, data) {
+            yield* Effect.void;
+            const tracked = processes.get(name);
+            if (!tracked) {
+               return yield* Effect.fail(new Error(`Process not found: ${name}`));
+            }
+            if (tracked.entry.status !== "running" && tracked.entry.status !== "starting") {
+               return yield* Effect.fail(new Error(`Process ${name} is not running`));
+            }
+            if (!tracked.child.stdin || tracked.child.stdin.destroyed || !tracked.child.stdin.writable) {
+               return yield* Effect.fail(new Error(`Stdin not available for process: ${name}`));
+            }
+            return yield* Effect.callback<void, Error>((resume) => {
+               tracked.child.stdin!.write(data, (err) => {
+                  if (err) {
+                     resume(Effect.fail(err));
+                  } else {
+                     resume(Effect.succeed(undefined));
+                  }
+               });
+            });
+         });
+
+         const closeStdin = Effect.fn("ProcessSupervisor.closeStdin")(function* (name) {
+            yield* Effect.void;
+            const tracked = processes.get(name);
+            if (!tracked) {
+               return yield* Effect.fail(new Error(`Process not found: ${name}`));
+            }
+            if (!tracked.child.stdin || tracked.child.stdin.destroyed) {
+               return yield* Effect.fail(new Error(`Stdin not available for process: ${name}`));
+            }
+            yield* Effect.sync(() => {
+               tracked.child.stdin!.end();
+            });
+            return yield* Effect.void;
+         });
+
+         const telemetry = Effect.fn("ProcessSupervisor.telemetry")(function* (name, customReader) {
+            yield* Effect.void;
+            const tracked = processes.get(name);
+            if (!tracked) {
+               return yield* Effect.fail(new Error(`Process not found: ${name}`));
+            }
+            if (tracked.entry.status !== "running" && tracked.entry.status !== "starting") {
+               return yield* Effect.succeed<ProcessTelemetry>({
+                  status: "unavailable",
+                  pid: tracked.entry.pid,
+                  reason: `Process is ${tracked.entry.status}`,
+                  timestamp: Date.now()
+               });
+            }
+            const reader = customReader ?? defaultTelemetryReader;
+            return yield* reader(tracked.entry.pid) as Effect.Effect<ProcessTelemetry, Error>;
+         });
+
          return ProcessSupervisor.of({
             start,
             stop,
             restart,
             ps,
             logs,
-            awaitExit
+            awaitExit,
+            writeStdin,
+            closeStdin,
+            telemetry
          });
       })
    );

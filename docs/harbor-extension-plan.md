@@ -1669,7 +1669,7 @@ Each bullet below represents one testable behavior. Implementers write a dedicat
 - [ ] ready port alone passes when only port supplied
 - [ ] both log and port must pass when both supplied
 - [ ] stop tree-kills Windows vs POSIX (fake platform)
-- [ ] logs cursor pagination / grep
+- [x] logs cursor pagination / grep
 - [ ] awaitExit resolves if already exited with recheck after Deferred registration
 
 #### H. Submit Pipeline & Schema Validation
@@ -1762,10 +1762,10 @@ Each bullet below represents one testable behavior. Implementers write a dedicat
 - [x] Implement session_start cutover fail-closed verification (logs error and refuses parent registration if legacy extensions are active without `-` force-exclude) (`tests/cutover.test.ts`).
 
 ### Phase 3 — Advanced Process Supervision & Telemetry
-- Write failing vitest tests first for every behavior in this phase before implementing any production code.
-- Implement interactive stdin stream forwarding in `ShellExecutor` and `ProcessSupervisor` with vitest suite (`tests/process-stdin.test.ts`).
-- Implement multi-process stdio log tailing, regex search, and cursor pagination in `/tasks` log viewer with vitest suite (`tests/log-tailing.test.ts`).
-- Implement process live CPU and memory telemetry collection and TUI snapshot rendering (`tests/telemetry.test.ts`).
+- [x] Write failing vitest tests first for every behavior in this phase before implementing any production code.
+- [x] Implement interactive stdin stream forwarding in `ShellExecutor` and `ProcessSupervisor` with vitest suite (`tests/process-stdin.test.ts`).
+- [x] Implement multi-process stdio log tailing, regex search, and cursor pagination in `/tasks` log viewer with vitest suite (`tests/log-tailing.test.ts`).
+- [x] Implement process live CPU and memory telemetry collection and TUI snapshot rendering (`tests/telemetry.test.ts`).
 
 ---
 

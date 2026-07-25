@@ -5,7 +5,7 @@ import { buildChildEnv } from "../utils/shell-env.js";
 export interface ShellExecutorShape {
    readonly spawnProcess: (
       command: string,
-      options?: { cwd?: string; env?: Record<string, string>; shell?: string }
+      options?: { cwd?: string; env?: Record<string, string>; shell?: string; stdin?: boolean }
    ) => Effect.Effect<ChildProcess>;
 
    readonly execSync: (
@@ -21,20 +21,22 @@ export class ShellExecutor extends Context.Service<ShellExecutor, ShellExecutorS
          const spawnProcess = Effect.fn("ShellExecutor.spawnProcess")(function* (command, options) {
             const shell = options?.shell ?? (process.platform === "win32" ? "cmd.exe" : "/bin/sh");
             const env = buildChildEnv({ ...process.env, ...options?.env }, shell);
+            const stdio: ("pipe" | "ignore")[] = options?.stdin ? ["pipe", "pipe", "pipe"] : ["ignore", "pipe", "pipe"];
 
             const child = yield* Effect.sync(() => {
                if (process.platform === "win32") {
-                  return spawn("cmd.exe", ["/d", "/s", "/c", command], {
+                  return spawn(command, [], {
                      cwd: options?.cwd ?? process.cwd(),
                      env,
-                     stdio: ["ignore", "pipe", "pipe"],
+                     stdio,
+                     shell: true,
                      windowsHide: true
                   });
                }
                return spawn("/bin/sh", ["-c", command], {
                   cwd: options?.cwd ?? process.cwd(),
                   env,
-                  stdio: ["ignore", "pipe", "pipe"]
+                  stdio
                });
             });
 
