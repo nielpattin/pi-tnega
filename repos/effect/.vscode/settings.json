@@ -1,26 +1,46 @@
 {
-   "oxc.path.tsgolint": "node_modules/.bin/tsgolint.cmd",
-   "editor.defaultFormatter": "oxc.oxc-vscode",
-   "editor.formatOnSave": true,
-   "editor.formatOnSaveMode": "file",
-   "oxc.fmt.configPath": "oxfmt.config.ts",
-   "oxc.configPath": "oxlint.config.ts",
-   "editor.codeActionsOnSave": {
-      "source.format.oxc": "always"
-   },
-   "oxc.requireConfig": true,
-   "oxc.typeAware": true,
-   "oxc.tsConfigPath": "tsconfig.json",
-   "[json]": {
-      "editor.defaultFormatter": "oxc.oxc-vscode"
-   },
-   "[jsonc]": {
-      "editor.defaultFormatter": "vscode.json-language-features"
-   },
-   "oxc.enable.oxlint": true,
-   // UI Setting:
-   // TypeScript 7 > Experimental: Use Tsgo
-   "js/ts.experimental.useTsgo": true,
-   // Optional: use a local TypeScript package directory.
-   "js/ts.tsdk.path": "./node_modules/typescript"
+  "dprint.path": "node_modules/.bin/dprint",
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "dprint.dprint",
+  "editor.formatOnSaveMode": "file",
+  "editor.codeActionsOnSave": {
+    "source.fixAll.oxc": "explicit"
+  },
+  "editor.quickSuggestions": {
+    "other": true,
+    "comments": false,
+    "strings": false
+  },
+  "editor.acceptSuggestionOnCommitCharacter": true,
+  "editor.acceptSuggestionOnEnter": "on",
+  "editor.quickSuggestionsDelay": 10,
+  "editor.suggestOnTriggerCharacters": true,
+  "editor.tabCompletion": "off",
+  "editor.suggest.localityBonus": true,
+  "editor.suggestSelection": "recentlyUsed",
+  "editor.wordBasedSuggestions": "matchingDocuments",
+  "editor.parameterHints.enabled": true,
+  "files.insertFinalNewline": true,
+  "[typescript]": {
+    "editor.defaultFormatter": "dprint.dprint"
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "dprint.dprint"
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "dprint.dprint"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "dprint.dprint"
+  },
+  "[jsonc]": {
+    "editor.defaultFormatter": "dprint.dprint"
+  },
+  "[markdown]": {
+    "editor.defaultFormatter": "dprint.dprint"
+  },
+  "js/ts.tsdk.path": "./node_modules/typescript/lib",
+  "js/ts.tsdk.additionalLocations": ["./node_modules/typescript/lib"],
+  "js/ts.tsdk.promptToUseWorkspaceVersion": true,
+  "js/ts.experimental.useTsgo": true
 }
