@@ -13,7 +13,8 @@ export default defineConfig({
       "pnpm-workspace.yaml",
       "*yml",
       "**/pi-mcp-adapter/**",
-      ".pi/**"
+      ".pi/**",
+      "repos/**"
    ],
    trailingComma: "none",
    printWidth: 120,

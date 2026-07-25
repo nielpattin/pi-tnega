@@ -49,5 +49,5 @@ export default defineConfig({
    env: {
       builtin: true
    },
-   ignorePatterns: ["**/pi-mcp-adapter/**", "**/node_modules/**", "**/tests/**", "**/*.test.ts"]
+   ignorePatterns: ["**/pi-mcp-adapter/**", "**/node_modules/**", "**/tests/**", "**/*.test.ts", "repos/**"]
 });
