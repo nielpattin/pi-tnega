@@ -3,6 +3,9 @@ import { makeHarborRuntime, runTool } from "../src/runtime.js";
 import { TaskManager } from "../src/services/TaskManager.js";
 import { JobRegistry } from "../src/services/JobRegistry.js";
 import { ProcessSupervisor } from "../src/services/ProcessSupervisor.js";
+import { handleTask } from "../src/tools/task.js";
+import { handleHub } from "../src/tools/hub.js";
+import { handleSubmit } from "../src/tools/submit.js";
 import { Effect } from "effect";
 
 describe("Harbor Runtime Integration", () => {
@@ -29,6 +32,35 @@ describe("Harbor Runtime Integration", () => {
 
     expect(fetchedJob).toBeDefined();
     expect(fetchedJob?.id).toBe(job.id);
+  });
+
+  it("executes task, submit, and hub tools through HarborLive runtime via runTool", async () => {
+    const taskRes: any = await runTool(
+      runtime,
+      handleTask({
+        task: "Subagent tool test",
+        name: "tool-test-job"
+      })
+    );
+
+    expect(taskRes.ok).toBe(true);
+    const jobId = taskRes.jobs[0].id;
+
+    const submitRes: any = await runTool(
+      runtime,
+      handleSubmit({ result: { data: { output: 123 } } }, { jobId })
+    );
+
+    expect(submitRes.ok).toBe(true);
+    expect(submitRes.status).toBe("completed");
+
+    const hubRes: any = await runTool(
+      runtime,
+      handleHub({ op: "jobs" })
+    );
+
+    expect(hubRes.ok).toBe(true);
+    expect(hubRes.jobs.length).toBeGreaterThan(0);
   });
 
   it("handles process supervision via runtime", async () => {

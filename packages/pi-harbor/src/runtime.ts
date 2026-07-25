@@ -6,6 +6,7 @@ import { TaskManager } from "./services/TaskManager.js";
 import { SchemaValidator } from "./services/SchemaValidator.js";
 import { AgentsStore } from "./services/AgentsStore.js";
 import { AgyBackend } from "./backends/agy.js";
+import { PiBackend } from "./backends/pi.js";
 
 const ProcessSupervisorLive = ProcessSupervisor.layer.pipe(Layer.provide(ShellExecutor.layer));
 
@@ -20,7 +21,8 @@ export const HarborLive = Layer.mergeAll(
    AgentsStore.layer,
    ProcessSupervisorLive,
    TaskManagerLive,
-   AgyBackendLive
+   AgyBackendLive,
+   PiBackend.layer
 );
 
 export function makeHarborRuntime() {
