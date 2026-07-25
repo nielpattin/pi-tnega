@@ -4,12 +4,15 @@ import { HubToolParamsSchema, hubToolDefinition, handleHub } from "../src/tools/
 import { JobRegistry } from "../src/services/JobRegistry.js";
 import { ProcessSupervisor } from "../src/services/ProcessSupervisor.js";
 import { ShellExecutor } from "../src/services/ShellExecutor.js";
+import { MailBus } from "../src/services/MailBus.js";
 
 describe("hub tool & validation guards", () => {
   function makeTestRuntime() {
-    const TestLayer = ProcessSupervisor.layer.pipe(
-      Layer.provideMerge(ShellExecutor.layer),
-      Layer.provideMerge(JobRegistry.layer)
+    const TestLayer = Layer.mergeAll(
+      ProcessSupervisor.layer.pipe(Layer.provide(ShellExecutor.layer)),
+      ShellExecutor.layer,
+      JobRegistry.layer,
+      MailBus.layer
     );
     return ManagedRuntime.make(TestLayer);
   }

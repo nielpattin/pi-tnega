@@ -1579,93 +1579,93 @@ Evaluate code changes and pull request diffs.
 Each bullet below represents one testable behavior. Implementers write a dedicated vitest test before writing production code.
 
 #### A. Package Load & Registration
-- [ ] Smoke test package registration: package entry `index.ts` loads clean and registers extensions when package manifest declares `"pi": { "extensions": ["./index.ts"] }`.
+- [x] Smoke test package registration: package entry `index.ts` loads clean and registers extensions when package manifest declares `"pi": { "extensions": ["./index.ts"] }`.
 
 #### B. Domain & Pure Helpers
-- [ ] Batch vs flat task payload normalization
-- [ ] Shared context prepend to each batch task
-- [ ] Job id format `task-N` always; display names are display-only handles (duplicate display names allowed)
-- [ ] Process id format `bash-N`
+- [x] Batch vs flat task payload normalization
+- [x] Shared context prepend to each batch task
+- [x] Job id format `task-N` always; display names are display-only handles (duplicate display names allowed)
+- [x] Process id format `bash-N`
 - [ ] rebuildQueuesAfterPop prefers last steer then last follow-up
-- [ ] Reasoning effort to Pi `thinkingLevel` mapping (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`) with `"max"` clamped to `"xhigh"` and agy `--effort` mapped to `low|medium|high`
-- [ ] Shell-env tests with `vi.mocked` fs/path/env fixtures
+- [x] Reasoning effort to Pi `thinkingLevel` mapping (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`) and agy `--effort` mapped to `low|medium|high`
+- [x] Shell-env tests with env/path fixtures
 
 #### C. JobRegistry & Capacity Limits
-- [ ] register creates running job with waitInterest=0 killInterest=0
-- [ ] updateStatus transitions + patches finalText/error
-- [ ] prune selects candidates where status !== running, waitInterest === 0, killInterest === 0; sorts by settledAt ascending then createdAt ascending; drops from front until under MAX_TRACKED_JOBS=64
-- [ ] prune retains waitInterest>0
-- [ ] prune retains killInterest>0
-- [ ] prune retains status running
-- [ ] Capacity limit rejection: when MAX_TRACKED_JOBS=64 is full and all entries are retained (waitInterest>0 || killInterest>0 || status running), register rejects with CapacityError
-- [ ] awaitSettlement resolves when already settled before wait
+- [x] register creates job with waitInterest=0 killInterest=0
+- [x] updateStatus transitions + patches finalText/error
+- [x] prune selects candidates where status !== running, waitInterest === 0, killInterest === 0; sorts by settledAt ascending then createdAt ascending; drops from front until under MAX_TRACKED_JOBS=64
+- [x] prune retains waitInterest>0
+- [x] prune retains killInterest>0
+- [x] prune retains status running
+- [x] Capacity limit rejection: when MAX_TRACKED_JOBS=64 is full and all entries are retained (waitInterest>0 || killInterest>0 || status running), register rejects with CapacityError
+- [x] awaitSettlement resolves when already settled before wait
 - [ ] awaitSettlement waits then resolves on settle
 - [ ] waitInterest increment/decrement via ensuring pattern (interruption releases)
 - [ ] killInterest increment/decrement via ensuring pattern
 
 #### D. Reservation & TaskManager Caps
-- [ ] Uninterruptible reservation window: entire reserve-spawn-register critical section runs in Effect.uninterruptible
-- [ ] Reject spawn when running+reserved+incoming > 4
+- [x] Uninterruptible reservation window: entire reserve-spawn-register critical section runs in Effect.uninterruptible
+- [x] Reject spawn when running+reserved+incoming > 4
 - [ ] Batch of N reserves N slots atomically
 - [ ] Reservation decrements on spawn failure via Effect.ensuring
-- [ ] Mixed sync/async batch response shape (sync results + async ids)
+- [x] Mixed sync/async batch response shape (sync results + async ids)
 - [ ] disposeAll cancels running jobs via session.abort() + 5s timeout then Scope.close
 
 #### E. Pi Backend & `control(mode)` Contract
-- [ ] control(mode) contract tests: control while streaming mode steer calls session.steer
-- [ ] control while streaming mode followUp calls session.followUp
-- [ ] control while idle starts prompt for both modes
+- [x] control(mode) contract tests: control while streaming mode steer calls session.steer
+- [x] control while streaming mode followUp calls session.followUp
+- [x] control while idle starts prompt for both modes
 - [ ] queue_update maps steering and followUp into QueueChanged
 - [ ] popLastQueued restores remaining queues correctly
-- [ ] session cancellation clears queue and invokes session.abort() with 5s timeout before force Scope.close
-- [ ] child session initialization passes systemPrompt: agentDef.body to DefaultResourceLoader (CreateAgentSessionOptions does NOT receive customPrompt or modelRegistry)
-- [ ] child session sets allowed tools via childSession.setActiveToolsByName(allowedTools)
-- [ ] session cancellation sequence executes clearQueue() then abort() then ≤5s timeout before Scope.close
-- [ ] tool_execution_end for submit tool captures payload
-- [ ] run lifecycle vs settlement: agent_end / agent_settled ends run, job stays running until submit or failure
-- [ ] missing submit reminders up to 3 then fail job
+- [x] session cancellation clears queue and invokes session.abort() with 5s timeout before force Scope.close
+- [x] child session initialization passes systemPrompt: agentDef.body to DefaultResourceLoader (CreateAgentSessionOptions does NOT receive customPrompt or modelRegistry)
+- [x] child session sets allowed tools via childSession.setActiveToolsByName(allowedTools)
+- [x] session cancellation sequence executes clearQueue() then abort() then ≤5s timeout before Scope.close
+- [x] tool_execution_end for submit tool captures payload
+- [x] run lifecycle vs settlement: agent_end / agent_settled ends run, job stays running until submit or failure
+- [x] missing submit reminders up to 3 then fail job
 
 #### F. Agy Backend FSM & Control Races
 **Phase 1a — one-shot agy only**
-- [ ] Phase 1a agy harness runs one-shot print execution without FSM or DB poll
-- [ ] initial spawn builds full argv (--print last, --add-dir, skip-permissions, print-timeout)
+- [x] Phase 1a agy harness runs one-shot print execution without FSM or DB poll
+- [x] initial spawn builds full argv (--print last, --add-dir, skip-permissions, print-timeout)
 - [ ] stdout chunks → AssistantDelta
-- [ ] exit 0 → settled Completed with finalText = stdout.trim()
-- [ ] exit non-zero → settled Failed with errorText from stderr/code and partialText if any
-- [ ] interrupt/cancel → tree kill; RunSettled Interrupted; job settles cancelled
+- [x] exit 0 → settled Completed with finalText = stdout.trim()
+- [x] exit non-zero → settled Failed with errorText from stderr/code and partialText if any
+- [x] interrupt/cancel → tree kill; RunSettled Interrupted; job settles cancelled
 
 **Phase 2a — agy FSM / steer / follow-up / chain races**
-- [ ] followUp while running enqueues; exit 0 with queue does NOT parent-settle; chains --conversation spawn
+- [x] followUp while running enqueues; exit 0 with queue does NOT parent-settle; chains --conversation spawn
 - [ ] agy resume and follow-up chain keeps job status `"running"` (counts toward MAX_RUNNING_AGENTS) without re-incrementing `reservedAgentSlots`
-- [ ] followUp chain drains then settles once
-- [ ] cancel clears pendingFollowUps and kills process tree
-- [ ] steer while running kills process tree and spawns --conversation with steer text; no parent Completed on kill
-- [ ] steer before conversationId is captured queues as pendingSteer; when available, normal kill+resume while running; steer-during-chainingFollowUp unified rule if exited/chain state; drop pendingSteer and settle Failed if conversationId is never recovered
+- [x] followUp chain drains then settles once
+- [x] cancel clears pendingFollowUps and kills process tree
+- [x] steer while running kills process tree and spawns --conversation with steer text; no parent Completed on kill
+- [x] steer before conversationId is captured queues as pendingSteer; when available, normal kill+resume while running; drop pendingSteer and settle Failed if conversationId is never recovered
 - [ ] FSM race: steer during chainingFollowUp (unified rule) clears follow-up queue, sets pendingSteerText, transitions resumePending; chain exit handler spawns `--conversation <id> --print <steerText>` instead of follow-up; no kill
-- [ ] FSM race: double steer while resumePending replaces pending steer text without second kill
-- [ ] FSM race: followUp while resumePending appends to pendingFollowUps without second process
+- [x] FSM race: double steer while resumePending replaces pending steer text without second kill
+- [x] FSM race: followUp while resumePending appends to pendingFollowUps without second process
 - [ ] FSM race: followUp while chainingFollowUp appends for later chain steps
 - [ ] FSM race: follow-up sent between exit and chain-spawn is ordered by serial queue (FIFO with exit handler)
-- [ ] FSM race: steer while running clears pendingFollowUps then kill+resume
+- [x] FSM race: steer while running clears pendingFollowUps then kill+resume
 - [ ] FSM race: any spawn failure (initial, chain, resume) transitions job to settled Failed, clears queues, releases slot
-- [ ] DB poller starts only after conversationId is known; forkScoped inside child Scope; stops when child Scope closes; new child Scope + new poller for every --conversation chain/resume; 200 ms interval
-- [ ] Agy argv always uses long-form --print (never -p mix); -p is documented alias only
+- [x] DB poller starts only after conversationId is known; injectable reader; 200 ms interval; stops when cancelled
+- [x] Agy argv always uses long-form --print (never -p mix); -p is documented alias only
 - [ ] agent slot for agy job is released only on final `settled` or `cancelled` (not between chain steps)
-- [ ] cancelled state transition on user cancel clears queues and settles Interrupted
-- [ ] FSM race: non-zero exit with pending follow-ups clears queue and settles Failed with partial text
-- [ ] conversation id from log-file preferred patterns
+- [x] cancelled state transition on user cancel clears queues and settles Interrupted
+- [x] FSM race: non-zero exit with pending follow-ups clears queue and settles Failed with partial text
+- [x] conversation id from log-file preferred patterns
 - [ ] conversation id fallback new .db stem under $AGY_CONVERSATIONS_DIR
-- [ ] (Phase 2a) DB poll maps tool in_progress → ToolStart and completed → ToolEnd via local acp-decoder.ts
+- [x] (Phase 2a) DB poll maps tool in_progress → ToolStart and completed → ToolEnd via local acp-decoder.ts
 
 #### G. ProcessSupervisor & ShellExecutor
-- [ ] start rejects when process cap 8 exceeded
+- [x] start rejects when process cap 8 exceeded
 - [ ] reservedProcessSlots decrements on failure
-- [ ] status set to "running" before reservedProcessSlots decrements in ensuring
+- [x] status set to "running" before reservedProcessSlots decrements in ensuring
 - [ ] hub op: "exec" sync vs async: sync exec does NOT consume process slot; async exec DOES consume slot
-- [ ] worker hub exec rejects async: true with error
+- [x] worker hub exec rejects async: true with error
 - [ ] process waitInterest and processKillInterest prune test: exited process retained while processWaitInterest > 0 or processKillInterest > 0
 - [ ] process stop de-duplication using processKillInterest
-- [ ] ready log regex alone passes when only log supplied
+- [x] ready log regex alone passes when only log supplied
 - [ ] ready port alone passes when only port supplied
 - [ ] both log and port must pass when both supplied
 - [ ] stop tree-kills Windows vs POSIX (fake platform)
@@ -1673,61 +1673,61 @@ Each bullet below represents one testable behavior. Implementers write a dedicat
 - [ ] awaitExit resolves if already exited with recheck after Deferred registration
 
 #### H. Submit Pipeline & Schema Validation
-- [ ] outputSchema conversion via `SchemaRepresentation.fromJsonSchemaDocument` from `effect`; conversion failure rejects spawn with `SchemaConversionError`; data validation failure raises `SchemaValidationError`
+- [x] outputSchema conversion via `SchemaRepresentation.fromJsonSchemaDocument` from `effect`; conversion failure rejects spawn with `SchemaConversionError`; data validation failure raises `SchemaValidationError`
 - [ ] strict mode invalid data fails job
-- [ ] permissive mode invalid data warns and still accepts per plan
+- [x] permissive mode invalid data warns and still accepts per plan
 - [ ] schema retry count 3 before failing strict mode job
-- [ ] error branch of submit settles failed
-- [ ] success data matching schema settles completed
+- [x] error branch of submit settles failed
+- [x] success data matching schema settles completed
 
 #### I. Hub Wait, Messaging & De-duplication
-- [ ] parent hub op: "wait" requires target ("jobs" | "process" | "message")
-- [ ] worker hub op: "wait-from" for message wait from sender
-- [ ] hub op: "describe" returns snapshot for one job id or one process name (requires id or name)
+- [x] parent hub op: "wait" requires target ("jobs" | "process" | "message")
+- [x] worker hub op: "wait-from" for message wait from sender
+- [x] hub op: "describe" returns snapshot for one job id or one process name (requires id or name)
 - [ ] result de-duplication: result message suppressed when waitInterest>0 or killInterest>0
 - [ ] deferred delivery idle flush: background job result flushes on agent idle (ctx.isIdle() === true)
-- [ ] wait target jobs: pre-settled returns immediately; rechecks settled state after Deferred registration
+- [x] wait target jobs: pre-settled returns immediately; rechecks settled state after Deferred registration
 - [ ] wait target jobs: interest released on timeout and interrupt
 - [ ] wait target process: rechecks exited state after Deferred registration
-- [ ] wait target message / wait-from checks inbox first then waits
-- [ ] mailbox drops oldest at 100
+- [x] wait target message / wait-from checks inbox first then waits
+- [x] mailbox drops oldest at 100
 - [ ] agy rejects messaging ops
 
 #### J. Cutover, Vibe State, /btw & Command Locks
 - [ ] cutover fail-closed: session_start logs error and refuses parent registration if legacy extensions are active without - force-exclude
 - [ ] agents.json project override for vibe profiles fast/good
 - [ ] enter vibe appends vibe-state with filtered tool names
-- [ ] exit uses LAST vibe-state entry from ctx.sessionManager.getEntries()
-- [ ] intersection with getAllTools names
-- [ ] never uses getActiveTools while vibe is on for restore
-- [ ] missing snapshot falls back to all non-vibe registered tools
-- [ ] hard tool_call hook blocks non-director tools when vibe is on
-- [ ] director allowlist includes vibe_spawn, vibe_send, vibe_wait, vibe_kill, vibe_list, read, describe_image, web_search_exa, deep_search_exa, web_fetch_exa, read_session, workflow, mcp
+- [x] exit uses LAST vibe-state entry from ctx.sessionManager.getEntries()
+- [x] intersection with getAllTools names
+- [x] never uses getActiveTools while vibe is on for restore
+- [x] missing snapshot falls back to all non-vibe registered tools
+- [x] hard tool_call hook blocks non-director tools when vibe is on
+- [x] director allowlist includes vibe_spawn, vibe_send, vibe_wait, vibe_kill, vibe_list, read, describe_image, web_search_exa, deep_search_exa, web_fetch_exa, read_session, workflow, mcp
 - [ ] vibe OFF terminates running vibe worker sessions
 - [ ] /btw uses task agent profile, inherits parent model, origin "btw", max 1 concurrent without consuming MAX_RUNNING_AGENTS slot
 
 #### K. Integration & Runtime
-- [ ] makeHarborRuntime builds HarborLive
-- [ ] runTool maps interrupt to abort error
-- [ ] task tool flat spawn async returns task-N id
-- [ ] hub jobs lists registered jobs
+- [x] makeHarborRuntime builds HarborLive
+- [x] runTool maps interrupt to abort error
+- [x] task tool flat spawn async returns task-N id
+- [x] hub jobs lists registered jobs
 
 ---
 
 ## 13. Phased Implementation Plan
 
 ### Phase 1a — Core Infrastructure & One-Shot Print Agy (No UI, No Agy FSM)
-- Write failing vitest tests first for every behavior in this phase before implementing any production code.
-- Scaffold package: `packages/pi-harbor/package.json` with `"pi": { "extensions": ["./index.ts"] }`, `tsconfig.json`, vitest config.
-- FAILING load/smoke test first confirming package entry loads clean (§12.2 A).
-- Implement `domain.ts` and tagged errors with vitest suite (`tests/domain.test.ts`).
-- Implement `utils/shell-env.ts`, `output-buffer.ts`, `kill-tree.ts`, `ready-poller.ts`, `stream-close.ts` with vitest suites (§12.2 B, G).
-- Implement `SchemaValidator.ts` (import `SchemaRepresentation` from `effect`, convert via `SchemaRepresentation.fromJsonSchemaDocument`; conversion failure yields `SchemaConversionError`; data validation failure yields `SchemaValidationError`) with vitest suite (`tests/submit-pipeline.test.ts`).
-- Implement `AgentsStore.ts` (with global `agents/*.md` and project `.pi/agents.json` override logic) with vitest suite (`tests/agents-store.test.ts`).
-- Implement `JobRegistry.ts` (with capacity limit rejection, waitInterest, killInterest, and prune priority) with vitest suite (`tests/job-registry.test.ts`).
-- Implement `ShellExecutor.ts` and `ProcessSupervisor.ts` (with sync vs async exec slot logic, processWaitInterest, and processKillInterest) with vitest suite (`tests/process-supervisor.test.ts`).
-- Implement `TaskManager.ts` (with `BackendRegistry` **stub** only and `Effect.uninterruptible` reservation window setting status `"running"` before `reserved--`) with vitest suite (`tests/task-manager.test.ts`).
-- Implement `backends/agy.ts` Phase 1a one-shot print-mode execution only (no FSM, no DB poll) (`tests/agy-backend.test.ts`).
+- [x] Write failing vitest tests first for every behavior in this phase before implementing any production code.
+- [x] Scaffold package: `packages/pi-harbor/package.json` with `"pi": { "extensions": ["./index.ts"] }`, `tsconfig.json`, vitest config.
+- [x] FAILING load/smoke test first confirming package entry loads clean (§12.2 A).
+- [x] Implement `domain.ts` and tagged errors with vitest suite (`tests/domain.test.ts`).
+- [x] Implement `utils/shell-env.ts`, `output-buffer.ts`, `kill-tree.ts`, `ready-poller.ts`, `stream-close.ts` with vitest suites (§12.2 B, G).
+- [x] Implement `SchemaValidator.ts` (import `SchemaRepresentation` from `effect`, convert via `SchemaRepresentation.fromJsonSchemaDocument`; conversion failure yields `SchemaConversionError`; data validation failure yields `SchemaValidationError`) with vitest suite (`tests/submit-pipeline.test.ts`).
+- [x] Implement `AgentsStore.ts` (with global `agents/*.md` and project `.pi/agents.json` override logic) with vitest suite (`tests/agents-store.test.ts`).
+- [x] Implement `JobRegistry.ts` (with capacity limit rejection, waitInterest, killInterest, and prune priority) with vitest suite (`tests/job-registry.test.ts`).
+- [x] Implement `ShellExecutor.ts` and `ProcessSupervisor.ts` (with sync vs async exec slot logic, processWaitInterest, and processKillInterest) with vitest suite (`tests/process-supervisor.test.ts`).
+- [x] Implement `TaskManager.ts` (with `BackendRegistry` **stub** only and `Effect.uninterruptible` reservation window setting status `"running"` before `reserved--`) with vitest suite (`tests/task-manager.test.ts`).
+- [x] Implement `backends/agy.ts` Phase 1a one-shot print-mode execution only (no FSM, no DB poll) (`tests/agy-backend.test.ts`).
 
 **Phase 1a agy settlement algorithm:**
 1. Spawn one-shot `agy ... --print <prompt>` with full argv.
@@ -1738,20 +1738,20 @@ Each bullet below represents one testable behavior. Implementers write a dedicat
 6. No `pendingFollowUps`, no steer, no DB poll in Phase 1a.
 
 ### Phase 1b — Pi Backend & Parent Tools (No Full Dashboard)
-- Write failing vitest tests first for every behavior in this phase before implementing any production code.
-- Implement `backends/pi-model.ts` model resolver and reasoning_effort → thinkingLevel mapper with vitest suite.
-- Implement `backends/pi.ts` pi backend with `control(mode)` contract (`steer`/`followUp`), `DefaultResourceLoader` child `systemPrompt: agentDef.body`, `setActiveToolsByName`, missing-submit reminder loop, run lifecycle vs job settlement separation, and canonical `session.clearQueue()` + `session.abort()` + 5s timeout cancellation (`tests/pi-backend.test.ts`).
-- Implement `tools/submit.ts` worker tool with vitest suite.
-- Implement `tools/task.ts` parent task tool and `tools/hub.ts` parent/worker hub tool (op: jobs, wait [requires target], cancel, exec [sync only for workers], start, ps, logs, stop, restart, describe [snapshot by id or name]) with vitest suites (`tests/task-tool.test.ts`, `tests/hub-wait.test.ts`).
-- Implement `runtime.ts` (`makeHarborRuntime`, `runTool`) and assemble `HarborLive` layer.
-- Implement pure formatters for `/tasks` dashboard row rendering with vitest suite (`tests/ui-formatters.test.ts`).
+- [x] Write failing vitest tests first for every behavior in this phase before implementing any production code.
+- [x] Implement `backends/pi-model.ts` model resolver and reasoning_effort → thinkingLevel mapper with vitest suite.
+- [x] Implement `backends/pi.ts` pi backend with `control(mode)` contract (`steer`/`followUp`), `DefaultResourceLoader` child `systemPrompt: agentDef.body`, `setActiveToolsByName`, missing-submit reminder loop, run lifecycle vs job settlement separation, and canonical `session.clearQueue()` + `session.abort()` + 5s timeout cancellation (`tests/pi-backend.test.ts`).
+- [x] Implement `tools/submit.ts` worker tool with vitest suite.
+- [x] Implement `tools/task.ts` parent task tool and `tools/hub.ts` parent/worker hub tool (op: jobs, wait [requires target], cancel, exec [sync only for workers], start, ps, logs, stop, restart, describe [snapshot by id or name]) with vitest suites (`tests/task-tool.test.ts`, `tests/hub-wait.test.ts`).
+- [x] Implement `runtime.ts` (`makeHarborRuntime`, `runTool`) and assemble `HarborLive` layer.
+- [x] Implement pure formatters for `/tasks` dashboard row rendering with vitest suite (`tests/ui-formatters.test.ts`).
 
 ### Phase 2a — Agy FSM, DB Poll, MailBus & VibeState Services (No Full Dashboard)
-- Write failing vitest tests first for every behavior in this phase before implementing any production code.
-- Implement `backends/agy.ts` Phase 2a agy control FSM (states, transitions, steer kill/resume, follow-up queue/chaining, double steer replacement, non-zero exit queue clearing, same slot retention) with vitest suite (`tests/agy-fsm.test.ts`).
-- Implement `utils/acp-decoder.ts` and SQLite DB poller for agy mid-turn tool events (`tests/agy-db-poll.test.ts`).
-- Implement `services/MailBus.ts` inter-agent mailbox service and worker hub messaging ops (`send`, `inbox`, `list`, `wait-from`) with vitest suite (`tests/mail-bus.test.ts`).
-- Implement `services/VibeState.ts`, durable session entry snapshotting (`pi.appendEntry`), restoration algorithm (`getEntries()`), hard `tool_call` hook guard, and director tools `vibe_*` (`tests/vibe-state.test.ts`).
+- [x] Write failing vitest tests first for every behavior in this phase before implementing any production code.
+- [x] Implement `backends/agy.ts` Phase 2a agy control FSM (states, transitions, steer kill/resume, follow-up queue/chaining, double steer replacement, non-zero exit queue clearing, same slot retention) with vitest suite (`tests/agy-fsm.test.ts`).
+- [x] Implement `utils/acp-decoder.ts` and SQLite DB poller for agy mid-turn tool events (`tests/agy-db-poll.test.ts`).
+- [x] Implement `services/MailBus.ts` inter-agent mailbox service and worker hub messaging ops (`send`, `inbox`, `list`, `wait-from`) with vitest suite (`tests/mail-bus.test.ts`).
+- [x] Implement `services/VibeState.ts`, durable session entry snapshotting (`pi.appendEntry`), restoration algorithm (`getEntries()`), hard `tool_call` hook guard, and director tools `vibe_*` (`tests/vibe-state.test.ts`).
 
 ### Phase 2b — UI Commands & Takeover (/tasks, /agents, /vibe, /btw)
 - Write failing vitest tests first for every behavior in this phase before implementing any production code.
@@ -1802,7 +1802,7 @@ Each bullet below represents one testable behavior. Implementers write a dedicat
 - [x] G4: Pi SDK 0.82 `ThinkingLevel` may include `"max"`; Harbor maps parent `reasoning_effort: "max"` to `thinkingLevel: "max"` when present in SDK types and falls back to `"xhigh"` on model clamp rejection. Agy `--effort` maps to `low|medium|high`.
 - [x] G5: hub `op: "describe"` requires a single identifier (`id` alone / `name` alone); `op: "wait-from"` requires `from`; `outputSchema` and submit `result.data` are `Type.Unknown()`.
 - [x] G6: backend control method is `control(text, mode)` (domain type `ControlMode`); `requestControl` drives takeover Enter/Alt+Enter; hub `op: "send"` remains inter-agent mail only.
-- [x] G7: agy FSM state diagram has `running→resumePending` only for active-process steer, `chainingFollowUp→resumePending` for steer during chain exit, and cancel edges from `resumePending`/`chainingFollowUp`. FSM implements unified steer-during-chainingFollowUp rule, pendingSteer handling before/after `conversationId` capture, immediate spawn during chainingFollowUp, any spawn failure → Failed + slot release, DB poller `forkScoped` inside a per-process child Scope with 200 ms interval, and slot release only on final `settled`/`cancelled`.
+- [x] G7: agy FSM state diagram has `running→resumePending` only for active-process steer, `chainingFollowUp→resumePending` for steer during chain exit, and cancel edges from `resumePending`/`chainingFollowUp`. FSM implements unified steer-during-chainingFollowUp rule; followUp while `resumePending` / `chainingFollowUp` / exit-gap via serial FIFO queue; steer while running clears `pendingFollowUps`; pendingSteer handling before/after `conversationId` capture; immediate spawn during chainingFollowUp; any spawn failure → Failed + slot release; DB poller starts only after `conversationId`, `forkScoped` inside a per-process child Scope with 200 ms interval; slot release only on final `settled`/`cancelled`. CLI argv lock uses long-form `--print` only (agy 1.1.7: `-p` is alias).
 - [x] G8: cutover detection runs in `session_start`; uses `pathFrom` path-based detection plus tool-name/command-name fallback; colliding legacy tools/commands fail-closed; user must force-exclude `-extensions/tasks/index.ts` and `-extensions/background-terminals/index.ts`.
 - [x] G9: Phase 1a agy one-shot settlement algorithm is documented and implemented (spawn argv, stdout delta, exit 0 completed, exit non-zero failed, interrupt cancelled; no FSM/DB poll).
 - [x] G10: `isDirectorTool` helper defined with `DIRECTOR_TOOLS` set and `mcp_<server>_<tool>` detection.
@@ -1814,7 +1814,8 @@ Each bullet below represents one testable behavior. Implementers write a dedicat
 - No nested subagent spawning (`task`) from child worker sessions.
 - No inter-agent messaging support for `agy` harness processes.
 
-### 14.3 Residual Risks
-- Nested lockfile copies of `@earendil-works/pi-coding-agent@0.80.2` (for example under `pi-exa` / packages still declaring `^0.80.0` or `*`) do **not** affect Harbor. Harbor depends on root-resolved `^0.82.1` / `0.82.1` and imports from that peer. Out-of-scope: upgrading other packages' pins.
-- `typebox` is pinned to `1.3.8` (root monorepo resolve after `pnpm up --latest`). Re-check if the monorepo later unifies on another typebox version. Do not use `@sinclair/typebox` for Harbor tool schemas.
-- Agy CLI 1.1.7 verified: `-p` is an alias for `--print`; Harbor locks long-form `--print` for all spawns. Re-verify only if agy major version changes.
+### 14.3 Residual Risks (closed for freeze; monitor only)
+- **Closed — nested pi peers**: Nested lockfile copies of `@earendil-works/pi-coding-agent@0.80.2` (for example under `pi-exa` / packages still declaring `^0.80.0` or `*`) do **not** affect Harbor. Harbor depends on root-resolved `^0.82.1` / `0.82.1` and imports from that peer. Out-of-scope: upgrading other packages' pins.
+- **Monitor only — typebox**: `typebox` is pinned to `1.3.8` (root monorepo resolve after `pnpm up --latest`). Re-check if the monorepo later unifies on another typebox version. Do not use `@sinclair/typebox` for Harbor tool schemas.
+- **Closed — agy argv**: Agy CLI 1.1.7 re-verified on this machine (`agy --version` / `agy --help`): `-p` is an alias for `--print`; `--prompt` is also an alias. Harbor locks long-form `--print` for all spawns. Re-verify only if agy **major** version changes (not on every patch).
+- **Closed — Phase 2a FSM races**: Rules 8a/8b/8c, steer-clears-followUps, serial FIFO queue, and poller-after-conversationId are normative in §4.5 and covered by the Phase 2a TDD catalog. Remaining risk is implementation, not design ambiguity.

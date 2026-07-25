@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { JobRegistry } from "../services/JobRegistry.js";
 import { ProcessSupervisor } from "../services/ProcessSupervisor.js";
 import { ShellExecutor } from "../services/ShellExecutor.js";
+import { MailBus } from "../services/MailBus.js";
 
 export const HubToolParamsSchema = Type.Object({
    op: Type.Union([
@@ -57,9 +58,14 @@ export const hubToolDefinition = {
 
 export interface HandleHubOptions {
    isWorker?: boolean;
+   harness?: "pi" | "agy";
 }
 
 export const handleHub = Effect.fn("hub.handleHub")(function* (params: HubToolParams, options?: HandleHubOptions) {
+   if (options?.harness === "agy" && ["send", "inbox", "list", "wait-from"].includes(params.op)) {
+      return { ok: false, error: "Inter-agent messaging operations are unsupported on agy harness processes." };
+   }
+
    if (options?.isWorker) {
       const workerOps = ["send", "inbox", "list", "wait-from", "exec"];
       if (!workerOps.includes(params.op)) {
@@ -112,7 +118,12 @@ export const handleHub = Effect.fn("hub.handleHub")(function* (params: HubToolPa
             return { ok: true, process: proc };
          }
          if (params.target === "message") {
-            return { ok: true, messages: [] };
+            if (!params.from) {
+               return { ok: false, error: 'op "wait" for target "message" requires "from" parameter.' };
+            }
+            const mailBus = yield* MailBus;
+            const msg = yield* mailBus.awaitFrom(params.to ?? "parent", params.from, params.timeoutMs);
+            return { ok: true, message: msg };
          }
          return { ok: false, error: `Invalid wait target "${params.target}".` };
       }
@@ -222,11 +233,41 @@ export const handleHub = Effect.fn("hub.handleHub")(function* (params: HubToolPa
          return { ok: false, error: 'op "describe" requires "id" or "name".' };
       }
 
-      case "send":
-      case "inbox":
-      case "list":
+      case "send": {
+         if (!params.to || !params.message) {
+            return { ok: false, error: 'op "send" requires "to" and "message" parameters.' };
+         }
+         const mailBus = yield* MailBus;
+         const msg = yield* mailBus.send({
+            senderId: params.from ?? "parent",
+            recipientId: params.to,
+            payload: params.message,
+            replyTo: params.replyTo
+         });
+         return { ok: true, message: msg };
+      }
+
+      case "inbox": {
+         const mailBus = yield* MailBus;
+         const recipientId = params.from ?? params.to ?? "parent";
+         const messages = yield* mailBus.inbox(recipientId, { peek: params.peek });
+         return { ok: true, messages };
+      }
+
+      case "list": {
+         const mailBus = yield* MailBus;
+         const peers = yield* mailBus.listPeers;
+         return { ok: true, peers };
+      }
+
       case "wait-from": {
-         return { ok: false, error: `Messaging operation "${params.op}" is not implemented until Phase 2a MailBus.` };
+         if (!params.from) {
+            return { ok: false, error: 'op "wait-from" requires "from" parameter.' };
+         }
+         const mailBus = yield* MailBus;
+         const recipientId = params.to ?? "parent";
+         const msg = yield* mailBus.awaitFrom(recipientId, params.from, params.timeoutMs);
+         return { ok: true, message: msg };
       }
 
       default:

@@ -5,13 +5,13 @@ import { ProcessSupervisor } from "./services/ProcessSupervisor.js";
 import { TaskManager } from "./services/TaskManager.js";
 import { SchemaValidator } from "./services/SchemaValidator.js";
 import { AgentsStore } from "./services/AgentsStore.js";
+import { MailBus } from "./services/MailBus.js";
+import { VibeState } from "./services/VibeState.js";
 import { AgyBackend } from "./backends/agy.js";
 import { PiBackend } from "./backends/pi.js";
 
 const ProcessSupervisorLive = ProcessSupervisor.layer.pipe(Layer.provide(ShellExecutor.layer));
-
 const TaskManagerLive = TaskManager.layer.pipe(Layer.provide(JobRegistry.layer));
-
 const AgyBackendLive = AgyBackend.layer.pipe(Layer.provide(ShellExecutor.layer));
 
 export const HarborLive = Layer.mergeAll(
@@ -22,7 +22,9 @@ export const HarborLive = Layer.mergeAll(
    ProcessSupervisorLive,
    TaskManagerLive,
    AgyBackendLive,
-   PiBackend.layer
+   PiBackend.layer,
+   MailBus.layer,
+   VibeState.layer
 );
 
 export function makeHarborRuntime() {
