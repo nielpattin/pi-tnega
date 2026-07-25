@@ -1,0 +1,62 @@
+import { test } from "vitest";
+
+import assert from "node:assert/strict";
+import { renderSegment } from "../segments.ts";
+import type { ColorScheme, SegmentContext, ThemeLike } from "../types.ts";
+
+function hexAnsi(hex: `#${string}`): string {
+   const value = hex.slice(1);
+   const r = parseInt(value.slice(0, 2), 16);
+   const g = parseInt(value.slice(2, 4), 16);
+   const b = parseInt(value.slice(4, 6), 16);
+   return `\x1b[38;2;${r};${g};${b}m`;
+}
+
+function createSegmentContext(thinkingLevel: string, colors: ColorScheme): SegmentContext {
+   return {
+      autoCompactEnabled: true,
+      colors,
+      contextPercent: 0,
+      contextWindow: 0,
+      customCompactionEnabled: false,
+      customItemsById: new Map(),
+      extensionStatuses: new Map(),
+      git: { branch: null, staged: 0, unstaged: 0, untracked: 0 },
+      hiddenExtensionStatusKeys: new Set(),
+      model: undefined,
+      options: {},
+      sessionId: undefined,
+      sessionStartTime: Date.now(),
+      shellCwd: null,
+      shellModeActive: false,
+      shellName: null,
+      shellRunning: false,
+      theme: {
+         fg() {
+            throw new Error("unexpected theme color lookup in thinking segment test");
+         },
+      } satisfies ThemeLike,
+      thinkingLevel,
+      usageStats: { cacheRead: 0, cacheWrite: 0, cost: 0, input: 0, output: 0 },
+      usingSubscription: false,
+   };
+}
+
+test("thinking segment uses per-level colors for off through medium", () => {
+   const colors: ColorScheme = {
+      thinking: "#111111",
+      thinkingLow: "#333333",
+      thinkingMedium: "#444444",
+      thinkingMinimal: "#222222",
+   };
+
+   const off = renderSegment("thinking", createSegmentContext("off", colors));
+   const minimal = renderSegment("thinking", createSegmentContext("minimal", colors));
+   const low = renderSegment("thinking", createSegmentContext("low", colors));
+   const medium = renderSegment("thinking", createSegmentContext("medium", colors));
+
+   assert.equal(off.content, `${hexAnsi("#111111")}off\x1b[0m`);
+   assert.equal(minimal.content, `${hexAnsi("#222222")}min\x1b[0m`);
+   assert.equal(low.content, `${hexAnsi("#333333")}low\x1b[0m`);
+   assert.equal(medium.content, `${hexAnsi("#444444")}med\x1b[0m`);
+});

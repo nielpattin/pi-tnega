@@ -1,0 +1,5 @@
+{
+   "tui.editor.cursorLeft": ["left"],
+   "app.model.cycleForward": ["f3"],
+   "app.model.cycleBackward": ["f4"]
+}

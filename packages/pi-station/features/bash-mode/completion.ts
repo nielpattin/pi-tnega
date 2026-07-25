@@ -1,0 +1,609 @@
+import { readdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import type { AutocompleteItem, AutocompleteProvider, AutocompleteSuggestions } from "@earendil-works/pi-tui";
+import { matchHistoryEntries, readGlobalShellHistory, readProjectHistory } from "./history.ts";
+import type { ExtendedCompletionItem, GhostSuggestion } from "./types.ts";
+
+interface TokenContext {
+   line: string;
+   cursorCol: number;
+   beforeCursor: string;
+   afterCursor: string;
+   token: string;
+   tokenStart: number;
+   tokenEnd: number;
+   tokenIndex: number;
+   previousTokens: string[];
+}
+
+export interface OneOffBashCommandContext {
+   prefix: string;
+   command: string;
+   offset: number;
+}
+
+const GIT_SUBCOMMANDS = [
+   "add",
+   "bisect",
+   "branch",
+   "checkout",
+   "cherry-pick",
+   "clean",
+   "clone",
+   "commit",
+   "diff",
+   "fetch",
+   "grep",
+   "init",
+   "log",
+   "merge",
+   "mv",
+   "pull",
+   "push",
+   "rebase",
+   "reset",
+   "restore",
+   "revert",
+   "rm",
+   "show",
+   "stash",
+   "status",
+   "switch",
+   "tag",
+   "worktree"
+];
+
+function tokenizeBeforeCursor(text: string): string[] {
+   const tokens: string[] = [];
+   let current = "";
+   let quote: "'" | '"' | null = null;
+   let escaped = false;
+
+   for (const char of text) {
+      if (escaped) {
+         current += char;
+         escaped = false;
+         continue;
+      }
+
+      if (char === "\\") {
+         escaped = true;
+         current += char;
+         continue;
+      }
+
+      if (quote) {
+         current += char;
+         if (char === quote) {
+            quote = null;
+         }
+         continue;
+      }
+
+      if (char === "'" || char === '"') {
+         quote = char;
+         current += char;
+         continue;
+      }
+
+      if (/\s/.test(char)) {
+         if (current) {
+            tokens.push(current);
+            current = "";
+         }
+         continue;
+      }
+
+      current += char;
+   }
+
+   if (current) {
+      tokens.push(current);
+   }
+   return tokens;
+}
+
+function getTokenContext(line: string, cursorCol: number): TokenContext {
+   const beforeCursor = line.slice(0, cursorCol);
+   const afterCursor = line.slice(cursorCol);
+   const tokens = tokenizeBeforeCursor(beforeCursor);
+
+   let tokenStart = 0;
+   for (let i = beforeCursor.length - 1; i >= 0; i -= 1) {
+      const char = beforeCursor[i];
+      if (char && /\s/.test(char)) {
+         tokenStart = i + 1;
+         break;
+      }
+   }
+
+   let tokenEnd = cursorCol;
+   for (let i = cursorCol; i < line.length; i += 1) {
+      const char = line[i];
+      if (char && /\s/.test(char)) {
+         break;
+      }
+      tokenEnd = i + 1;
+   }
+
+   return {
+      afterCursor,
+      beforeCursor,
+      cursorCol,
+      line,
+      previousTokens: tokens,
+      token: line.slice(tokenStart, tokenEnd),
+      tokenEnd,
+      tokenIndex: Math.max(0, tokens.length - 1),
+      tokenStart
+   };
+}
+
+export function getOneOffBashCommandContext(line: string): OneOffBashCommandContext | null {
+   if (line.startsWith("!!")) {
+      return {
+         command: line.slice(2),
+         offset: 2,
+         prefix: "!!"
+      };
+   }
+
+   if (line.startsWith("!")) {
+      return {
+         command: line.slice(1),
+         offset: 1,
+         prefix: "!"
+      };
+   }
+
+   return null;
+}
+
+function supportsShouldTriggerFileCompletion(provider: AutocompleteProvider): provider is AutocompleteProvider & {
+   shouldTriggerFileCompletion(lines: string[], cursorLine: number, cursorCol: number): boolean;
+} {
+   return "shouldTriggerFileCompletion" in provider && typeof provider.shouldTriggerFileCompletion === "function";
+}
+
+function isExtendedCompletionItem(item: AutocompleteItem): item is ExtendedCompletionItem {
+   return (
+      "replacement" in item &&
+      typeof item.replacement === "string" &&
+      "startCol" in item &&
+      typeof item.startCol === "number" &&
+      "endCol" in item &&
+      typeof item.endCol === "number"
+   );
+}
+
+function uniqueByReplacement(items: ExtendedCompletionItem[]): ExtendedCompletionItem[] {
+   const best = new Map<string, ExtendedCompletionItem>();
+   for (const item of items) {
+      const key = `${item.startCol}:${item.endCol}:${item.replacement}`;
+      const existing = best.get(key);
+      if (!existing || item.score > existing.score) {
+         best.set(key, item);
+      }
+   }
+   return [...best.values()].toSorted((a, b) => b.score - a.score || a.label.localeCompare(b.label));
+}
+
+function pathBase(token: string, cwd: string): { dir: string; prefix: string; displayPrefix: string } {
+   const expanded = token.startsWith("~/") ? join(process.env.HOME || "", token.slice(2)) : token;
+
+   const hasSlash = expanded.includes("/");
+   if (!hasSlash) {
+      return { dir: cwd, displayPrefix: "", prefix: expanded };
+   }
+
+   const baseDir = expanded.endsWith("/") ? expanded.slice(0, -1) : dirname(expanded);
+   const resolvedDir = isAbsolute(baseDir) ? baseDir : resolve(cwd, baseDir);
+   const prefix = expanded.endsWith("/") ? "" : basename(expanded);
+   const displayPrefix = token.endsWith("/") ? token : token.slice(0, Math.max(0, token.length - prefix.length));
+   return { dir: resolvedDir, displayPrefix, prefix };
+}
+
+function escapeShellPath(value: string): string {
+   return value.replace(/([\\\s"'`$&|;<>()[\]{}?!*])/g, String.raw`\$1`);
+}
+
+function getPathSuggestions(token: string, cwd: string): ExtendedCompletionItem[] {
+   if (!token) {
+      return [];
+   }
+   const { dir, prefix, displayPrefix } = pathBase(token, cwd);
+
+   try {
+      const entries = readdirSync(dir, { withFileTypes: true })
+         .filter((entry) => prefix.length === 0 || entry.name.startsWith(prefix))
+         .slice(0, 100);
+
+      return entries.map((entry) => {
+         const suffix = entry.isDirectory() ? "/" : "";
+         const label = `${displayPrefix}${entry.name}${suffix}`;
+         const replacement = `${displayPrefix}${escapeShellPath(entry.name)}${suffix}`;
+         return {
+            endCol: 0,
+            label,
+            replacement,
+            score: 40 + (entry.isDirectory() ? 4 : 0),
+            source: "path",
+            startCol: 0,
+            value: replacement
+         } satisfies ExtendedCompletionItem;
+      });
+   } catch {
+      // Missing or unreadable directories should only remove this completion source.
+      return [];
+   }
+}
+
+function runGit(args: string[], cwd: string): string[] {
+   try {
+      const result = spawnSync("git", args, {
+         cwd,
+         encoding: "utf8",
+         stdio: ["ignore", "pipe", "ignore"]
+      });
+      if (result.status !== 0 || !result.stdout) {
+         return [];
+      }
+      return result.stdout
+         .split("\n")
+         .map((line) => line.trim())
+         .filter(Boolean);
+   } catch {
+      // Git-aware completions are optional and should not break the main completion flow.
+      return [];
+   }
+}
+
+function getGitSuggestions(ctx: TokenContext, cwd: string): ExtendedCompletionItem[] {
+   const tokens = ctx.previousTokens;
+   if (tokens[0] !== "git") {
+      return [];
+   }
+
+   if (ctx.tokenIndex <= 1) {
+      return GIT_SUBCOMMANDS.filter((command) => command.startsWith(ctx.token)).map((command) => ({
+         endCol: 0,
+         label: command,
+         replacement: command,
+         score: 52,
+         source: "git",
+         startCol: 0,
+         value: command
+      }));
+   }
+
+   const subcommand = tokens[1] ?? "";
+   if (!["checkout", "switch", "merge", "rebase", "branch", "show", "diff"].includes(subcommand)) {
+      return [];
+   }
+
+   const refs = [...runGit(["branch", "--format=%(refname:short)"], cwd), ...runGit(["tag", "--list"], cwd)];
+
+   return [...new Set(refs)]
+      .filter((ref) => ref.startsWith(ctx.token))
+      .slice(0, 100)
+      .map((ref) => ({
+         endCol: 0,
+         label: ref,
+         replacement: ref,
+         score: 50,
+         source: "git",
+         startCol: 0,
+         value: ref
+      }));
+}
+
+function canUseHistorySuggestion(ctx: TokenContext): boolean {
+   return ctx.cursorCol === ctx.line.length && ctx.line.trim().length > 0;
+}
+
+function withRange(items: ExtendedCompletionItem[], startCol: number, endCol: number): ExtendedCompletionItem[] {
+   return items.map((item) => ({ ...item, endCol, startCol }));
+}
+
+function applyCompletionToLine(line: string, item: ExtendedCompletionItem): string {
+   return line.slice(0, item.startCol) + item.replacement + line.slice(item.endCol);
+}
+
+function commandHead(value: string): string {
+   return tokenizeBeforeCursor(value.trim())[0] ?? "";
+}
+
+function findNewestHistoryMatchForHead(entries: string[], prefix: string, head: string): string | null {
+   for (const rawEntry of entries) {
+      const entry = rawEntry.trim();
+      if (!entry || !entry.startsWith(prefix)) {
+         continue;
+      }
+      if (commandHead(entry) !== head) {
+         continue;
+      }
+      return entry;
+   }
+   return null;
+}
+
+function getCuratedCommandFallback(prefix: string): GhostSuggestion | null {
+   const trimmed = prefix.trim();
+   if (!trimmed) {
+      return null;
+   }
+
+   if ("cd".startsWith(trimmed)) {
+      return { source: "path", value: "cd .." };
+   }
+
+   if ("git".startsWith(trimmed)) {
+      return { source: "git", value: "git status" };
+   }
+
+   return null;
+}
+
+function isLikelyGitCommandHead(prefix: string): boolean {
+   const trimmed = prefix.trim();
+   return trimmed.length >= 2 && "git".startsWith(trimmed);
+}
+
+function boostValidatedItemsFromGlobalHistory(
+   line: string,
+   items: ExtendedCompletionItem[],
+   globalHistoryMatches: string[]
+): ExtendedCompletionItem[] {
+   if (items.length === 0 || globalHistoryMatches.length === 0) {
+      return items;
+   }
+
+   const boosts = new Map<string, number>();
+   for (const [index, value] of globalHistoryMatches.entries()) {
+      boosts.set(value, Math.max(1, 4 - index));
+   }
+
+   return items.map((item) => {
+      const boost = boosts.get(applyCompletionToLine(line, item));
+      return boost ? { ...item, score: item.score + boost } : item;
+   });
+}
+
+export class BashCompletionEngine {
+   async getGhostSuggestion(line: string, cwd: string, shellPath: string): Promise<GhostSuggestion | null> {
+      const projectHistoryEntries = readProjectHistory(cwd);
+
+      if (line.trim().length === 0) {
+         const prefix = line;
+         const projectHistory = matchHistoryEntries(
+            projectHistoryEntries.map((entry) => entry.command),
+            line,
+            1
+         );
+         if (projectHistory.length > 0 && typeof projectHistory[0] === "string") {
+            return { source: "project-history", value: `${prefix}${projectHistory[0]}` };
+         }
+
+         return null;
+      }
+
+      const ctx = getTokenContext(line, line.length);
+      if (!canUseHistorySuggestion(ctx)) {
+         return null;
+      }
+
+      const projectHistory = matchHistoryEntries(
+         projectHistoryEntries.map((entry) => entry.command),
+         line,
+         10
+      );
+      const trimmedLine = line.trim();
+      for (const match of projectHistory) {
+         if (match.trim().length > trimmedLine.length) {
+            return { source: "project-history", value: match };
+         }
+      }
+
+      if (ctx.tokenIndex === 0) {
+         return this.getCommandPositionGhostSuggestion(line, readGlobalShellHistory(shellPath));
+      }
+
+      const deterministic = this.getDeterministicInlineSuggestions(ctx, cwd);
+      const globalHistory = matchHistoryEntries(readGlobalShellHistory(shellPath), line, 5);
+      const ranked = boostValidatedItemsFromGlobalHistory(line, uniqueByReplacement(deterministic), globalHistory);
+
+      for (const item of ranked) {
+         const value = this.buildInlineSuggestionValue(line, item);
+         if (value) {
+            return { source: item.source, value };
+         }
+      }
+
+      // Fallback: use global history matches directly when deterministic yields nothing.
+      for (const match of globalHistory) {
+         if (match.trim().length > trimmedLine.length) {
+            return { source: "global-history", value: match };
+         }
+      }
+
+      return null;
+   }
+
+   private getCommandPositionGhostSuggestion(line: string, globalHistoryEntries: string[]): GhostSuggestion | null {
+      if (isLikelyGitCommandHead(line)) {
+         const globalMatch = findNewestHistoryMatchForHead(globalHistoryEntries, line, "git");
+         if (globalMatch) {
+            return { source: "global-history", value: globalMatch };
+         }
+      }
+
+      // Match against global history for any command prefix.
+      // Skip entries that don't extend beyond the current input.
+      const trimmed = line.trim();
+      const globalMatches = matchHistoryEntries(globalHistoryEntries, line, 5);
+      for (const match of globalMatches) {
+         if (match.trim().length > trimmed.length) {
+            return { source: "global-history", value: match };
+         }
+      }
+
+      return getCuratedCommandFallback(line);
+   }
+
+   private getDeterministicInlineSuggestions(ctx: TokenContext, cwd: string): ExtendedCompletionItem[] {
+      const items: ExtendedCompletionItem[] = [];
+      items.push(...withRange(getGitSuggestions(ctx, cwd), ctx.tokenStart, ctx.tokenEnd));
+      items.push(...withRange(getPathSuggestions(ctx.token, cwd), ctx.tokenStart, ctx.tokenEnd));
+
+      return uniqueByReplacement(items);
+   }
+
+   private buildInlineSuggestionValue(line: string, item: ExtendedCompletionItem): string | null {
+      const value = applyCompletionToLine(line, item);
+      if (!value.startsWith(line) || value === line) {
+         return null;
+      }
+      return value;
+   }
+}
+
+export class BashAutocompleteProvider implements Omit<AutocompleteProvider, "getSuggestions"> {
+   getSuggestions(..._args: any[]): AutocompleteSuggestions | null {
+      return null;
+   }
+
+   applyCompletion(
+      lines: string[],
+      cursorLine: number,
+      cursorCol: number,
+      item: AutocompleteItem
+   ): {
+      lines: string[];
+      cursorLine: number;
+      cursorCol: number;
+   } {
+      if (!isExtendedCompletionItem(item)) {
+         throw new Error("Expected an extended completion item for bash autocomplete");
+      }
+
+      return applyExtendedCompletion(lines, cursorLine, item);
+   }
+
+   shouldTriggerFileCompletion(): boolean {
+      return false;
+   }
+}
+
+function applyExtendedCompletion(
+   lines: string[],
+   cursorLine: number,
+   item: ExtendedCompletionItem
+): {
+   lines: string[];
+   cursorLine: number;
+   cursorCol: number;
+} {
+   const currentLine = lines[cursorLine] || "";
+   const startCol = Math.max(0, Math.min(item.startCol, currentLine.length));
+   const endCol = Math.max(startCol, Math.min(item.endCol, currentLine.length));
+   const nextLine = currentLine.slice(0, startCol) + item.replacement + currentLine.slice(endCol);
+   const nextLines = [...lines];
+   nextLines[cursorLine] = nextLine;
+   return {
+      cursorCol: startCol + item.replacement.length,
+      cursorLine,
+      lines: nextLines
+   };
+}
+
+export class OneOffBashAutocompleteProvider implements Omit<AutocompleteProvider, "getSuggestions"> {
+   getSuggestions(..._args: any[]): AutocompleteSuggestions | null {
+      return null;
+   }
+
+   applyCompletion(
+      lines: string[],
+      cursorLine: number,
+      cursorCol: number,
+      item: AutocompleteItem
+   ): {
+      lines: string[];
+      cursorLine: number;
+      cursorCol: number;
+   } {
+      if (!isExtendedCompletionItem(item)) {
+         throw new Error("Expected an extended completion item for one-off bash autocomplete");
+      }
+
+      return applyExtendedCompletion(lines, cursorLine, item);
+   }
+
+   shouldTriggerFileCompletion(lines: string[], cursorLine: number, cursorCol: number): boolean {
+      const bang = cursorLine === 0 ? getOneOffBashCommandContext(lines[0] || "") : null;
+      return bang !== null && cursorCol >= bang.offset;
+   }
+}
+
+export class ModeAwareAutocompleteProvider implements Omit<AutocompleteProvider, "getSuggestions"> {
+   private readonly defaultProvider: AutocompleteProvider | undefined;
+   private readonly bashProvider: AutocompleteProvider;
+   private readonly oneOffBashProvider: AutocompleteProvider;
+   private readonly isBashModeActive: () => boolean;
+
+   constructor(
+      defaultProvider: AutocompleteProvider | undefined,
+      bashProvider: AutocompleteProvider,
+      oneOffBashProvider: AutocompleteProvider,
+      isBashModeActive: () => boolean
+   ) {
+      this.defaultProvider = defaultProvider;
+      this.bashProvider = bashProvider;
+      this.oneOffBashProvider = oneOffBashProvider;
+      this.isBashModeActive = isBashModeActive;
+   }
+
+   getSuggestions(
+      lines: string[],
+      cursorLine: number,
+      cursorCol: number,
+      options: { signal: AbortSignal; force?: boolean }
+   ): AutocompleteSuggestions | null | Promise<AutocompleteSuggestions | null> {
+      return (
+         this.resolveProvider(lines, cursorLine, cursorCol)?.getSuggestions(lines, cursorLine, cursorCol, options) ??
+         null
+      );
+   }
+
+   applyCompletion(lines: string[], cursorLine: number, cursorCol: number, item: AutocompleteItem, prefix: string) {
+      const provider = this.resolveProvider(lines, cursorLine, cursorCol);
+      if (provider) {
+         return provider.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
+      }
+      return { cursorCol, cursorLine, lines };
+   }
+
+   shouldTriggerFileCompletion(lines: string[], cursorLine: number, cursorCol: number): boolean {
+      const provider = this.resolveProvider(lines, cursorLine, cursorCol);
+      if (!provider) {
+         return false;
+      }
+      if (!supportsShouldTriggerFileCompletion(provider)) {
+         return true;
+      }
+      return provider.shouldTriggerFileCompletion(lines, cursorLine, cursorCol);
+   }
+
+   private resolveProvider(lines: string[], cursorLine: number, cursorCol: number): AutocompleteProvider | undefined {
+      if (this.isBashModeActive()) {
+         return this.bashProvider;
+      }
+      if (
+         supportsShouldTriggerFileCompletion(this.oneOffBashProvider) &&
+         this.oneOffBashProvider.shouldTriggerFileCompletion(lines, cursorLine, cursorCol)
+      ) {
+         return this.oneOffBashProvider;
+      }
+      return this.defaultProvider;
+   }
+}

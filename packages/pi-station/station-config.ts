@@ -1,0 +1,202 @@
+import { visibleWidth } from "@earendil-works/pi-tui";
+import type { ColorValue, CustomItemPosition, CustomStatusItem, PresetDef, StatusLineSegmentId } from "./types.ts";
+import { DEFAULT_STATION_SHORTCUTS, resolveStationShortcuts } from "./features/shortcut-manager/index.ts";
+import type { StationShortcuts } from "./features/shortcut-manager/index.ts";
+
+export interface StationConfig {
+   customItems: CustomStatusItem[];
+   scrollBar: boolean;
+   fixedEditor: boolean;
+   hashline: boolean;
+   shortcuts: StationShortcuts;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeCustomItemId(value: unknown): string | null {
+   if (typeof value !== "string") {
+      return null;
+   }
+   const normalized = value.trim();
+   if (!normalized) {
+      return null;
+   }
+   return /^[a-zA-Z0-9_-]+$/.test(normalized) ? normalized : null;
+}
+
+function normalizeCustomItemPosition(value: unknown): CustomItemPosition {
+   if (value === "left" || value === "right" || value === "secondary") {
+      return value;
+   }
+   return "right";
+}
+
+function normalizeCustomColor(value: unknown): ColorValue | undefined {
+   if (typeof value !== "string") {
+      return undefined;
+   }
+   const normalized = value.trim();
+   return (normalized || undefined) as ColorValue | undefined;
+}
+
+function normalizeCustomPrefix(value: unknown): string | undefined {
+   if (typeof value !== "string") {
+      return undefined;
+   }
+   const normalized = value.trim();
+   return normalized ? normalized : undefined;
+}
+
+function normalizeCustomStatusItem(raw: unknown, idOverride?: string): CustomStatusItem | null {
+   if (!isRecord(raw)) {
+      return null;
+   }
+   const id = normalizeCustomItemId(idOverride ?? raw.id);
+   if (!id) {
+      return null;
+   }
+
+   const statusKey = typeof raw.statusKey === "string" && raw.statusKey.trim() ? raw.statusKey.trim() : id;
+
+   return {
+      color: normalizeCustomColor(raw.color),
+      excludeFromExtensionStatuses: raw.excludeFromExtensionStatuses !== false,
+      hideWhenMissing: raw.hideWhenMissing !== false,
+      id,
+      position: normalizeCustomItemPosition(raw.position),
+      prefix: normalizeCustomPrefix(raw.prefix),
+      statusKey
+   };
+}
+
+function normalizeCustomItems(raw: unknown): CustomStatusItem[] {
+   const normalized: CustomStatusItem[] = [];
+
+   if (Array.isArray(raw)) {
+      for (const entry of raw) {
+         const item = normalizeCustomStatusItem(entry);
+         if (item) {
+            normalized.push(item);
+         }
+      }
+   } else if (isRecord(raw)) {
+      for (const [id, entry] of Object.entries(raw)) {
+         const item = normalizeCustomStatusItem(entry, id);
+         if (item) {
+            normalized.push(item);
+         }
+      }
+   }
+
+   const deduped = new Map<string, CustomStatusItem>();
+   for (const item of normalized) {
+      deduped.set(item.id, item);
+   }
+
+   return [...deduped.values()];
+}
+
+export function parseStationConfig(value: unknown): StationConfig {
+   const defaultConfig: StationConfig = {
+      customItems: [],
+      fixedEditor: true,
+      scrollBar: true,
+      hashline: true,
+      shortcuts: { ...DEFAULT_STATION_SHORTCUTS }
+   };
+
+   if (!isRecord(value)) {
+      return defaultConfig;
+   }
+
+   return {
+      customItems: normalizeCustomItems(value.customItems),
+      fixedEditor: value.fixedEditor !== false,
+      scrollBar: value.scrollBar !== false,
+      hashline: value.hashline !== false,
+      shortcuts: resolveStationShortcuts(value.shortcuts)
+   };
+}
+
+export function mergeSegmentsWithCustomItems(
+   layoutDef: PresetDef,
+   customItems: readonly CustomStatusItem[]
+): {
+   leftSegments: StatusLineSegmentId[];
+   rightSegments: StatusLineSegmentId[];
+   secondarySegments: StatusLineSegmentId[];
+   secondaryRightSegments: StatusLineSegmentId[];
+   tertiarySegments: StatusLineSegmentId[];
+} {
+   const left: StatusLineSegmentId[] = [...layoutDef.leftSegments];
+   const right: StatusLineSegmentId[] = [...layoutDef.rightSegments];
+   const secondary: StatusLineSegmentId[] = [...(layoutDef.secondarySegments ?? [])];
+   const secondaryRight: StatusLineSegmentId[] = [...(layoutDef.secondaryRightSegments ?? [])];
+   const tertiary: StatusLineSegmentId[] = [...(layoutDef.tertiarySegments ?? [])];
+
+   for (const item of customItems) {
+      const segmentId: StatusLineSegmentId = `custom:${item.id}`;
+      if (item.position === "left") {
+         left.push(segmentId);
+      } else if (item.position === "secondary") {
+         secondary.push(segmentId);
+      } else {
+         right.push(segmentId);
+      }
+   }
+
+   return {
+      leftSegments: left,
+      rightSegments: right,
+      secondaryRightSegments: secondaryRight,
+      secondarySegments: secondary,
+      tertiarySegments: tertiary
+   };
+}
+
+export function collectHiddenExtensionStatusKeys(customItems: readonly CustomStatusItem[]): Set<string> {
+   const hidden = new Set<string>();
+   for (const item of customItems) {
+      if (item.excludeFromExtensionStatuses) {
+         hidden.add(item.statusKey);
+      }
+   }
+   return hidden;
+}
+
+export function isNotificationExtensionStatus(value: string): boolean {
+   return value.trimStart().startsWith("[");
+}
+
+export function getNotificationExtensionStatuses(
+   statuses: ReadonlyMap<string, string>,
+   hiddenKeys: ReadonlySet<string>
+): string[] {
+   const notifications: string[] = [];
+   for (const [statusKey, value] of statuses.entries()) {
+      if (hiddenKeys.has(statusKey) || !value || !isNotificationExtensionStatus(value)) {
+         continue;
+      }
+      notifications.push(value);
+   }
+   return notifications;
+}
+
+export function normalizeExtensionStatusValue(value: string): string | null {
+   if (!value || visibleWidth(value) <= 0) {
+      return null;
+   }
+
+   const stripped = value.replace(/(\x1b\[[0-9;]*m|\s|·|[|])+$/, "");
+   return visibleWidth(stripped) > 0 ? stripped : null;
+}
+
+export function normalizeCompactExtensionStatus(value: string): string | null {
+   if (isNotificationExtensionStatus(value)) {
+      return null;
+   }
+
+   return normalizeExtensionStatusValue(value);
+}
