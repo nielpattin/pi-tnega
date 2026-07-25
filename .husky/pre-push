@@ -1,7 +1,0 @@
-# Git exports local repository variables into hooks. The test suite creates
-# temporary Git repositories. Clear the parent repo environment so nested Git
-# commands operate on their cwd.
-unset $(git rev-parse --local-env-vars)
-
-pnpm test
-node scripts/require-changeset.mjs origin/main

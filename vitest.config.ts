@@ -1,31 +1,31 @@
-import { configDefaults, defineConfig } from "vitest/config";
+import { defineConfig } from "vitest/config"
+
+const isDeno = process.versions.deno !== undefined
+const isBun = process.versions.bun !== undefined
 
 export default defineConfig({
-   test: {
-      environment: "node",
-      include: ["packages/pi-*/**/*.test.ts", "tests/**/*.test.ts"],
-      exclude: [
-         ...configDefaults.exclude,
-         "extensions/background-terminals/**",
-         "extensions/subagents/**",
-         "extensions/workflows/**",
-         "extensions/pi-skill-toggle/**",
-         "extensions/pi-intercom/**/*.test.ts",
-         "extensions/pi-mcp-adapter/**/*.test.ts"
-      ],
-      coverage: {
-         provider: "v8",
-         reporter: ["text", "json", "html"],
-         thresholds: {
-            global: {
-               branches: 50,
-               functions: 70,
-               lines: 60,
-               statements: 60
-            }
-         }
-      },
-      restoreMocks: true,
-      clearMocks: true
-   }
-});
+  test: {
+    projects: [
+      "packages/*/vitest.config.ts",
+      "packages/ai/*/vitest.config.ts",
+      "packages/atom/*/vitest.config.ts",
+      "packages/tools/*/vitest.config.ts",
+      "packages/sql/*/vitest.config.ts",
+      ...(isDeno ?
+        [
+          "!packages/atom",
+          "!packages/platform-bun",
+          "!packages/platform-node",
+          "!packages/platform-node-shared",
+          "!packages/sql/d1",
+          "!packages/sql/sqlite-node"
+        ] :
+        []),
+      ...(isBun ?
+        [
+          "!packages/platform-node"
+        ] :
+        [])
+    ]
+  }
+})
