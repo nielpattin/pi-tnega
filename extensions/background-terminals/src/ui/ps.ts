@@ -64,6 +64,8 @@ function statusGlyph(snap: TerminalSnapshot, theme: Theme) {
          return theme.fg("error", "■");
       case "killed":
          return theme.fg("muted", "■");
+      default:
+         return "";
    }
 }
 
@@ -77,6 +79,8 @@ function statusWord(snap: TerminalSnapshot, theme: Theme) {
          return theme.fg("error", "failed");
       case "killed":
          return theme.fg("muted", "killed");
+      default:
+         return "";
    }
 }
 
@@ -91,6 +95,7 @@ export async function openTerminalPicker(ctx: ExtensionCommandContext, view: Ter
          return;
       }
 
+      // eslint-disable-next-line no-await-in-loop
       const picked = await ctx.ui.custom<string | null>(
          (tui, theme, keybindings, done) => new TerminalDashboard(tui, theme, keybindings, view, selection, done),
          {
@@ -102,6 +107,7 @@ export async function openTerminalPicker(ctx: ExtensionCommandContext, view: Ter
       if (!picked) return;
       if (!view.get(picked)) continue;
 
+      // eslint-disable-next-line no-await-in-loop
       await ctx.ui.custom<null>(
          (tui, theme, keybindings, done) => new TerminalDetailView(tui, theme, keybindings, picked, view, done),
          {

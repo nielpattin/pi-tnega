@@ -157,12 +157,12 @@ Progress is still available via:
 
 ## When to use workflow vs subagent
 
-| Use                                                      | Prefer           |
-| -------------------------------------------------------- | ---------------- |
-| One self-contained side task                             | `subagent_spawn` |
-| Multi-phase fan-out / synthesize pipeline                | `workflow`       |
-| User said `ultracode` or explicitly asked for a workflow | `workflow`       |
-| Quick background shell process                           | `bg_start`       |
+| Use                                                      | Prefer       |
+| -------------------------------------------------------- | ------------ |
+| One self-contained side task                             | `task_spawn` |
+| Multi-phase fan-out / synthesize pipeline                | `workflow`   |
+| User said `ultracode` or explicitly asked for a workflow | `workflow`   |
+| Quick background shell process                           | `bg_start`   |
 
 ## Dependencies
 

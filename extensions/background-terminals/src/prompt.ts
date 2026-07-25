@@ -30,43 +30,69 @@ export const BG_START_PROMPT_SNIPPET =
 export const BG_START_PROMPT_GUIDELINES = [
    "Use bg_start for commands expected to run long or indefinitely (servers, watch modes, long builds); use the regular bash tool for quick commands.",
    "bg_start processes receive no stdin — never start a command that requires interactive input.",
-   "After bg_start, keep working; the exit result arrives automatically. Use bg_status only when you need current output before continuing."
+   "After bg_start, keep working; the exit result arrives automatically. Use bg_status only when you need current output before continuing.",
+   'Prefer a stable `name` (1-48 chars) for long-lived services so you can address them later as `bg_status(id: "web")` / `bg_logs(id: "web")` / `bg_kill(ids: ["web"])`. Names must be unique among currently running terminals; reuse is allowed after settle.',
+   "For servers and watchers, pass `ready` so you know when the process is actually up: `ready.log` (regex on captured output) and/or `ready.port` (TCP accept). Both must pass when both are set. On timeout the process stays running and the tool reports timed out — do not assume readiness.",
+   "Use bg_logs (not repeated bg_status) to read retained logs with cursor pagination, grep, head/tail, or follow. Reuse the returned cursor. Prefer automatic exit messages over polling loops."
 ];
 
 export const BG_START_PARAMETER_DESCRIPTIONS = {
    command:
       "Shell command line to run in the background (sh -c on POSIX, cmd.exe /d /s /c on Windows). It receives no stdin (EOF immediately); interactive commands will not work.",
    title: "Short human-readable name shown in listings and the UI",
-   workingDir: "Working directory (default: current working directory)"
+   workingDir: "Working directory (default: current working directory)",
+   name: "Optional stable handle (1-48 chars), unique among live running terminals",
+   ready: "Optional readiness condition: wait for log regex and/or TCP port connection before returning"
 };
 
 export const BG_STATUS_TOOL_DESCRIPTION =
-   "Peek at a background terminal's status and current output (tail-truncated) without blocking. If the terminal already exited, this returns its final state.";
+   "Peek at a background terminal's status and current output (tail-truncated) without blocking. Accepts terminal id or stable process name.";
 
 export const BG_STATUS_PARAMETER_DESCRIPTIONS = {
-   id: 'Terminal id, e.g. "bt-1"'
+   id: 'Terminal id (e.g. "bt-1") or stable name'
 };
 
 export const BG_LIST_TOOL_DESCRIPTION =
    "List all background terminals (running and settled) with pid, elapsed time, exit status, and output sizes.";
 
 export const BG_KILL_TOOL_DESCRIPTION =
-   "Stop one or more running background terminals (SIGTERM to the whole process tree, escalating to SIGKILL). Returns each terminal's final state; already-settled ids are reported as such.";
+   "Stop one or more running background terminals (SIGTERM to the whole process tree, escalating to SIGKILL). Accepts terminal ids or stable names.";
 
 export const BG_KILL_PARAMETER_DESCRIPTIONS = {
-   ids: 'Terminal ids to stop, e.g. ["bt-1"]'
+   ids: 'Terminal ids or names to stop, e.g. ["bt-1", "web-server"]'
+};
+
+export const BG_LOGS_TOOL_DESCRIPTION =
+   "Retrieve captured output logs from a background terminal with cursor pagination, grep filtering, head/tail slicing, and follow capability.";
+
+export const BG_LOGS_PARAMETER_DESCRIPTIONS = {
+   id: 'Terminal id (e.g. "bt-1") or stable process name',
+   lines: "Max lines to return (default 100)",
+   head: "Read from start instead of tail (default false)",
+   grep: "Regex filter pattern",
+   cursor: "Byte offset from an earlier bg_logs call",
+   follow: "Wait for new output past cursor",
+   timeoutSec: "Timeout for follow in seconds (default 30)"
 };
 
 export function buildStartResult(snap: TerminalSnapshot) {
-   return (
-      `Started background terminal ${snap.id} "${snap.title}" (pid ${snap.pid ?? "?"}, ${snap.cwd}).\n\n` +
-      `Command: ${snap.command}\n` +
+   let text =
+      `Started background terminal ${snap.id}${snap.name ? ` (${snap.name})` : ""} "${snap.title}" (pid ${snap.pid ?? "?"}, ${snap.cwd}).\n\n` +
+      `Command: ${snap.command}\n`;
+   if (snap.readyResult) {
+      if (snap.readyResult.ready) {
+         text += `Readiness condition MET.\n`;
+      } else if (snap.readyResult.timedOut) {
+         text += `Readiness condition TIMED OUT (process is still running).\n`;
+      }
+   }
+   text +=
       `It runs in the background with no stdin. You'll get a message when it exits, ` +
-      `or use bg_status(id: "${snap.id}") to peek, bg_kill to stop it, bg_list to see all.`
-   );
+      `or use bg_status(id: "${snap.name ?? snap.id}") to peek, bg_logs to view/follow logs, bg_kill to stop it, bg_list to see all.`;
+   return text;
 }
 
-/** One metadata line: `bt-1 [running] "dev server" (pid 12345, 3m12s, exit -, /path)`. */
+/** One metadata line: `bt-1 (my-name) [running] "dev server" (pid 12345, 3m12s, exit -, /path)`. */
 export function describeTerminal(snap: TerminalSnapshot) {
    const details = [
       `pid ${snap.pid ?? "?"}`,
@@ -75,7 +101,8 @@ export function describeTerminal(snap: TerminalSnapshot) {
       snap.cwd,
       `stdout ${formatSize(snap.stdout.totalBytes)}, stderr ${formatSize(snap.stderr.totalBytes)}`
    ];
-   return `${snap.id} [${snap.status}] "${snap.title}" (${details.join(", ")})`;
+   const nameLabel = snap.name ? ` (${snap.name})` : "";
+   return `${snap.id}${nameLabel} [${snap.status}] "${snap.title}" (${details.join(", ")})`;
 }
 
 /** Tail-truncated labeled output section with a pointer at the full log. */

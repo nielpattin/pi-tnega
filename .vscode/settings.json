@@ -22,5 +22,17 @@
    // TypeScript 7 > Experimental: Use Tsgo
    "js/ts.experimental.useTsgo": true,
    // Optional: use a local TypeScript package directory.
-   "js/ts.tsdk.path": "./node_modules/typescript"
+   "js/ts.tsdk.path": "./node_modules/typescript",
+   "js/ts.preferences.autoImportFileExcludePatterns": [
+      "repos/**"
+   ],
+   "files.exclude": {
+      "repos/**": true
+   },
+   "files.watcherExclude": {
+      "repos/**": true
+   },
+   "search.exclude": {
+      "repos/**": true
+   }
 }

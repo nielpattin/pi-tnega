@@ -22,8 +22,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { Cause, Scope } from "effect";
 import { Effect, Queue, Stream } from "effect";
-import type { SubagentBackend, SubagentSession } from "../backend.ts";
-import type { SpawnTask, SubagentEvent, SubagentMeta, TranscriptPart } from "../domain.ts";
+import type { TaskBackend, TaskSession } from "../backend.ts";
+import type { SpawnTask, TaskEvent, TaskMeta, TranscriptPart } from "../domain.ts";
 import { rebuildQueuesAfterPop, SendError, SpawnError } from "../domain.ts";
 
 const CHILD_SHUTDOWN_TIMEOUT_MS = 5_000;
@@ -31,11 +31,12 @@ const CHILD_TOOL_CALL_TIMEOUT_MS = 3 * 60 * 1_000;
 
 /** Tools that headless children must not receive. Everything else stays enabled. */
 const CHILD_EXCLUDED_TOOL_NAMES = [
-   "subagent_spawn",
-   "subagent_wait",
-   "subagent_cancel",
-   "subagent_check",
-   "subagent_list",
+   "task_spawn",
+   "task_spawn_batch",
+   "task_wait",
+   "task_cancel",
+   "task_check",
+   "task_list",
    "vibe_spawn",
    "vibe_send",
    "vibe_wait",
@@ -153,7 +154,7 @@ function createToolCallTimeoutGuard(timeoutMs = CHILD_TOOL_CALL_TIMEOUT_MS) {
    const wrap = (definition: ToolDefinition) => {
       if (wrapped.has(definition)) return;
       wrapped.add(definition);
-      const execute = definition.execute;
+      const execute = definition.execute.bind(definition);
       definition.execute = async (toolCallId, params, signal, onUpdate, ctx) => {
          const timeoutController = new AbortController();
          const executionSignal = signal
@@ -295,7 +296,7 @@ function boundedError(error: unknown) {
    return (error instanceof Error ? error.message : String(error)).slice(0, 4096);
 }
 
-const makePiSession = (task: SpawnTask): Effect.Effect<SubagentSession, SpawnError, Scope.Scope> =>
+const makePiSession = (task: SpawnTask): Effect.Effect<TaskSession, SpawnError, Scope.Scope> =>
    Effect.gen(function* () {
       const registry = task.parent.modelRegistry;
       if (!registry) {
@@ -314,7 +315,7 @@ const makePiSession = (task: SpawnTask): Effect.Effect<SubagentSession, SpawnErr
       const session = yield* Effect.tryPromise({
          try: async () => {
             const { loader, settingsManager } = await createChildResources(task.cwd, task.parent.projectTrusted);
-            const { session } = await createAgentSession({
+            const { session: createdSession } = await createAgentSession({
                cwd: task.cwd,
                sessionManager: SessionManager.create(task.cwd),
                settingsManager,
@@ -328,22 +329,22 @@ const makePiSession = (task: SpawnTask): Effect.Effect<SubagentSession, SpawnErr
             // Apply tools allowlist if task.tools is provided
             if (task.tools !== undefined) {
                const requestedTools = new Set(task.tools);
-               const registeredTools = session.getAllTools().map((t) => t.name);
+               const registeredTools = createdSession.getAllTools().map((t) => t.name);
                const allowedTools = registeredTools.filter(
                   (name) => requestedTools.has(name) && !(CHILD_EXCLUDED_TOOL_NAMES as readonly string[]).includes(name)
                );
-               (session as any).setActiveTools?.(allowedTools);
+               (createdSession as any).setActiveTools?.(allowedTools);
             }
             // Start child extension session hooks/resources in headless mode.
             // A rejection here would otherwise leak the freshly created session:
             // the scope finalizer that owns cleanup is only registered later.
             try {
-               await session.bindExtensions({ mode: "print" });
+               await createdSession.bindExtensions({ mode: "print" });
             } catch (error) {
-               await shutdownAndDisposeChildSession(session);
+               await shutdownAndDisposeChildSession(createdSession);
                throw error;
             }
-            return session;
+            return createdSession;
          },
          catch: (error) => new SpawnError({ message: boundedError(error) })
       });
@@ -357,8 +358,8 @@ const makePiSession = (task: SpawnTask): Effect.Effect<SubagentSession, SpawnErr
          settled: false
       };
 
-      const events = yield* Queue.make<SubagentEvent, Cause.Done>();
-      const emit = (event: SubagentEvent) => {
+      const events = yield* Queue.make<TaskEvent, Cause.Done>();
+      const emit = (event: TaskEvent) => {
          Queue.offerUnsafe(events, event);
       };
 
@@ -376,7 +377,7 @@ const makePiSession = (task: SpawnTask): Effect.Effect<SubagentSession, SpawnErr
          return registry.find(last.provider, last.responseModel ?? last.model) ?? sessionModel;
       };
 
-      const currentMeta = (): SubagentMeta => {
+      const currentMeta = (): TaskMeta => {
          const m = activeModel();
          return {
             backend: "pi",
@@ -544,7 +545,7 @@ const makePiSession = (task: SpawnTask): Effect.Effect<SubagentSession, SpawnErr
 
       // Session naming is best-effort.
       yield* Effect.try(() =>
-         session.sessionManager.appendSessionInfo(`${task.origin === "btw" ? "btw" : "subagent"}: ${task.title}`)
+         session.sessionManager.appendSessionInfo(`${task.origin === "btw" ? "btw" : "task"}: ${task.title}`)
       ).pipe(Effect.ignore);
 
       emit({ _tag: "MetaChanged", meta: currentMeta() });
@@ -556,7 +557,7 @@ const makePiSession = (task: SpawnTask): Effect.Effect<SubagentSession, SpawnErr
          send: (text) =>
             Effect.suspend((): Effect.Effect<void, SendError> => {
                if (state.closed) {
-                  return new SendError({ message: "Subagent session is closed." });
+                  return new SendError({ message: "Task session is closed." });
                }
                if (session.isStreaming) {
                   // Steer the active run via the SDK's queue; queue_update events
@@ -582,6 +583,7 @@ const makePiSession = (task: SpawnTask): Effect.Effect<SubagentSession, SpawnErr
             // manager settle a run that is still mutating the workspace. The
             // manager bounds this effect at 5s and force-disposes on timeout.
             while (!state.closed && session.isStreaming) {
+               // eslint-disable-next-line no-await-in-loop
                await new Promise((resolve) => setTimeout(resolve, 50));
             }
             // No streaming run means no agent_end will arrive; emit the
@@ -609,10 +611,10 @@ const makePiSession = (task: SpawnTask): Effect.Effect<SubagentSession, SpawnErr
                }
                return popped;
             })
-      } satisfies SubagentSession;
+      } satisfies TaskSession;
    });
 
-export const piBackend: SubagentBackend = {
+export const piBackend: TaskBackend = {
    name: "pi",
    capabilities: { steering: true, modelSelection: true, reasoningEffort: true },
    // In-process SDK: always available.

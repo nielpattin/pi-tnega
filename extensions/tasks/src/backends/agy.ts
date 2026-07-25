@@ -11,8 +11,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { Cause, Scope } from "effect";
 import { Effect, Queue, Stream } from "effect";
-import type { SubagentBackend, SubagentSession } from "../backend.ts";
-import type { ReasoningEffort, RunOutcome, SpawnTask, SubagentEvent, SubagentMeta } from "../domain.ts";
+import type { TaskBackend, TaskSession } from "../backend.ts";
+import type { ReasoningEffort, RunOutcome, SpawnTask, TaskEvent, TaskMeta } from "../domain.ts";
 import { SendError, SpawnError } from "../domain.ts";
 
 /** Base family model shown to the parent agent. Effort selects the CLI slug. */
@@ -199,10 +199,7 @@ export function buildAgyArgs(task: {
 }
 
 function makeAgyLogFilePath(): string {
-   return path.join(
-      os.tmpdir(),
-      `agy-subagent-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.log`
-   );
+   return path.join(os.tmpdir(), `agy-task-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.log`);
 }
 
 function readFileIfExists(filePath: string): string {
@@ -293,7 +290,7 @@ const makeAgySession = (
    task: SpawnTask,
    resolveBinary: () => string | undefined,
    spawnImpl: AgySpawnFn
-): Effect.Effect<SubagentSession, SpawnError, Scope.Scope> =>
+): Effect.Effect<TaskSession, SpawnError, Scope.Scope> =>
    Effect.gen(function* () {
       const binary = resolveBinary();
       if (!binary) {
@@ -302,8 +299,8 @@ const makeAgySession = (
          });
       }
 
-      const events = yield* Queue.unbounded<SubagentEvent, Cause.Done>();
-      const emit = (event: SubagentEvent) => {
+      const events = yield* Queue.unbounded<TaskEvent, Cause.Done>();
+      const emit = (event: TaskEvent) => {
          Queue.offerUnsafe(events, event);
       };
 
@@ -321,7 +318,7 @@ const makeAgySession = (
          meta: {
             backend: "agy" as const,
             modelLabel
-         } satisfies SubagentMeta as SubagentMeta
+         } satisfies TaskMeta as TaskMeta
       };
 
       const captureConversationId = (sources: string[]) => {
@@ -542,7 +539,7 @@ const makeAgySession = (
             }
          }),
          popLastQueued: () => Effect.succeed(undefined)
-      } satisfies SubagentSession;
+      } satisfies TaskSession;
    });
 
 /** Testable factory: inject binary resolution and process spawn. */
@@ -551,7 +548,7 @@ export function createAgyBackend(
       resolveBinary?: () => string | undefined;
       spawn?: AgySpawnFn;
    } = {}
-): SubagentBackend {
+): TaskBackend {
    const resolveBinary = options.resolveBinary ?? (() => resolveAgyBinary());
    const spawnImpl: AgySpawnFn =
       options.spawn ?? ((command, args, spawnOptions) => spawn(command, [...args], spawnOptions as any));
@@ -568,4 +565,4 @@ export function createAgyBackend(
    };
 }
 
-export const agyBackend: SubagentBackend = createAgyBackend();
+export const agyBackend: TaskBackend = createAgyBackend();

@@ -14,6 +14,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
+import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Context, Deferred, Effect, Exit, FiberSet, Layer, Scope } from "effect";
@@ -26,6 +27,7 @@ import {
    type TerminalStatus
 } from "./domain.ts";
 import { OutputBuffer } from "./output.ts";
+import { buildChildEnv } from "./shell-env.ts";
 
 export const MAX_RUNNING = 8;
 export const MAX_TRACKED = 32;
@@ -64,6 +66,13 @@ interface MutableSnapshot extends TerminalSnapshot {
    exitCode?: number;
    signal?: string;
    errorText?: string;
+   name?: string;
+   readyResult?: {
+      ready: boolean;
+      timedOut?: boolean;
+      logMatched?: boolean;
+      portMatched?: boolean;
+   };
 }
 
 interface Entry {
@@ -94,10 +103,35 @@ interface Entry {
    settled: Deferred.Deferred<void>;
 }
 
+export interface ReadyOptions {
+   readonly log?: string;
+   readonly port?: number;
+   readonly host?: string;
+   readonly timeoutSec?: number;
+}
+
 export interface StartOptions {
    readonly command: string;
    readonly title: string;
    readonly cwd: string;
+   readonly name?: string;
+   readonly ready?: ReadyOptions;
+}
+
+export interface LogOptions {
+   readonly id: string;
+   readonly lines?: number;
+   readonly head?: boolean;
+   readonly grep?: string;
+   readonly cursor?: number;
+   readonly follow?: boolean;
+   readonly timeoutSec?: number;
+}
+
+export interface LogResult {
+   readonly text: string;
+   readonly cursor: number;
+   readonly status: TerminalStatus;
 }
 
 export interface KillResult {
@@ -140,6 +174,7 @@ export interface TerminalReadModel {
 export interface TerminalManagerShape {
    start(options: StartOptions): Effect.Effect<TerminalSnapshot, SpawnError | ConcurrencyLimitError>;
    status(id: string): Effect.Effect<TerminalSnapshot, UnknownTerminalError>;
+   logs(options: LogOptions): Effect.Effect<LogResult, UnknownTerminalError>;
    /** Kill running terminals; resolves only after they have settled. */
    kill(ids: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<KillResult>>;
    readonly list: Effect.Effect<ReadonlyArray<TerminalSnapshot>>;
@@ -153,7 +188,12 @@ export class TerminalManager extends Context.Service<TerminalManager, TerminalMa
 
 // --- Process helpers ------------------------------------------------------------
 
-function shellInvocation(command: string) {
+interface ShellInvocation {
+   readonly shell: string;
+   readonly args: string[];
+}
+
+function shellInvocation(command: string): ShellInvocation {
    if (process.platform === "win32") {
       let shPath: string | undefined;
       const gitSh = "C:\\Program Files\\Git\\usr\\bin\\sh.exe";
@@ -224,7 +264,7 @@ function awaitChildClose(child: ChildProcess, closed: () => boolean) {
    return Effect.callback<void>((resume) => {
       if (closed()) {
          resume(Effect.void);
-         return;
+         return Effect.void;
       }
       const onClose = () => resume(Effect.void);
       child.once("close", onClose);
@@ -236,19 +276,20 @@ function awaitChildClose(child: ChildProcess, closed: () => boolean) {
  * shell's exit because descendants can keep the inherited pipes and process
  * group alive after the shell itself is gone. */
 function terminateChild(child: ChildProcess, closed: () => boolean, onSignal: () => void) {
-   return Effect.suspend(() => {
-      if (closed()) return Effect.void;
-      return Effect.gen(function* () {
-         yield* Effect.sync(() => {
-            onSignal();
-            killTree(child, "SIGTERM");
-         });
-         yield* awaitChildClose(child, closed).pipe(Effect.timeout(FORCE_KILL_AFTER_MS), Effect.ignore);
-         if (closed()) return;
-         yield* Effect.sync(() => killTree(child, "SIGKILL"));
-         yield* awaitChildClose(child, closed).pipe(Effect.timeout(500), Effect.ignore);
-      });
-   });
+   return Effect.suspend(() =>
+      closed()
+         ? Effect.void
+         : Effect.gen(function* () {
+              yield* Effect.sync(() => {
+                 onSignal();
+                 killTree(child, "SIGTERM");
+              });
+              yield* awaitChildClose(child, closed).pipe(Effect.timeout(FORCE_KILL_AFTER_MS), Effect.ignore);
+              if (closed()) return;
+              yield* Effect.sync(() => killTree(child, "SIGKILL"));
+              yield* awaitChildClose(child, closed).pipe(Effect.timeout(500), Effect.ignore);
+           })
+   );
 }
 
 // --- Implementation --------------------------------------------------------------
@@ -275,7 +316,7 @@ const makeManager = Effect.gen(function* () {
    let onSettled: ((snap: TerminalSnapshot, consumed: boolean) => void) | undefined;
 
    const notify = (id?: string) => {
-      for (const listener of [...listeners]) {
+      for (const listener of listeners) {
          try {
             listener();
          } catch {
@@ -295,6 +336,15 @@ const makeManager = Effect.gen(function* () {
 
    const runningCount = () => [...entries.values()].filter((e) => e.snapshot.status === "running").length;
 
+   const resolveEntry = (idOrName: string): Entry | undefined => {
+      const direct = entries.get(idOrName);
+      if (direct) return direct;
+      const matches = [...entries.values()].filter((e) => e.snapshot.name === idOrName);
+      if (matches.length === 0) return undefined;
+      const running = matches.find((e) => e.snapshot.status === "running");
+      return running ?? matches[matches.length - 1];
+   };
+
    const addKillInterest = (ids: ReadonlyArray<string>) => {
       for (const id of ids) killInterest.set(id, (killInterest.get(id) ?? 0) + 1);
    };
@@ -312,7 +362,7 @@ const makeManager = Effect.gen(function* () {
       if (entries.size <= MAX_TRACKED) return;
       const candidates = [...entries.values()]
          .filter((e) => e.snapshot.status !== "running" && !killInterest.has(e.snapshot.id))
-         .sort(
+         .toSorted(
             (a, b) => (a.snapshot.settledAt ?? a.snapshot.createdAt) - (b.snapshot.settledAt ?? b.snapshot.createdAt)
          );
       for (const entry of candidates) {
@@ -459,6 +509,31 @@ const makeManager = Effect.gen(function* () {
 
    const start = (options: StartOptions) =>
       Effect.gen(function* () {
+         if (options.name !== undefined) {
+            const name = options.name.trim();
+            if (name.length < 1 || name.length > 48) {
+               return yield* new SpawnError({
+                  message: "name must be between 1 and 48 characters long."
+               });
+            }
+            const existing = [...entries.values()].find(
+               (e) => e.snapshot.name === name && e.snapshot.status === "running"
+            );
+            if (existing) {
+               return yield* new SpawnError({
+                  message: `A running background terminal with name "${name}" already exists.`
+               });
+            }
+         }
+
+         if (options.ready !== undefined) {
+            if (!options.ready.log && options.ready.port === undefined) {
+               return yield* new SpawnError({
+                  message: "ready options require at least one of 'log' or 'port'."
+               });
+            }
+         }
+
          // Reserve synchronously (before the first yield inside doStart) so
          // parallel tool calls cannot race past the cap.
          yield* Effect.suspend((): Effect.Effect<void, SpawnError | ConcurrencyLimitError> => {
@@ -478,11 +553,12 @@ const makeManager = Effect.gen(function* () {
 
          const doStart = Effect.gen(function* () {
             const { shell, args } = shellInvocation(options.command);
+            const env = buildChildEnv(process.env, shell);
             const child = yield* Effect.try({
                try: () =>
                   spawn(shell, args, {
                      cwd: options.cwd,
-                     env: process.env,
+                     env,
                      // stdin IGNORED: there is no input surface, ever. A process
                      // that reads stdin sees EOF immediately.
                      stdio: ["ignore", "pipe", "pipe"],
@@ -507,6 +583,7 @@ const makeManager = Effect.gen(function* () {
                title: options.title,
                cwd: options.cwd,
                pid: child.pid,
+               name: options.name,
                status: "running",
                createdAt: Date.now(),
                get stdout() {
@@ -633,6 +710,68 @@ const makeManager = Effect.gen(function* () {
             }
             entries.set(id, entry);
             notify(id);
+
+            if (options.ready) {
+               const readyOpts = options.ready;
+               const timeoutMs = (readyOpts.timeoutSec ?? 30) * 1000;
+               const deadline = Date.now() + timeoutMs;
+               const host = readyOpts.host ?? "127.0.0.1";
+
+               const checkPort = (port: number): Promise<boolean> => {
+                  return new Promise((res) => {
+                     const socket = net.createConnection({ host, port });
+                     socket.on("connect", () => {
+                        socket.destroy();
+                        res(true);
+                     });
+                     socket.on("error", () => {
+                        socket.destroy();
+                        res(false);
+                     });
+                  });
+               };
+
+               let readyPassed = false;
+               let logMatched = false;
+               let portMatched = false;
+
+               while (Date.now() < deadline && entry.snapshot.status === "running") {
+                  const outText = entry.stdoutBuf.view().text;
+                  const errText = entry.stderrBuf.view().text;
+                  const combined = errText ? `${outText}\n${errText}` : outText;
+
+                  let lOk = true;
+                  if (readyOpts.log) {
+                     try {
+                        lOk = new RegExp(readyOpts.log).test(combined);
+                     } catch {
+                        lOk = combined.includes(readyOpts.log);
+                     }
+                  }
+                  logMatched = lOk;
+
+                  let pOk = true;
+                  if (readyOpts.port !== undefined) {
+                     pOk = yield* Effect.promise(() => checkPort(readyOpts.port!));
+                  }
+                  portMatched = pOk;
+
+                  if (lOk && pOk) {
+                     readyPassed = true;
+                     break;
+                  }
+
+                  yield* Effect.sleep(50);
+               }
+
+               entry.snapshot.readyResult = {
+                  ready: readyPassed,
+                  timedOut: !readyPassed && entry.snapshot.status === "running",
+                  logMatched,
+                  portMatched
+               };
+            }
+
             return snapshot as TerminalSnapshot;
          });
 
@@ -652,7 +791,7 @@ const makeManager = Effect.gen(function* () {
 
    const status = (id: string) =>
       Effect.suspend((): Effect.Effect<TerminalSnapshot, UnknownTerminalError> => {
-         const entry = entries.get(id);
+         const entry = resolveEntry(id);
          if (!entry) {
             const known = [...entries.keys()];
             return new UnknownTerminalError({
@@ -660,6 +799,94 @@ const makeManager = Effect.gen(function* () {
             });
          }
          return Effect.succeed(entry.snapshot as TerminalSnapshot);
+      });
+
+   const logs = (options: LogOptions) =>
+      Effect.suspend((): Effect.Effect<LogResult, UnknownTerminalError> => {
+         const entry = resolveEntry(options.id);
+         if (!entry) {
+            const known = [...entries.keys()];
+            return new UnknownTerminalError({
+               message: `Unknown terminal id "${options.id}". Known: ${known.join(", ") || "none"}.`
+            });
+         }
+
+         return Effect.gen(function* () {
+            const timeoutSec = options.timeoutSec ?? 30;
+            const deadline = Date.now() + timeoutSec * 1000;
+
+            const getFullText = () => {
+               let out = entry.stdoutBuf.view().text;
+               if (entry.stdoutBuf.spillPath && fs.existsSync(entry.stdoutBuf.spillPath)) {
+                  try {
+                     out = fs.readFileSync(entry.stdoutBuf.spillPath, "utf8");
+                  } catch {}
+               }
+               let err = entry.stderrBuf.view().text;
+               if (entry.stderrBuf.spillPath && fs.existsSync(entry.stderrBuf.spillPath)) {
+                  try {
+                     err = fs.readFileSync(entry.stderrBuf.spillPath, "utf8");
+                  } catch {}
+               }
+               return err ? `${out}\n${err}` : out;
+            };
+
+            let fullText = getFullText();
+            let totalBytes = Buffer.byteLength(fullText, "utf8");
+
+            if (
+               options.follow &&
+               options.cursor !== undefined &&
+               totalBytes <= options.cursor &&
+               entry.snapshot.status === "running"
+            ) {
+               while (Date.now() < deadline && entry.snapshot.status === "running") {
+                  yield* Effect.sleep(50);
+                  fullText = getFullText();
+                  totalBytes = Buffer.byteLength(fullText, "utf8");
+                  if (totalBytes > options.cursor) break;
+               }
+            }
+
+            let text = fullText;
+            if (options.cursor !== undefined && options.cursor > 0) {
+               const buf = Buffer.from(fullText, "utf8");
+               if (options.cursor < buf.length) {
+                  text = buf.subarray(options.cursor).toString("utf8");
+               } else {
+                  text = "";
+               }
+            }
+
+            if (options.grep) {
+               try {
+                  const re = new RegExp(options.grep);
+                  text = text
+                     .split("\n")
+                     .filter((l) => re.test(l))
+                     .join("\n");
+               } catch {
+                  // ignore regex parse error
+               }
+            }
+
+            const maxLines = options.lines ?? 100;
+            const cleanText = text.replace(/\n$/, "");
+            const linesList = cleanText ? cleanText.split("\n") : [];
+            if (linesList.length > maxLines) {
+               if (options.head) {
+                  text = linesList.slice(0, maxLines).join("\n");
+               } else {
+                  text = linesList.slice(linesList.length - maxLines).join("\n");
+               }
+            }
+
+            return {
+               text,
+               cursor: totalBytes,
+               status: entry.snapshot.status
+            };
+         });
       });
 
    /** Kill one running entry: close the scope — whose finalizer marks the kill
@@ -678,7 +905,7 @@ const makeManager = Effect.gen(function* () {
          const unique = [...new Set(ids)];
          const byId = new Map(
             unique
-               .map((id) => entries.get(id))
+               .map((id) => resolveEntry(id))
                .filter((entry): entry is Entry => entry !== undefined)
                .map((entry) => [entry.snapshot.id, entry])
          );
@@ -701,18 +928,19 @@ const makeManager = Effect.gen(function* () {
             // Capture the report BEFORE the ensuring below releases interest and
             // prunes — a just-settled entry must not vanish out from under it.
             return unique.map((id): KillResult => {
-               const snapshot = byId.get(id)?.snapshot;
+               const resolved = resolveEntry(id);
+               const snapshot = resolved?.snapshot ?? byId.get(id)?.snapshot;
                const history = settledHistory.get(id);
-               const status = snapshot?.status ?? history?.status ?? "killed";
-               const wasRunning = runningIds.includes(id);
+               const resultStatus = snapshot?.status ?? history?.status ?? "killed";
+               const wasRunning = runningIds.includes(snapshot?.id ?? id);
                return {
-                  id,
+                  id: snapshot?.id ?? id,
                   title: snapshot?.title ?? history?.title ?? "?",
-                  status,
+                  status: resultStatus,
                   wasRunning,
                   // A natural exit can win the race with our SIGTERM; report what
                   // actually happened rather than claiming the kill did it.
-                  killed: wasRunning && status === "killed",
+                  killed: wasRunning && resultStatus === "killed",
                   exit: snapshot ? formatExit(snapshot) : (history?.exit ?? "unknown")
                };
             });
@@ -750,7 +978,7 @@ const makeManager = Effect.gen(function* () {
 
    const view: TerminalReadModel = {
       list: () => [...entries.values()].map((entry) => entry.snapshot),
-      get: (id) => entries.get(id)?.snapshot,
+      get: (idOrName) => resolveEntry(idOrName)?.snapshot,
       size: () => entries.size,
       subscribe: (listener) => {
          listeners.add(listener);
@@ -768,8 +996,8 @@ const makeManager = Effect.gen(function* () {
             if (set.size === 0) idListeners.delete(id);
          };
       },
-      requestKill: (id) => {
-         const entry = entries.get(id);
+      requestKill: (idOrName) => {
+         const entry = resolveEntry(idOrName);
          if (!entry) return;
          // UI-initiated kills are not "consumed": the killed result still flows
          // back to the model as a follow-up message (subagents precedent).
@@ -787,6 +1015,7 @@ const makeManager = Effect.gen(function* () {
    return TerminalManager.of({
       start,
       status,
+      logs,
       kill,
       list: Effect.sync(() => [...entries.values()].map((e) => e.snapshot)),
       disposeAll,

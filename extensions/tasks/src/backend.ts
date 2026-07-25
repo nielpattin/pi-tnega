@@ -1,11 +1,11 @@
 /**
- * The unified backend interface: `SubagentBackend` for the pi agent runtime,
- * producing `SubagentSession`.
+ * The unified backend interface: `TaskBackend` for the pi agent runtime,
+ * producing `TaskSession`.
  */
 
 import type { Effect, Scope, Stream } from "effect";
 import { Context } from "effect";
-import type { BackendName, SendError, SpawnError, SpawnTask, SubagentEvent, SubagentMeta } from "./domain.ts";
+import type { BackendName, SendError, SpawnError, SpawnTask, TaskEvent, TaskMeta } from "./domain.ts";
 
 export interface BackendCapabilities {
    /** Can send() steer a live run (vs. only starting a fresh run when idle). */
@@ -15,17 +15,17 @@ export interface BackendCapabilities {
 }
 
 /**
- * A live subagent session. The manager is the single consumer of `events`;
- * it folds them into the `SubagentSnapshot` everything else reads.
+ * A live task session. The manager is the single consumer of `events`;
+ * it folds them into the `TaskSnapshot` everything else reads.
  */
-export interface SubagentSession {
+export interface TaskSession {
    /** Current metadata snapshot. Updates also arrive as MetaChanged events. */
-   readonly meta: Effect.Effect<SubagentMeta>;
+   readonly meta: Effect.Effect<TaskMeta>;
    /**
     * All activity, normalized. Ends when the session's scope closes. Every
     * run started within the session terminates with a RunSettled event.
     */
-   readonly events: Stream.Stream<SubagentEvent>;
+   readonly events: Stream.Stream<TaskEvent>;
    /**
     * Steer the active run, or start a fresh run when idle (v1 `manager.send`
     * semantics — the "is a run active" decision is backend-native state).
@@ -45,7 +45,7 @@ export interface SubagentSession {
    popLastQueued(): Effect.Effect<string | undefined>;
 }
 
-export interface SubagentBackend {
+export interface TaskBackend {
    readonly name: BackendName;
    readonly capabilities: BackendCapabilities;
    /** Probe availability (binary on PATH, SDK importable, credentials). */
@@ -55,10 +55,10 @@ export interface SubagentBackend {
     * underlying session or process and ends `events`. Fire-and-forget
     * semantics (background fibers, result delivery) live in the manager.
     */
-   spawn(task: SpawnTask): Effect.Effect<SubagentSession, SpawnError, Scope.Scope>;
+   spawn(task: SpawnTask): Effect.Effect<TaskSession, SpawnError, Scope.Scope>;
 }
 
 /** Registry of all wired backends, keyed by name. */
-export class BackendRegistry extends Context.Service<BackendRegistry, ReadonlyMap<BackendName, SubagentBackend>>()(
-   "subagents/BackendRegistry"
+export class BackendRegistry extends Context.Service<BackendRegistry, ReadonlyMap<BackendName, TaskBackend>>()(
+   "tasks/BackendRegistry"
 ) {}

@@ -3,9 +3,13 @@
  * inspect and stop, but never write to (stdin is ignored at the OS level).
  *
  * Tools (for the LLM):
- * - bg_start: fire-and-forget spawn (command, title, working_dir). Max 8
- *   running at once. The model is notified exactly once when a process exits.
- * - bg_status: peek at one terminal's status + tail-truncated output.
+ * - bg_start: fire-and-forget spawn (command, title, working_dir, optional
+ *   stable `name`, optional `ready` log/port condition). Max 8 running at once.
+ *   The model is notified exactly once when a process exits.
+ * - bg_status: peek at one terminal's status + tail-truncated output. Accepts
+ *   terminal id or stable name.
+ * - bg_logs: read/follow retained output logs with cursor pagination, grep,
+ *   head/tail. Accepts terminal id or stable name.
  * - bg_list: list all tracked terminals (running and settled).
  * - bg_kill: SIGTERM→SIGKILL the whole process tree; returns final state.
  *
@@ -30,6 +34,8 @@ import {
    BG_KILL_PARAMETER_DESCRIPTIONS,
    BG_KILL_TOOL_DESCRIPTION,
    BG_LIST_TOOL_DESCRIPTION,
+   BG_LOGS_PARAMETER_DESCRIPTIONS,
+   BG_LOGS_TOOL_DESCRIPTION,
    BG_START_PARAMETER_DESCRIPTIONS,
    BG_START_PROMPT_GUIDELINES,
    BG_START_PROMPT_SNIPPET,
@@ -207,6 +213,22 @@ export default function (pi: ExtensionAPI) {
             Type.String({
                description: BG_START_PARAMETER_DESCRIPTIONS.workingDir
             })
+         ),
+         name: Type.Optional(
+            Type.String({
+               description: BG_START_PARAMETER_DESCRIPTIONS.name
+            })
+         ),
+         ready: Type.Optional(
+            Type.Object(
+               {
+                  log: Type.Optional(Type.String({ description: "Regex pattern matched against captured output" })),
+                  port: Type.Optional(Type.Number({ description: "TCP port that must accept connections" })),
+                  host: Type.Optional(Type.String({ description: "Host for port check (default 127.0.0.1)" })),
+                  timeoutSec: Type.Optional(Type.Number({ description: "Timeout in seconds (default 30)" }))
+               },
+               { description: BG_START_PARAMETER_DESCRIPTIONS.ready }
+            )
          )
       }),
       async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -223,11 +245,48 @@ export default function (pi: ExtensionAPI) {
          // Collapse whitespace (a newline inside a one-line UI row desyncs the
          // TUI renderer) before bounding the length.
          const title = params.title.replace(/\s+/g, " ").trim().slice(0, 80) || "terminal";
-         const snap = await runTool(getRuntime(), manager.start({ command, title, cwd }));
+         const snap = await runTool(
+            getRuntime(),
+            manager.start({ command, title, cwd, name: params.name, ready: params.ready })
+         );
 
          return {
             content: [{ type: "text", text: buildStartResult(snap) }],
-            details: { id: snap.id, title: snap.title, cwd, pid: snap.pid }
+            details: { id: snap.id, name: snap.name, title: snap.title, cwd, pid: snap.pid }
+         };
+      }
+   });
+
+   pi.registerTool({
+      name: "bg_logs",
+      label: "Get Background Terminal Logs",
+      description: BG_LOGS_TOOL_DESCRIPTION,
+      promptSnippet: "Read/follow retained background-terminal logs with cursor, grep, head/tail",
+      promptGuidelines: [
+         "Prefer bg_logs over polling bg_status when you need retained or filtered output.",
+         "Reuse the returned cursor for follow/pagination. Do not invent cursors.",
+         "id accepts either the bt-N id or a stable process name."
+      ],
+      parameters: Type.Object({
+         id: Type.String({ description: BG_LOGS_PARAMETER_DESCRIPTIONS.id }),
+         lines: Type.Optional(Type.Number({ description: BG_LOGS_PARAMETER_DESCRIPTIONS.lines })),
+         head: Type.Optional(Type.Boolean({ description: BG_LOGS_PARAMETER_DESCRIPTIONS.head })),
+         grep: Type.Optional(Type.String({ description: BG_LOGS_PARAMETER_DESCRIPTIONS.grep })),
+         cursor: Type.Optional(Type.Number({ description: BG_LOGS_PARAMETER_DESCRIPTIONS.cursor })),
+         follow: Type.Optional(Type.Boolean({ description: BG_LOGS_PARAMETER_DESCRIPTIONS.follow })),
+         timeoutSec: Type.Optional(Type.Number({ description: BG_LOGS_PARAMETER_DESCRIPTIONS.timeoutSec }))
+      }),
+      async execute(_toolCallId, params) {
+         const manager = await getManager();
+         const res = await runTool(getRuntime(), manager.logs(params));
+         return {
+            content: [
+               {
+                  type: "text",
+                  text: `[Logs for ${params.id} | status: ${res.status} | cursor: ${res.cursor}]\n${res.text}`
+               }
+            ],
+            details: { id: params.id, cursor: res.cursor, status: res.status }
          };
       }
    });
@@ -360,7 +419,7 @@ export default function (pi: ExtensionAPI) {
       const body = sanitizeText(content.split("\n").slice(1).join("\n").trim());
 
       if (expanded) {
-         const md = new Markdown(`${body}`, 0, 0, getMarkdownTheme());
+         const md = new Markdown(body, 0, 0, getMarkdownTheme());
          const container = new Text(header, 0, 0);
          return {
             render: (width: number) => [...container.render(width), ...md.render(width)],

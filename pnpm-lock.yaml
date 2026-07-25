@@ -152,7 +152,7 @@ importers:
         specifier: ^5.9.2
         version: 5.9.3
 
-  extensions/subagents:
+  extensions/tasks:
     dependencies:
       effect:
         specifier: 4.0.0-beta.101

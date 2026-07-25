@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { OutputView, TerminalSnapshot } from "./src/domain.ts";
 import {
+  BG_LOGS_PARAMETER_DESCRIPTIONS,
+  BG_LOGS_TOOL_DESCRIPTION,
   BG_START_PARAMETER_DESCRIPTIONS,
+  BG_START_PROMPT_GUIDELINES,
   BG_START_TOOL_DESCRIPTION,
   buildKillReport,
   buildStartResult,
@@ -133,4 +136,21 @@ test("completion output is a shorter tail than the detailed status view", () => 
   assert.match(completion, /line-100/);
   assert.match(completion, /stdout truncated/);
   assert.match(status, /line-1\n/);
+});
+
+test("bg_start prompt guidelines mention readiness, stable names, and bg_logs", () => {
+  const guidelines = BG_START_PROMPT_GUIDELINES.join("\n");
+  assert.match(guidelines, /stable `name`/);
+  assert.match(guidelines, /ready\.log/);
+  assert.match(guidelines, /ready\.port/);
+  assert.match(guidelines, /bg_logs/);
+  assert.match(guidelines, /cursor/);
+});
+
+test("bg_logs tool and parameter descriptions are exported", () => {
+  assert.ok(BG_LOGS_TOOL_DESCRIPTION.includes("cursor"));
+  assert.ok(BG_LOGS_TOOL_DESCRIPTION.includes("grep"));
+  assert.equal(BG_LOGS_PARAMETER_DESCRIPTIONS.id, 'Terminal id (e.g. "bt-1") or stable process name');
+  assert.equal(BG_LOGS_PARAMETER_DESCRIPTIONS.grep, "Regex filter pattern");
+  assert.equal(BG_LOGS_PARAMETER_DESCRIPTIONS.follow, "Wait for new output past cursor");
 });

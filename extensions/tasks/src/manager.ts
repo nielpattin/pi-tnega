@@ -1,29 +1,29 @@
 /**
- * SubagentManager — owns the registry of running/finished subagents.
+ * TaskManager — owns the registry of running/finished tasks.
  *
- * Each subagent is a scoped `SubagentSession` from a `SubagentBackend` plus a
+ * Each task is a scoped `TaskSession` from a `TaskBackend` plus a
  * pump fiber that folds its normalized event stream into a mutable
- * `SubagentSnapshot`. Closing a subagent's scope kills the underlying
+ * `TaskSnapshot`. Closing a task's scope kills the underlying
  * session/process and stops the pump.
  *
- * The manager also exposes a synchronous `SubagentReadModel` so the
+ * The manager also exposes a synchronous `TaskReadModel` so the
  * imperative TUI components (which render synchronously) can read snapshots
  * and issue fire-and-forget commands without touching the Effect runtime.
  */
 
 import { Context, Effect, Exit, Fiber, Layer, Result, Scope, Stream } from "effect";
-import type { SubagentBackend, SubagentSession } from "./backend.ts";
+import type { TaskBackend, TaskSession } from "./backend.ts";
 import { BackendRegistry } from "./backend.ts";
 import type {
    BackendName,
    LiveToolState,
    RunOutcome,
    SpawnTask,
-   SubagentEvent,
-   SubagentOrigin,
-   SubagentMeta,
-   SubagentSnapshot,
-   SubagentStatus,
+   TaskEvent,
+   TaskOrigin,
+   TaskMeta,
+   TaskSnapshot,
+   TaskStatus,
    TranscriptItem
 } from "./domain.ts";
 import { BackendUnavailableError, ConcurrencyLimitError, SendError, SpawnError } from "./domain.ts";
@@ -39,32 +39,32 @@ function bounded(text: string) {
 
 // --- Internal state -----------------------------------------------------------
 
-/** Mutable snapshot; exposed to readers via the readonly SubagentSnapshot type. */
+/** Mutable snapshot; exposed to readers via the readonly TaskSnapshot type. */
 interface MutableSnapshot {
    id: string;
-   origin: SubagentOrigin;
+   origin: TaskOrigin;
    backend: BackendName;
    title: string;
    agent?: string;
    prompt: string;
    cwd: string;
-   status: SubagentStatus;
+   status: TaskStatus;
    createdAt: number;
    settledAt?: number;
    errorText?: string;
-   meta: SubagentMeta;
+   meta: TaskMeta;
    usage: { tokens?: number; contextWindow?: number };
    transcript: TranscriptItem[];
    liveAssistant?: { text: string; thinking: string };
    liveTools: LiveToolState[];
-   queued: SubagentSnapshot["queued"];
+   queued: TaskSnapshot["queued"];
    finalText: string;
    turns: number;
 }
 
 interface Entry {
    snapshot: MutableSnapshot;
-   session: SubagentSession;
+   session: TaskSession;
    scope: Scope.Closeable;
    pump?: Fiber.Fiber<void>;
    liveToolMap: Map<string, LiveToolState>;
@@ -76,24 +76,24 @@ interface Entry {
 // --- Read model ----------------------------------------------------------------
 
 /** Synchronous bridge for the TUI. Snapshots are live objects; do not mutate. */
-export interface SubagentReadModel {
-   list(): ReadonlyArray<SubagentSnapshot>;
-   get(id: string): SubagentSnapshot | undefined;
+export interface TaskReadModel {
+   list(): ReadonlyArray<TaskSnapshot>;
+   get(id: string): TaskSnapshot | undefined;
    size(): number;
    /** Any-change notification (footer status, dashboard). */
    subscribe(listener: () => void): () => void;
-   /** Per-subagent notification (takeover view). */
+   /** Per-task notification (takeover view). */
    subscribeTo(id: string, listener: () => void): () => void;
-   /** Fire-and-forget: steer/continue a subagent (takeover input). */
+   /** Fire-and-forget: steer/continue a task (takeover input). */
    requestSend(id: string, text: string): void;
-   /** Fire-and-forget: abort a running subagent (dashboard `x`, takeover). */
+   /** Fire-and-forget: abort a running task (dashboard `x`, takeover). */
    requestAbort(id: string): void;
    /**
     * Register the settle hook. `consumed` is true when an active
-    * subagent_wait/cancel is collecting the result (so it must not also be
+    * task_wait/cancel is collecting the result (so it must not also be
     * delivered as a follow-up message).
     */
-   setOnSettled(hook: ((snap: SubagentSnapshot, consumed: boolean) => void) | undefined): void;
+   setOnSettled(hook: ((snap: TaskSnapshot, consumed: boolean) => void) | undefined): void;
    /** Pop last queued steer/follow-up for takeover Alt+Up. Returns text or undefined. */
    requestPopQueued(id: string): string | undefined;
 }
@@ -103,34 +103,32 @@ export interface SubagentReadModel {
 export interface CancelResult {
    readonly id: string;
    readonly title: string;
-   readonly status: SubagentStatus;
+   readonly status: TaskStatus;
    readonly cancelled: boolean;
 }
 
-export interface SubagentManagerShape {
+export interface TaskManagerShape {
    spawn(
       backend: BackendName,
       task: SpawnTask
-   ): Effect.Effect<SubagentSnapshot, SpawnError | ConcurrencyLimitError | BackendUnavailableError>;
+   ): Effect.Effect<TaskSnapshot, SpawnError | ConcurrencyLimitError | BackendUnavailableError>;
    /**
-    * Wait until all listed subagents are settled. Unknown ids are treated as
+    * Wait until all listed tasks are settled. Unknown ids are treated as
     * settled (the tool layer validates ids first). While waiting, settles for
     * these ids are marked "consumed". Interruption (tool abort) releases the
-    * interest and leaves the subagents running.
+    * interest and leaves the tasks running.
     */
    waitFor(ids: ReadonlyArray<string>, onPending?: (pending: string[]) => void): Effect.Effect<void>;
-   /** Cancel running subagents; resolves when they have settled. */
+   /** Cancel running tasks; resolves when they have settled. */
    cancel(ids: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<CancelResult>>;
    send(id: string, text: string): Effect.Effect<void, SendError>;
-   get(id: string): Effect.Effect<SubagentSnapshot | undefined>;
-   readonly list: Effect.Effect<ReadonlyArray<SubagentSnapshot>>;
+   get(id: string): Effect.Effect<TaskSnapshot | undefined>;
+   readonly list: Effect.Effect<ReadonlyArray<TaskSnapshot>>;
    readonly disposeAll: Effect.Effect<void>;
-   readonly view: SubagentReadModel;
+   readonly view: TaskReadModel;
 }
 
-export class SubagentManager extends Context.Service<SubagentManager, SubagentManagerShape>()(
-   "subagents/SubagentManager"
-) {}
+export class TaskManager extends Context.Service<TaskManager, TaskManagerShape>()("tasks/TaskManager") {}
 
 // --- Implementation --------------------------------------------------------------
 
@@ -152,7 +150,7 @@ const makeManager = Effect.gen(function* () {
    let btwCounter = 0;
    let reserved = 0;
    let disposed = false;
-   let onSettled: ((snap: SubagentSnapshot, consumed: boolean) => void) | undefined;
+   let onSettled: ((snap: TaskSnapshot, consumed: boolean) => void) | undefined;
 
    const notify = (id?: string) => {
       const waiters = changeWaiters;
@@ -256,7 +254,7 @@ const makeManager = Effect.gen(function* () {
       pruneSettled();
    };
 
-   const foldEvent = (entry: Entry, event: SubagentEvent) => {
+   const foldEvent = (entry: Entry, event: TaskEvent) => {
       const s = entry.snapshot;
       switch (event._tag) {
          case "RunStarted":
@@ -340,12 +338,12 @@ const makeManager = Effect.gen(function* () {
          yield* Effect.suspend((): Effect.Effect<void, SpawnError | ConcurrencyLimitError> => {
             if (disposed) {
                return new SpawnError({
-                  message: "Subagent manager is shutting down."
+                  message: "Task manager is shutting down."
                });
             }
             if (runningCount() + reserved >= MAX_RUNNING) {
                return new ConcurrencyLimitError({
-                  message: `Max ${MAX_RUNNING} subagents can run concurrently. Wait for one to finish before spawning another.`
+                  message: `Max ${MAX_RUNNING} tasks can run concurrently. Wait for one to finish before spawning another.`
                });
             }
             reserved++;
@@ -353,7 +351,7 @@ const makeManager = Effect.gen(function* () {
          });
 
          const doSpawn = Effect.gen(function* () {
-            const backend: SubagentBackend | undefined = registry.get(backendName);
+            const backend: TaskBackend | undefined = registry.get(backendName);
             if (!backend) {
                return yield* new BackendUnavailableError({
                   message: `Unknown backend "${backendName}".`
@@ -373,12 +371,12 @@ const makeManager = Effect.gen(function* () {
             if (disposed) {
                yield* Scope.close(scope, Exit.void);
                return yield* new SpawnError({
-                  message: "Subagent manager shut down while spawning."
+                  message: "Task manager shut down while spawning."
                });
             }
 
             const origin = task.origin ?? "model";
-            const id = origin === "btw" ? `btw-${++btwCounter}` : `sa-${++modelCounter}`;
+            const id = origin === "btw" ? `btw-${++btwCounter}` : `task-${++modelCounter}`;
             const meta = yield* session.meta;
             const entry: Entry = {
                snapshot: {
@@ -407,7 +405,7 @@ const makeManager = Effect.gen(function* () {
 
             // Pump: fold the event stream into the snapshot. Tied to the entry
             // scope, so closing the scope stops it. If the stream ends while the
-            // subagent still looks running, the backend died out from under us.
+            // task still looks running, the backend died out from under us.
             const pump = Stream.runForEach(session.events, (event) => Effect.sync(() => foldEvent(entry, event))).pipe(
                Effect.ensuring(
                   Effect.sync(() => {
@@ -423,7 +421,7 @@ const makeManager = Effect.gen(function* () {
             entry.pump = yield* Scope.provide(Effect.forkScoped(pump), scope);
 
             notify(id);
-            return entry.snapshot as SubagentSnapshot;
+            return entry.snapshot as TaskSnapshot;
          });
 
          return yield* doSpawn.pipe(
@@ -523,16 +521,16 @@ const makeManager = Effect.gen(function* () {
          const entry = entries.get(id);
          if (!entry || disposed) {
             return new SendError({
-               message: `Subagent "${id}" is no longer tracked.`
+               message: `Task "${id}" is no longer tracked.`
             });
          }
-         // Restarting a settled subagent occupies a running slot again, so it
+         // Restarting a settled task occupies a running slot again, so it
          // must respect the same cap as spawn. Steering an already-running one
          // does not consume additional capacity.
          if (entry.snapshot.status !== "running") {
             if (runningCount() + reserved >= MAX_RUNNING) {
                return new SendError({
-                  message: `Max ${MAX_RUNNING} subagents can run concurrently; restarting "${id}" would exceed that.`
+                  message: `Max ${MAX_RUNNING} tasks can run concurrently; restarting "${id}" would exceed that.`
                });
             }
             // Occupy the slot synchronously: the RunStarted that flips status
@@ -570,7 +568,7 @@ const makeManager = Effect.gen(function* () {
       yield* Effect.sync(() => notify());
    });
 
-   const view: SubagentReadModel = {
+   const view: TaskReadModel = {
       list: () => [...entries.values()].map((entry) => entry.snapshot),
       get: (id) => entries.get(id)?.snapshot,
       size: () => entries.size,
@@ -625,7 +623,7 @@ const makeManager = Effect.gen(function* () {
    // the extension forgot to call disposeAll explicitly.
    yield* Effect.addFinalizer(() => disposeAll);
 
-   return SubagentManager.of({
+   return TaskManager.of({
       spawn,
       waitFor,
       cancel,
@@ -637,7 +635,4 @@ const makeManager = Effect.gen(function* () {
    });
 });
 
-export const SubagentManagerLive: Layer.Layer<SubagentManager, never, BackendRegistry> = Layer.effect(
-   SubagentManager,
-   makeManager
-);
+export const TaskManagerLive: Layer.Layer<TaskManager, never, BackendRegistry> = Layer.effect(TaskManager, makeManager);

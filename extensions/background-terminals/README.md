@@ -27,12 +27,13 @@ In non-TUI modes, `/ps` just prints a text list.
 
 ## Tools the model can call
 
-| Tool        | Purpose                    |
-| ----------- | -------------------------- |
-| `bg_start`  | Start a background process |
-| `bg_status` | Peek at one process        |
-| `bg_list`   | List all processes         |
-| `bg_kill`   | Stop one or more processes |
+| Tool        | Purpose                          |
+| ----------- | -------------------------------- |
+| `bg_start`  | Start a background process       |
+| `bg_status` | Peek at one process              |
+| `bg_logs`   | Read/follow retained output logs |
+| `bg_list`   | List all processes               |
+| `bg_kill`   | Stop one or more processes       |
 
 ### `bg_start`
 
@@ -40,7 +41,24 @@ In non-TUI modes, `/ps` just prints a text list.
 command: shell command string
 title: short label shown in /ps and listings
 working_dir: optional cwd
+name: optional stable handle (1-48 chars) for later reference
+ready: optional readiness condition
 ```
+
+Use `name` for long-lived services so you can address them later as `"web"` instead of remembering `bt-1`.
+
+Names must be unique among currently running terminals. Reuse is allowed after the terminal settles.
+
+Use `ready` to wait until the process is actually usable before the tool returns:
+
+```text
+ready.log: regex matched against captured output
+ready.port: TCP port that must accept connections
+ready.host: host for port check (default 127.0.0.1)
+ready.timeoutSec: timeout in seconds (default 30)
+```
+
+If both `log` and `port` are provided, both must pass. On timeout the process stays running and the tool reports timed out; do not assume readiness.
 
 Important limits:
 
@@ -55,17 +73,19 @@ Example:
 bg_start(
   title: "vite-dev",
   command: "pnpm dev",
-  working_dir: "."
+  working_dir: ".",
+  name: "vite",
+  ready: { log: "ready in", port: 5173, timeoutSec: 30 }
 )
 ```
 
 After start you get:
 
 ```text
-Started background terminal bt-1 "vite-dev" (pid ..., C:\...)
+Started background terminal bt-1 (vite) "vite-dev" (pid ..., C:\...)
 
 Command: pnpm dev
-...
+Readiness condition MET.
 ```
 
 When the process exits, the model gets a follow-up message automatically.
@@ -73,10 +93,32 @@ When the process exits, the model gets a follow-up message automatically.
 ### `bg_status`
 
 ```text
-id: "bt-1"
+id: "bt-1" or "vite"
 ```
 
 Returns status, exit info, and tail-truncated stdout/stderr.
+
+### `bg_logs`
+
+```text
+id: "bt-1" or "vite"
+lines: max lines to return (default 100)
+head: read from start instead of tail (default false)
+grep: regex filter pattern
+cursor: byte offset from an earlier bg_logs call
+follow: wait for new output past cursor (default false)
+timeoutSec: timeout for follow in seconds (default 30)
+```
+
+Use `bg_logs` when you need retained or filtered output. Prefer it over repeated `bg_status` polling.
+
+Reuse the cursor returned from each call for follow/pagination. Do not invent cursor values.
+
+Example:
+
+```text
+bg_logs(id: "vite", grep: "error", lines: 50)
+```
 
 ### `bg_list`
 
@@ -103,9 +145,9 @@ Start the Vite dev server in the background and keep working.
 
 ### Good model flow
 
-1. `bg_start`
+1. `bg_start` with a stable `name` and `ready` condition when appropriate
 2. keep working
-3. only use `bg_status` if you need live output now
+3. use `bg_logs` when you need retained or filtered output
 4. wait for the automatic exit message, or call `bg_kill` when done
 
 ### Bad flow
@@ -118,7 +160,7 @@ sleep 60
 bg_status
 ```
 
-That is unnecessary polling. The extension already delivers a completion message.
+That is unnecessary polling. The extension already delivers a completion message, and `bg_logs` covers retained output.
 
 ## `/ps` detail view keys
 
@@ -141,6 +183,7 @@ The header, command, and shortcut hint wrap fully. They are not truncated with `
 ## Notes for Windows
 
 - Shell preference: Git Bash `sh.exe` when available, otherwise `cmd.exe`.
+- When using Git `sh.exe`, child PATH is prepended with `Git\usr\bin` and `Git\bin` so Unix helpers (sed, uname) and corepack shims (pnpm) resolve.
 - Tree kill uses `taskkill /T /F`.
 - Kill reports often show `exit 1` instead of `SIGTERM`. That is normal on Windows.
 

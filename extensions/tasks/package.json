@@ -1,0 +1,15 @@
+{
+   "name": "tasks",
+   "private": true,
+   "type": "module",
+   "scripts": {
+      "check": "tsc --noEmit -p .",
+      "test": "node --test --experimental-strip-types agent-definition.test.ts manager.test.ts result-delivery.test.ts takeover.test.ts by-the-way.test.ts agy.test.ts vibe.test.ts agents-tab-state.test.ts builtins-and-delete.test.ts queue.test.ts task-spawn.test.ts batch-spawn.test.ts"
+   },
+   "dependencies": {
+      "effect": "4.0.0-beta.101"
+   },
+   "devDependencies": {
+      "typescript": "^7.0.2"
+   }
+}

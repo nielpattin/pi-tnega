@@ -7,7 +7,7 @@ export default defineConfig({
       exclude: [
          ...configDefaults.exclude,
          "extensions/background-terminals/**",
-         "extensions/subagents/**",
+         "extensions/tasks/**",
          "extensions/workflows/**",
          "extensions/pi-skill-toggle/**",
          "extensions/pi-intercom/**/*.test.ts",

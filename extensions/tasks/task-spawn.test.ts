@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import subagentsExtension from "./index.ts";
+import tasksExtension from "./index.ts";
 import {
-  SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS,
-  SUBAGENT_SPAWN_TOOL_DESCRIPTION,
-  getSubagentSpawnPromptGuidelines,
+  TASK_SPAWN_PARAMETER_DESCRIPTIONS,
+  TASK_SPAWN_TOOL_DESCRIPTION,
+  getTaskSpawnPromptGuidelines,
 } from "./src/prompt.ts";
 
 function createMockPiApi() {
@@ -25,12 +25,12 @@ function createMockPiApi() {
   };
 }
 
-test("subagent_spawn tool parameters schema contains only agent, prompt, name, working_dir", () => {
+test("task_spawn tool parameters schema contains agent, prompt, name, working_dir", () => {
   const mockApi = createMockPiApi();
-  subagentsExtension(mockApi as any);
+  tasksExtension(mockApi as any);
 
-  const registeredTool = mockApi.registeredTools.find((t: any) => t.name === "subagent_spawn");
-  assert.ok(registeredTool, "subagent_spawn tool was not registered");
+  const registeredTool = mockApi.registeredTools.find((t: any) => t.name === "task_spawn");
+  assert.ok(registeredTool, "task_spawn tool was not registered");
 
   const properties = registeredTool.parameters.properties;
   assert.ok(properties.agent, "agent property missing");
@@ -38,10 +38,9 @@ test("subagent_spawn tool parameters schema contains only agent, prompt, name, w
   assert.ok(properties.name, "name property missing");
   assert.ok(properties.working_dir, "working_dir property missing");
 
-  // Verify removed parameters are not in schema
-  assert.equal(properties.harness, undefined, "harness must be removed");
-  assert.equal(properties.model, undefined, "model must be removed");
-  assert.equal(properties.reasoning_effort, undefined, "reasoning_effort must be removed");
+  // Verify exact schema keys (no extra or removed parameters)
+  const propKeys = Object.keys(properties).sort();
+  assert.deepEqual(propKeys, ["agent", "name", "prompt", "working_dir"].sort());
 
   // Verify required parameters array
   const required = registeredTool.parameters.required || [];
@@ -52,21 +51,21 @@ test("subagent_spawn tool parameters schema contains only agent, prompt, name, w
 });
 
 test("prompt guidelines and parameter descriptions reflect agent-based spawn", () => {
-  assert.ok(SUBAGENT_SPAWN_TOOL_DESCRIPTION.includes("agent role"));
-  assert.equal((SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS as any).harness, undefined);
-  assert.equal((SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS as any).model, undefined);
-  assert.equal((SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS as any).reasoningEffort, undefined);
-  assert.ok(SUBAGENT_SPAWN_PARAMETER_DESCRIPTIONS.agent);
+  assert.ok(TASK_SPAWN_TOOL_DESCRIPTION.includes("agent role"));
+  assert.equal((TASK_SPAWN_PARAMETER_DESCRIPTIONS as any).harness, undefined);
+  assert.equal((TASK_SPAWN_PARAMETER_DESCRIPTIONS as any).model, undefined);
+  assert.equal((TASK_SPAWN_PARAMETER_DESCRIPTIONS as any).reasoningEffort, undefined);
+  assert.ok(TASK_SPAWN_PARAMETER_DESCRIPTIONS.agent);
 
-  const guidelines = getSubagentSpawnPromptGuidelines();
+  const guidelines = getTaskSpawnPromptGuidelines();
   assert.ok(guidelines.some((g) => g.includes("`agent`")));
 });
 
-test("subagent_spawn execution fails with clear error when agent or name is missing or invalid", async () => {
+test("task_spawn execution fails with clear error when agent or name is missing or invalid", async () => {
   const mockApi = createMockPiApi();
-  subagentsExtension(mockApi as any);
+  tasksExtension(mockApi as any);
 
-  const registeredTool = mockApi.registeredTools.find((t: any) => t.name === "subagent_spawn");
+  const registeredTool = mockApi.registeredTools.find((t: any) => t.name === "task_spawn");
   assert.ok(registeredTool);
 
   const mockCtx: any = {

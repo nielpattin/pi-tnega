@@ -12,7 +12,7 @@ Effect is used as the **async runtime core** for background processes, fiber orc
 
 | Package                           | Key Usage                                                                                                                                                                 |
 | :-------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `extensions/subagents`            | Subagent process lifecycle, background fibers, steering queue, event streaming (`Stream`), backend registry (`Context.Service`), concurrency caps.                        |
+| `extensions/tasks`                | Task process lifecycle, background fibers, steering queue, event streaming (`Stream`), backend registry (`Context.Service`), concurrency caps.                            |
 | `extensions/background-terminals` | Background terminal shell processes, process tree SIGTERM/SIGKILL escalation (`Scope` + `Effect.addFinalizer`), output buffer streaming, `TerminalManager` service layer. |
 | `extensions/copy-all`             | Async clipboard command execution, process exit code handling with `Effect.callback`, typed error wrapping (`Data.TaggedError`).                                          |
 | `extensions/ask-user`             | TUI popup prompt execution, interrupt signal handling with `Effect.tryPromise` & `Effect.runPromiseExit`.                                                                 |
@@ -27,7 +27,7 @@ Effect is used as the **async runtime core** for background processes, fiber orc
 ## 2. Environment & Version Pinning
 
 ```json
-// package.json in extensions using effect (ask-user, background-terminals, copy-all, subagents)
+// package.json in extensions using effect (ask-user, background-terminals, copy-all, tasks)
 "dependencies": {
    "effect": "4.0.0-beta.101"
 }
@@ -201,12 +201,12 @@ Run from the root or within specific extension folders:
 
 ```bash
 # Typecheck Effect-using extensions
-pnpm --filter subagents check
+pnpm --filter tasks check
 pnpm --filter background-terminals check
 pnpm --filter copy-all check
 pnpm --filter ask-user check
 
 # Run test suites
-pnpm --filter subagents test
+pnpm --filter tasks test
 pnpm --filter background-terminals test
 ```

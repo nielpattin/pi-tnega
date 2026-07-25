@@ -1,3 +1,29 @@
+<guidelines_constraints>
+
+- When writing Effect code, read @repos/effect/LLMS.md for examples of idiomatic usage, tests, module structure, and API design. Treat it as the source of truth for Effect patterns.
+- Read the docs/effect-v4-cheatsheet.md for a quick reference of Effect v4 patterns and idioms for writing Effect code for this project.
+- **No Unprompted Git Commits / Pushes**: Do NOT execute `git commit`, `git push`, or `pnpm release` unless explicitly requested by the user.
+- **Surgical Edits**: Touch only what is necessary for the task. Preserve comments and structure.
+- **Always Verify**: Verify changes with `pnpm check` or `pnpm test` before declaring success.
+
+</guidelines_constraints>
+
+<vendored_repositories>
+
+This project vendors external repositories under @repos/
+
+- Use vendored repositories as read-only reference material when working with related libraries
+- Prefer examples and patterns from the vendored source code over generated guesses or web search results
+- Do not edit files under @repos/ unless explicitly asked
+- Do not import from @repos/ - application code should continue importing from normal package dependencies
+
+</vendored_repositories>
+
+<workflow>
+Contributor monorepo workflow (create package, changesets, version, publish) lives in [DEVELOPMENT.md](./DEVELOPMENT.md).
+Follow DEVELOPMENT.md for package work. Do not invent alternate release flows.
+</workflow>
+
 <validation>
 - `pnpm lint` for linting.
 - `pnpm check` for lint, type, test checks.
@@ -10,15 +36,3 @@
 - Run `pnpm install` in the agent root directory to install dependencies for all packages and extensions.
 - Run package commands from root using `pnpm --dir packages/<package-name> <command>` (e.g. `pnpm --dir packages/pi-permission-system check` or `pnpm --dir packages/pi-permission-system test`).
 </environment>
-
-# Agent notes
-
-Contributor monorepo workflow (create package, changesets, version, publish) lives in [DEVELOPMENT.md](./DEVELOPMENT.md).
-
-Follow DEVELOPMENT.md for package work. Do not invent alternate release flows.
-
-## Guidelines & Constraints
-
-- **No Unprompted Git Commits / Pushes**: Do NOT execute `git commit`, `git push`, or `pnpm release` unless explicitly requested by the user.
-- **Surgical Edits**: Touch only what is necessary for the task. Preserve comments and structure.
-- **Always Verify**: Verify changes with `pnpm check` or `pnpm test` before declaring success.

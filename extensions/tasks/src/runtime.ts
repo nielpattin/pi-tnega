@@ -7,25 +7,25 @@
  */
 
 import { Cause, Exit, Layer, ManagedRuntime, type Effect } from "effect";
-import { BackendRegistry, type SubagentBackend } from "./backend.ts";
+import { BackendRegistry, type TaskBackend } from "./backend.ts";
 import { agyBackend } from "./backends/agy.ts";
 import { piBackend } from "./backends/pi.ts";
 import type { BackendName } from "./domain.ts";
 
 const BackendRegistryLive = Layer.sync(BackendRegistry, () => {
-   const backends: SubagentBackend[] = [piBackend, agyBackend];
-   return new Map<BackendName, SubagentBackend>(backends.map((backend) => [backend.name, backend]));
+   const backends: TaskBackend[] = [piBackend, agyBackend];
+   return new Map<BackendName, TaskBackend>(backends.map((backend) => [backend.name, backend]));
 });
 
-import { SubagentManagerLive } from "./manager.ts";
+import { TaskManagerLive } from "./manager.ts";
 
-const AppLayer = SubagentManagerLive.pipe(Layer.provide(BackendRegistryLive));
+const AppLayer = TaskManagerLive.pipe(Layer.provide(BackendRegistryLive));
 
-export function createSubagentRuntime() {
+export function createTaskRuntime() {
    return ManagedRuntime.make(AppLayer);
 }
 
-export type SubagentRuntime = ReturnType<typeof createSubagentRuntime>;
+export type TaskRuntime = ReturnType<typeof createTaskRuntime>;
 
 /**
  * Run an effect from an async tool handler. Typed failures and defects are
@@ -33,7 +33,7 @@ export type SubagentRuntime = ReturnType<typeof createSubagentRuntime>;
  * (tool AbortSignal) throws `interruptMessage`.
  */
 export async function runTool<A, E>(
-   runtime: SubagentRuntime,
+   runtime: TaskRuntime,
    effect: Effect.Effect<A, E>,
    options: { signal?: AbortSignal; interruptMessage?: string } = {}
 ) {

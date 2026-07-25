@@ -9,16 +9,16 @@
 import type { ExtensionCommandContext, KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
 import type { Component, Focusable, TUI } from "@earendil-works/pi-tui";
 import { Input, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { formatElapsed, type SubagentSnapshot } from "../domain.ts";
+import { formatElapsed, type TaskSnapshot } from "../domain.ts";
 import { formatContextUtilization } from "../format.ts";
-import type { SubagentReadModel } from "../manager.ts";
+import type { TaskReadModel } from "../manager.ts";
 import { buildTranscriptLines } from "./transcript.ts";
 
 function configuredKeys(keybindings: KeybindingsManager, binding: Parameters<KeybindingsManager["getKeys"]>[0]) {
    return keybindings.getKeys(binding).join("/") || "unbound";
 }
 
-function statusGlyph(snap: SubagentSnapshot, theme: Theme): string {
+function statusGlyph(snap: TaskSnapshot, theme: Theme): string {
    switch (snap.status) {
       case "running":
          return theme.fg("warning", "■");
@@ -26,10 +26,12 @@ function statusGlyph(snap: SubagentSnapshot, theme: Theme): string {
          return theme.fg("success", "■");
       case "error":
          return theme.fg("error", "■");
+      default:
+         return "";
    }
 }
 
-function statusWord(snap: SubagentSnapshot, theme: Theme): string {
+function statusWord(snap: TaskSnapshot, theme: Theme): string {
    switch (snap.status) {
       case "running":
          return theme.fg("warning", "running");
@@ -37,6 +39,8 @@ function statusWord(snap: SubagentSnapshot, theme: Theme): string {
          return theme.fg("success", "done");
       case "error":
          return theme.fg("error", "failed");
+      default:
+         return "";
    }
 }
 
@@ -46,9 +50,9 @@ export interface TakeoverOptions {
    readonly badge?: string;
 }
 
-export async function openSubagentTakeover(
+export async function openTaskTakeover(
    ctx: ExtensionCommandContext,
-   view: SubagentReadModel,
+   view: TaskReadModel,
    id: string,
    options?: TakeoverOptions
 ) {
@@ -62,17 +66,18 @@ export async function openSubagentTakeover(
    );
 }
 
-export async function openSubagentPicker(ctx: ExtensionCommandContext, view: SubagentReadModel) {
+export async function openTaskPicker(ctx: ExtensionCommandContext, view: TaskReadModel) {
    const selection: DashboardSelection = { index: 0 };
 
    while (true) {
       if (view.size() === 0) {
-         ctx.ui.notify("No subagents", "info");
+         ctx.ui.notify("No tasks", "info");
          return;
       }
 
+      // eslint-disable-next-line no-await-in-loop
       const picked = await ctx.ui.custom<string | null>(
-         (tui, theme, keybindings, done) => new SubagentDashboard(tui, theme, keybindings, view, selection, done),
+         (tui, theme, keybindings, done) => new TaskDashboard(tui, theme, keybindings, view, selection, done),
          {
             overlay: true,
             overlayOptions: { anchor: "center", width: "100%", maxHeight: "100%" }
@@ -82,7 +87,8 @@ export async function openSubagentPicker(ctx: ExtensionCommandContext, view: Sub
       if (!picked) return;
       if (!view.get(picked)) continue;
 
-      await openSubagentTakeover(ctx, view, picked);
+      // eslint-disable-next-line no-await-in-loop
+      await openTaskTakeover(ctx, view, picked);
       // After leaving the takeover view, fall back to the dashboard.
    }
 }
@@ -96,7 +102,7 @@ export interface DashboardSelection {
 
 export function reconcileDashboardSelection(
    selection: DashboardSelection,
-   subs: ReadonlyArray<Pick<SubagentSnapshot, "id">>
+   subs: ReadonlyArray<Pick<TaskSnapshot, "id">>
 ) {
    const stableIndex = selection.id ? subs.findIndex((snap) => snap.id === selection.id) : -1;
    selection.index =
@@ -104,11 +110,11 @@ export function reconcileDashboardSelection(
    selection.id = subs[selection.index]?.id;
 }
 
-class SubagentDashboard implements Component {
+class TaskDashboard implements Component {
    private tui: TUI;
    private theme: Theme;
    private keybindings: KeybindingsManager;
-   private view: SubagentReadModel;
+   private view: TaskReadModel;
    private selection: DashboardSelection;
    private done: (value: string | null) => void;
 
@@ -120,7 +126,7 @@ class SubagentDashboard implements Component {
       tui: TUI,
       theme: Theme,
       keybindings: KeybindingsManager,
-      view: SubagentReadModel,
+      view: TaskReadModel,
       selection: DashboardSelection,
       done: (value: string | null) => void
    ) {
@@ -135,7 +141,7 @@ class SubagentDashboard implements Component {
       this.unsubChange = view.subscribe(() => this.tui.requestRender());
    }
 
-   private subs(): ReadonlyArray<SubagentSnapshot> {
+   private subs(): ReadonlyArray<TaskSnapshot> {
       return this.view.list();
    }
 
@@ -222,7 +228,7 @@ class SubagentDashboard implements Component {
       const lines: string[] = [];
 
       // Header: title left, count right
-      const headerLeft = theme.fg("accent", theme.bold("Subagents"));
+      const headerLeft = theme.fg("accent", theme.bold("Tasks"));
       const headerRight = theme.fg("muted", `${subs.length} agent${subs.length === 1 ? "" : "s"}`);
       const headerPad = Math.max(1, width - visibleWidth(headerLeft) - visibleWidth(headerRight) - 4);
       lines.push(truncateToWidth(`  ${headerLeft}${" ".repeat(headerPad)}${headerRight}  `, width));
@@ -259,7 +265,7 @@ class SubagentDashboard implements Component {
       return lines;
    }
 
-   private renderRows(subs: ReadonlyArray<SubagentSnapshot>, width: number, height: number): string[] {
+   private renderRows(subs: ReadonlyArray<TaskSnapshot>, width: number, height: number): string[] {
       const theme = this.theme;
       const out: string[] = [];
 
@@ -321,7 +327,7 @@ class TakeoverView implements Component, Focusable {
    private theme: Theme;
    private keybindings: KeybindingsManager;
    private id: string;
-   private view: SubagentReadModel;
+   private view: TaskReadModel;
    private done: (value: null) => void;
    private options?: TakeoverOptions;
 
@@ -347,7 +353,7 @@ class TakeoverView implements Component, Focusable {
       theme: Theme,
       keybindings: KeybindingsManager,
       id: string,
-      view: SubagentReadModel,
+      view: TaskReadModel,
       done: (value: null) => void,
       options?: TakeoverOptions
    ) {
@@ -371,7 +377,7 @@ class TakeoverView implements Component, Focusable {
       };
    }
 
-   private snap(): SubagentSnapshot | undefined {
+   private snap(): TaskSnapshot | undefined {
       return this.view.get(this.id);
    }
 

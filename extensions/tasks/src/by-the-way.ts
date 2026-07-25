@@ -1,4 +1,4 @@
-import type { SubagentOrigin } from "./domain.ts";
+import type { TaskOrigin } from "./domain.ts";
 
 export const BTW_TITLE_MAX_LENGTH = 60;
 
@@ -16,6 +16,6 @@ export function deriveBtwTitle(prompt: string) {
 }
 
 /** User asides remain visible in the dashboard but hidden from model tools. */
-export function isModelVisible(snap: { readonly origin: SubagentOrigin }) {
+export function isModelVisible(snap: { readonly origin: TaskOrigin }) {
    return snap.origin === "model";
 }

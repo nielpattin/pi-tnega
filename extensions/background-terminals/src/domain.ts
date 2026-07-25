@@ -46,6 +46,15 @@ export interface TerminalSnapshot {
    readonly signal?: string;
    /** Spawn error / kill-escalation notes, bounded. */
    readonly errorText?: string;
+   /** Optional stable name provided by model (1-48 chars). */
+   readonly name?: string;
+   /** Optional readiness result when ready options were provided at spawn. */
+   readonly readyResult?: {
+      readonly ready: boolean;
+      readonly timedOut?: boolean;
+      readonly logMatched?: boolean;
+      readonly portMatched?: boolean;
+   };
    readonly stdout: OutputView;
    readonly stderr: OutputView;
 }

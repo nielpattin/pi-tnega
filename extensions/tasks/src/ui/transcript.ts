@@ -6,7 +6,7 @@
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import type { SubagentSnapshot, TranscriptItem } from "../domain.ts";
+import type { TaskSnapshot, TranscriptItem } from "../domain.ts";
 
 const ANSI_PATTERN =
    // eslint-disable-next-line no-control-regex
@@ -83,7 +83,7 @@ function renderToolResultItem(
 }
 
 /** Render a subagent's conversation as plain lines, wrapped to `width`. */
-export function buildTranscriptLines(snap: SubagentSnapshot, width: number, theme: Theme): string[] {
+export function buildTranscriptLines(snap: TaskSnapshot, width: number, theme: Theme): string[] {
    const out: string[] = [];
 
    for (const item of snap.transcript) {

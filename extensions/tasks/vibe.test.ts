@@ -37,9 +37,9 @@ test("withoutVibeTools strips all vibe_* tools while retaining normal tools", ()
     "vibe_wait",
     "vibe_kill",
     "vibe_list",
-    "subagent_spawn",
+    "task_spawn",
   ];
-  assert.deepEqual(withoutVibeTools(tools), ["read", "bash", "edit", "subagent_spawn"]);
+  assert.deepEqual(withoutVibeTools(tools), ["read", "bash", "edit", "task_spawn"]);
 });
 
 test("director tool allowlist includes required tools and optional info tools", () => {
@@ -63,7 +63,7 @@ test("director tool allowlist includes required tools and optional info tools", 
   assert.equal(isVibeDirectorTool("bash"), false);
   assert.equal(isVibeDirectorTool("edit"), false);
   assert.equal(isVibeDirectorTool("write"), false);
-  assert.equal(isVibeDirectorTool("subagent_spawn"), false);
+  assert.equal(isVibeDirectorTool("task_spawn"), false);
 });
 
 test("getVibeActiveTools includes optional info tools ONLY if present in registered tools", () => {

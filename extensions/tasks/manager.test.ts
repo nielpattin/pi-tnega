@@ -1,24 +1,19 @@
-/**
- * End-to-end smoke tests: manager behavior through a real ManagedRuntime,
- * exactly as the tool handlers drive it.
- */
-
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Effect, Layer, ManagedRuntime } from "effect";
-import { BackendRegistry, type SubagentBackend } from "./src/backend.ts";
+import { BackendRegistry, type TaskBackend } from "./src/backend.ts";
 import { piBackend } from "./src/backends/pi.ts";
 import { makeStubBackend } from "./src/backends/stub.ts";
 import type { BackendName, ParentContext, SpawnTask } from "./src/domain.ts";
 import {
-  SubagentManager,
-  SubagentManagerLive,
-  type SubagentManagerShape,
+  TaskManager,
+  TaskManagerLive,
+  type TaskManagerShape,
 } from "./src/manager.ts";
 import { runTool } from "./src/runtime.ts";
 
 const TestRegistryLive = Layer.sync(BackendRegistry, () => {
-  const backends: SubagentBackend[] = [
+  const backends: TaskBackend[] = [
     piBackend,
     makeStubBackend({
       backend: "pi",
@@ -28,14 +23,14 @@ const TestRegistryLive = Layer.sync(BackendRegistry, () => {
       cadenceMs: 40,
     }),
   ];
-  return new Map<BackendName, SubagentBackend>(
+  return new Map<BackendName, TaskBackend>(
     backends.map((backend) => [backend.name, backend]),
   );
 });
 
 const createTestRuntime = () =>
   ManagedRuntime.make(
-    SubagentManagerLive.pipe(Layer.provide(TestRegistryLive)),
+    TaskManagerLive.pipe(Layer.provide(TestRegistryLive)),
   );
 
 const parent: ParentContext = {
@@ -49,20 +44,20 @@ function task(prompt: string): SpawnTask {
 
 async function withManager(
   run: (
-    manager: SubagentManagerShape,
+    manager: TaskManagerShape,
     runtime: ReturnType<typeof createTestRuntime>,
   ) => Promise<void>,
 ) {
   const runtime = createTestRuntime();
   try {
-    const manager = await runtime.runPromise(SubagentManager);
+    const manager = await runtime.runPromise(TaskManager);
     await run(manager, runtime);
   } finally {
     await runtime.dispose();
   }
 }
 
-test("stub subagent completes and delivers a final result", async () => {
+test("stub task completes and delivers a final result", async () => {
   await withManager(async (manager, runtime) => {
     const settled: Array<{ id: string; consumed: boolean }> = [];
     manager.view.setOnSettled((snap, consumed) =>
@@ -114,7 +109,7 @@ test("FAIL: prompts settle as errors; unconsumed settles are delivered", async (
   });
 });
 
-test("cancel interrupts a running stub subagent", async () => {
+test("cancel interrupts a running stub task", async () => {
   await withManager(async (manager, runtime) => {
     const snap = await runTool(
       runtime,
@@ -144,7 +139,7 @@ test("spawn origin propagates to ids, snapshots, and settlement", async () => {
       manager.spawn("pi", { ...task("side question"), origin: "btw" }),
     );
 
-    assert.match(model.id, /^sa-/);
+    assert.match(model.id, /^task-/);
     assert.equal(model.origin, "model");
     assert.match(btw.id, /^btw-/);
     assert.equal(btw.origin, "btw");
@@ -183,12 +178,12 @@ test("the global concurrency cap includes by-the-way sessions", async () => {
           origin: "btw",
         }),
       ),
-      /Max 4 subagents/,
+      /Max 4 tasks/,
     );
   });
 });
 
-test("the concurrency cap rejects a fifth running subagent", async () => {
+test("the concurrency cap rejects a fifth running task", async () => {
   await withManager(async (manager, runtime) => {
     const spawns = await runTool(
       runtime,
@@ -201,7 +196,7 @@ test("the concurrency cap rejects a fifth running subagent", async () => {
     assert.equal(spawns.length, 4);
     await assert.rejects(
       runTool(runtime, manager.spawn("pi", task("Task 5"))),
-      /Max 4 subagents/,
+      /Max 4 tasks/,
     );
   });
 });
@@ -230,7 +225,7 @@ test("pi spawn fails fast without the parent model registry", async () => {
 
 test("idle restarts respect the concurrency cap", async () => {
   await withManager(async (manager, runtime) => {
-    // Settle one subagent, then fill all four slots with running ones.
+    // Settle one task, then fill all four slots with running ones.
     const settled = await runTool(
       runtime,
       manager.spawn("pi", task("early finisher")),
@@ -247,13 +242,13 @@ test("idle restarts respect the concurrency cap", async () => {
     // Restarting the settled one would be a fifth concurrent run.
     await assert.rejects(
       runTool(runtime, manager.send(settled.id, "go again")),
-      /Max 4 subagents/,
+      /Max 4 tasks/,
     );
     assert.equal(manager.view.get(settled.id)?.status, "done");
   });
 });
 
-test("send steers an idle subagent into another turn", async () => {
+test("send steers an idle task into another turn", async () => {
   await withManager(async (manager, runtime) => {
     const snap = await runTool(
       runtime,

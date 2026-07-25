@@ -18,8 +18,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { Cause, Scope } from "effect";
 import { Duration, Effect, Fiber, Queue, Ref, Stream } from "effect";
-import type { SubagentBackend, SubagentSession } from "../backend.ts";
-import type { BackendName, QueuedMessage, SpawnTask, SubagentEvent, SubagentMeta } from "../domain.ts";
+import type { TaskBackend, TaskSession } from "../backend.ts";
+import type { BackendName, QueuedMessage, SpawnTask, TaskEvent, TaskMeta } from "../domain.ts";
 import { popLastFromPending, SendError } from "../domain.ts";
 
 export interface StubProfile {
@@ -31,10 +31,10 @@ export interface StubProfile {
    readonly cadenceMs: number;
 }
 
-const STUB_DIR = path.join(os.tmpdir(), "subagents-stub");
+const STUB_DIR = path.join(os.tmpdir(), "tasks-stub");
 let sessionCounter = 0;
 
-export function makeStubBackend(profile: StubProfile): SubagentBackend {
+export function makeStubBackend(profile: StubProfile): TaskBackend {
    return {
       name: profile.backend,
       capabilities: {
@@ -63,7 +63,7 @@ function chunked(text: string, size: number): string[] {
    return chunks;
 }
 
-const makeStubSession = (profile: StubProfile, task: SpawnTask): Effect.Effect<SubagentSession, never, Scope.Scope> =>
+const makeStubSession = (profile: StubProfile, task: SpawnTask): Effect.Effect<TaskSession, never, Scope.Scope> =>
    Effect.gen(function* () {
       const sessionId = `stub-${profile.backend}-${++sessionCounter}`;
       const sessionFile = path.join(STUB_DIR, `${sessionId}.jsonl`);
@@ -75,7 +75,7 @@ const makeStubSession = (profile: StubProfile, task: SpawnTask): Effect.Effect<S
             contextWindow: profile.contextWindow,
             sessionFilePath: sessionFile,
             nativeSessionId: sessionId
-         } satisfies SubagentMeta as SubagentMeta,
+         } satisfies TaskMeta as TaskMeta,
          pending: [] as string[],
          turnCount: 0,
          closed: false,
@@ -83,11 +83,11 @@ const makeStubSession = (profile: StubProfile, task: SpawnTask): Effect.Effect<S
          dispatching: false
       };
 
-      const events = yield* Queue.make<SubagentEvent, Cause.Done>();
+      const events = yield* Queue.make<TaskEvent, Cause.Done>();
       const inbox = yield* Queue.make<string, Cause.Done>();
       const activeTurn = yield* Ref.make<Fiber.Fiber<void> | undefined>(undefined);
 
-      const emit = (event: SubagentEvent) =>
+      const emit = (event: TaskEvent) =>
          Effect.suspend(() => {
             try {
                fs.appendFileSync(sessionFile, `${JSON.stringify(event)}\n`);
@@ -166,7 +166,7 @@ const makeStubSession = (profile: StubProfile, task: SpawnTask): Effect.Effect<S
 
             const finalText =
                `[stub:${profile.backend}] completed: ${firstLine(userText).slice(0, 200)}\n\n` +
-               `This is a stubbed ${profile.backend} subagent turn ${turn + 1}. ` +
+               `This is a stubbed ${profile.backend} task turn ${turn + 1}. ` +
                `The real backend integration will replace this scripted output.`;
             for (const delta of chunked(finalText, 24)) {
                yield* emit({ _tag: "AssistantDelta", kind: "text", delta });
@@ -229,9 +229,10 @@ const makeStubSession = (profile: StubProfile, task: SpawnTask): Effect.Effect<S
       const submit = (text: string) =>
          Effect.gen(function* () {
             if (state.closed) {
-               return yield* new SendError({
-                  message: "Subagent session is closed."
+               yield* new SendError({
+                  message: "Task session is closed."
                });
+               return;
             }
             state.pending.push(text);
             const busy = (yield* Ref.get(activeTurn)) !== undefined;
@@ -294,5 +295,5 @@ const makeStubSession = (profile: StubProfile, task: SpawnTask): Effect.Effect<S
                yield* emit({ _tag: "QueueChanged", queued: queuedView() });
                return popped;
             })
-      } satisfies SubagentSession;
+      } satisfies TaskSession;
    });

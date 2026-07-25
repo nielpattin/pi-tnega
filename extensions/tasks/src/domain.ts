@@ -1,9 +1,9 @@
 /**
- * Domain model for subagents.
+ * Domain model for tasks.
  *
  * Everything downstream of a backend (manager, tools, UI) speaks only these
  * types. Backends translate their native streams into the
- * normalized `SubagentEvent` union.
+ * normalized `TaskEvent` union.
  */
 
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
@@ -13,7 +13,7 @@ export const BACKEND_NAMES = ["pi", "agy"] as const;
 export type BackendName = (typeof BACKEND_NAMES)[number];
 
 /** Who initiated the session. User asides stay out of model-facing tooling. */
-export type SubagentOrigin = "model" | "btw";
+export type TaskOrigin = "model" | "btw";
 
 /**
  * Shared reasoning-effort scale (pi's thinking levels).
@@ -22,7 +22,7 @@ export type SubagentOrigin = "model" | "btw";
 export const REASONING_EFFORTS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 
-export type SubagentStatus = "running" | "done" | "error";
+export type TaskStatus = "running" | "done" | "error";
 
 /** Parent-session context resolved by the tool layer and passed opaquely. */
 export interface ParentContext {
@@ -37,7 +37,7 @@ export interface ParentContext {
 
 export interface SpawnTask {
    /** Omitted for normal tool-driven spawns. */
-   readonly origin?: SubagentOrigin;
+   readonly origin?: TaskOrigin;
    readonly prompt: string;
    readonly title: string;
    /** Agent definition name, e.g. "task", "high-task", "scout". */
@@ -56,7 +56,7 @@ export interface SpawnTask {
    readonly tools?: string[];
 }
 
-export interface SubagentMeta {
+export interface TaskMeta {
    readonly backend: BackendName;
    /** Display label, e.g. "anthropic/claude-opus-4-5" or "gemini-3.6-flash-low". */
    readonly modelLabel?: string;
@@ -128,7 +128,7 @@ export type RunOutcome =
  * sanitized line, which keeps three different native tool-result shapes out
  * of the interface.
  */
-export type SubagentEvent =
+export type TaskEvent =
    // lifecycle (a session can run multiple turns via send())
    | { readonly _tag: "RunStarted" }
    | { readonly _tag: "RunSettled"; readonly outcome: RunOutcome }
@@ -171,29 +171,29 @@ export type SubagentEvent =
         readonly tokens?: number;
         readonly contextWindow?: number;
      }
-   | { readonly _tag: "MetaChanged"; readonly meta: Partial<SubagentMeta> }
+   | { readonly _tag: "MetaChanged"; readonly meta: Partial<TaskMeta> }
    /** Non-fatal diagnostics. Fatal failures arrive as a RunSettled outcome. */
    | { readonly _tag: "BackendError"; readonly message: string };
 
 // --- Snapshot ---------------------------------------------------------------
 
 /**
- * The manager folds `SubagentEvent`s into one snapshot per subagent. This is
+ * The manager folds `TaskEvent`s into one snapshot per task. This is
  * everything the tools, footer status, and both TUI views read.
  */
-export interface SubagentSnapshot {
+export interface TaskSnapshot {
    readonly id: string;
-   readonly origin: SubagentOrigin;
+   readonly origin: TaskOrigin;
    readonly backend: BackendName;
    readonly title: string;
    readonly agent?: string;
    readonly prompt: string;
    readonly cwd: string;
-   readonly status: SubagentStatus;
+   readonly status: TaskStatus;
    readonly createdAt: number;
    readonly settledAt?: number;
    readonly errorText?: string;
-   readonly meta: SubagentMeta;
+   readonly meta: TaskMeta;
    readonly usage: { readonly tokens?: number; readonly contextWindow?: number };
    readonly transcript: ReadonlyArray<TranscriptItem>;
    /** Streaming assistant buffers, cleared when the finalized message lands. */
@@ -202,18 +202,18 @@ export interface SubagentSnapshot {
    readonly queued: ReadonlyArray<QueuedMessage>;
    /** Final text of the most recent completed run (v1 `finalOutput`). */
    readonly finalText: string;
-   /** Count of finalized assistant messages (for subagent_check). */
+   /** Count of finalized assistant messages (for task_check). */
    readonly turns: number;
 }
 
 /** Final text, or the live streaming buffer while a run is active (v1 `latestOutput`). */
-export function latestText(snap: SubagentSnapshot) {
+export function latestText(snap: TaskSnapshot) {
    const live = snap.liveAssistant?.text.trim();
    if (live) return live;
    return snap.finalText;
 }
 
-export function formatElapsed(snap: SubagentSnapshot) {
+export function formatElapsed(snap: TaskSnapshot) {
    const end = snap.settledAt ?? Date.now();
    const totalSeconds = Math.max(0, Math.round((end - snap.createdAt) / 1000));
    const minutes = Math.floor(totalSeconds / 60);

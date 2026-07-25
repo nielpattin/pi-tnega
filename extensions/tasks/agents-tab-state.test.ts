@@ -584,11 +584,12 @@ test("computeFrontmatterLinesCount counts lines accurately", () => {
 
 test("CHILD_TOOL_DENYLIST includes all orchestration tools", () => {
    const expectedDenylist = [
-      "subagent_spawn",
-      "subagent_wait",
-      "subagent_cancel",
-      "subagent_check",
-      "subagent_list",
+      "task_spawn",
+      "task_spawn_batch",
+      "task_wait",
+      "task_cancel",
+      "task_check",
+      "task_list",
       "vibe_spawn",
       "vibe_send",
       "vibe_wait",
@@ -605,7 +606,7 @@ test("CHILD_TOOL_DENYLIST includes all orchestration tools", () => {
 test("getSelectableTools filters out denylisted tools", () => {
    const allTools = [
       { name: "read", description: "Read file" },
-      { name: "subagent_spawn", description: "Spawn subagent" },
+      { name: "task_spawn", description: "Spawn task" },
       { name: "bash", description: "Run bash command" },
       { name: "vibe_spawn", description: "Spawn vibe" },
       { name: "ask_user", description: "Ask user" }

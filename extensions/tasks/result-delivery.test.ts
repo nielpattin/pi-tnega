@@ -8,16 +8,16 @@ test("a result consumed by a later wait is not delivered", () => {
     output: string;
   }>();
 
-  delivery.defer({ id: "sa-1", output: "done" });
-  delivery.consume(["sa-1"]);
+  delivery.defer({ id: "task-1", output: "done" });
+  delivery.consume(["task-1"]);
 
   assert.deepEqual(delivery.drain(), []);
 });
 
 test("unconsumed results are delivered once in settlement order", () => {
   const delivery = createDeferredResultDelivery<{ id: string }>();
-  const first = { id: "sa-1" };
-  const second = { id: "sa-2" };
+  const first = { id: "task-1" };
+  const second = { id: "task-2" };
 
   delivery.defer(first);
   delivery.defer(second);
