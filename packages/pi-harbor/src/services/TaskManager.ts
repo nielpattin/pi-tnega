@@ -4,15 +4,21 @@ import { JobRegistry } from "./JobRegistry.js";
 
 export const MAX_RUNNING_AGENTS = 4;
 
+export interface TaskManagerSpawnOptions {
+   ownerSessionId?: string;
+   origin?: "standard" | "vibe" | "btw";
+   skipAgentSlot?: boolean;
+}
+
 export interface TaskManagerShape {
    readonly spawnTask: (
       spec: TaskSpec,
-      options?: { ownerSessionId?: string }
+      options?: TaskManagerSpawnOptions
    ) => Effect.Effect<Job, CapacityError | ConcurrencyLimitError>;
 
    readonly spawnBatch: (
       specs: ReadonlyArray<TaskSpec>,
-      options?: { ownerSessionId?: string }
+      options?: TaskManagerSpawnOptions
    ) => Effect.Effect<ReadonlyArray<Job>, CapacityError | ConcurrencyLimitError>;
 }
 
@@ -26,20 +32,25 @@ export class TaskManager extends Context.Service<TaskManager, TaskManagerShape>(
 
          const spawnBatch = Effect.fn("TaskManager.spawnBatch")(function* (
             specs: ReadonlyArray<TaskSpec>,
-            options?: { ownerSessionId?: string }
+            options?: TaskManagerSpawnOptions
          ) {
             const incomingCount = specs.length;
-            const runningJobs = yield* registry.list({ status: "running" });
-            const runningCount = runningJobs.length;
+            const skipSlot = options?.skipAgentSlot ?? false;
+            const origin = options?.origin ?? "standard";
 
-            if (runningCount + reservedAgentSlots + incomingCount > MAX_RUNNING_AGENTS) {
-               return yield* new ConcurrencyLimitError({
-                  message: `Concurrency limit exceeded. Maximum ${MAX_RUNNING_AGENTS} concurrent agent jobs allowed.`,
-                  limit: MAX_RUNNING_AGENTS
-               });
+            if (!skipSlot) {
+               const runningJobs = yield* registry.list({ status: "running" });
+               const runningCount = runningJobs.length;
+
+               if (runningCount + reservedAgentSlots + incomingCount > MAX_RUNNING_AGENTS) {
+                  return yield* new ConcurrencyLimitError({
+                     message: `Concurrency limit exceeded. Maximum ${MAX_RUNNING_AGENTS} concurrent agent jobs allowed.`,
+                     limit: MAX_RUNNING_AGENTS
+                  });
+               }
+
+               reservedAgentSlots += incomingCount;
             }
-
-            reservedAgentSlots += incomingCount;
 
             return yield* Effect.uninterruptible(
                Effect.gen(function* () {
@@ -53,6 +64,7 @@ export class TaskManager extends Context.Service<TaskManager, TaskManagerShape>(
                         name: spec.name ?? null,
                         kind: "agent",
                         agent: spec.agent ?? "task",
+                        origin,
                         promptOrCommand: spec.task,
                         harness: "pi"
                      });
@@ -63,7 +75,9 @@ export class TaskManager extends Context.Service<TaskManager, TaskManagerShape>(
                }).pipe(
                   Effect.ensuring(
                      Effect.sync(() => {
-                        reservedAgentSlots = Math.max(0, reservedAgentSlots - incomingCount);
+                        if (!skipSlot) {
+                           reservedAgentSlots = Math.max(0, reservedAgentSlots - incomingCount);
+                        }
                      })
                   )
                )
@@ -72,7 +86,7 @@ export class TaskManager extends Context.Service<TaskManager, TaskManagerShape>(
 
          const spawnTask = Effect.fn("TaskManager.spawnTask")(function* (
             spec: TaskSpec,
-            options?: { ownerSessionId?: string }
+            options?: TaskManagerSpawnOptions
          ) {
             const batch = yield* spawnBatch([spec], options);
             return batch[0];

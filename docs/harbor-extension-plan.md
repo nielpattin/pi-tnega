@@ -1694,9 +1694,9 @@ Each bullet below represents one testable behavior. Implementers write a dedicat
 - [ ] agy rejects messaging ops
 
 #### J. Cutover, Vibe State, /btw & Command Locks
-- [ ] cutover fail-closed: session_start logs error and refuses parent registration if legacy extensions are active without - force-exclude
+- [x] cutover fail-closed: session_start logs error and refuses parent registration if legacy extensions are active without - force-exclude
 - [ ] agents.json project override for vibe profiles fast/good
-- [ ] enter vibe appends vibe-state with filtered tool names
+- [x] enter vibe appends vibe-state with filtered tool names
 - [x] exit uses LAST vibe-state entry from ctx.sessionManager.getEntries()
 - [x] intersection with getAllTools names
 - [x] never uses getActiveTools while vibe is on for restore
@@ -1704,7 +1704,7 @@ Each bullet below represents one testable behavior. Implementers write a dedicat
 - [x] hard tool_call hook blocks non-director tools when vibe is on
 - [x] director allowlist includes vibe_spawn, vibe_send, vibe_wait, vibe_kill, vibe_list, read, describe_image, web_search_exa, deep_search_exa, web_fetch_exa, read_session, workflow, mcp
 - [ ] vibe OFF terminates running vibe worker sessions
-- [ ] /btw uses task agent profile, inherits parent model, origin "btw", max 1 concurrent without consuming MAX_RUNNING_AGENTS slot
+- [x] /btw uses task agent profile, inherits parent model, origin "btw", max 1 concurrent without consuming MAX_RUNNING_AGENTS slot
 
 #### K. Integration & Runtime
 - [x] makeHarborRuntime builds HarborLive
@@ -1754,12 +1754,12 @@ Each bullet below represents one testable behavior. Implementers write a dedicat
 - [x] Implement `services/VibeState.ts`, durable session entry snapshotting (`pi.appendEntry`), restoration algorithm (`getEntries()`), hard `tool_call` hook guard, and director tools `vibe_*` (`tests/vibe-state.test.ts`).
 
 ### Phase 2b — UI Commands & Takeover (/tasks, /agents, /vibe, /btw)
-- Write failing vitest tests first for every behavior in this phase before implementing any production code.
-- Implement `/tasks` TUI dashboard overlay, sub-tabs (Jobs, Bash, Processes, Stdio Logs, Takeover), and takeover keybindings (Enter → steer, Alt+Enter → followUp) (`tests/tasks-dashboard.test.ts`).
-- Implement `/agents` configuration panel (`tests/agents-panel.test.ts`).
-- Implement `/vibe` toggle command (`tests/vibe-commands.test.ts`).
-- Implement `/btw` side-task command (uses built-in task profile, inherited model, origin `btw`, side-channel max 1 concurrent without consuming MAX_RUNNING_AGENTS slot, results via `btw-result` entry + `registerEntryRenderer` with fallback renderer) (`tests/btw-result.test.ts`).
-- Implement session_start cutover fail-closed verification (logs error and refuses parent registration if legacy extensions are active without `-` force-exclude) (`tests/cutover.test.ts`).
+- [x] Write failing vitest tests first for every behavior in this phase before implementing any production code.
+- [x] Implement `/tasks` TUI dashboard overlay, sub-tabs (Jobs, Bash, Processes, Stdio Logs, Takeover), and takeover keybindings (Enter → steer, Alt+Enter → followUp) (`tests/tasks-dashboard.test.ts`).
+- [x] Implement `/agents` configuration panel (`tests/agents-panel.test.ts`).
+- [x] Implement `/vibe` toggle command (`tests/vibe-commands.test.ts`).
+- [x] Implement `/btw` side-task command (uses built-in task profile, inherited model, origin `btw`, side-channel max 1 concurrent without consuming MAX_RUNNING_AGENTS slot, results via `btw-result` entry + `registerEntryRenderer` with fallback renderer) (`tests/btw-result.test.ts`).
+- [x] Implement session_start cutover fail-closed verification (logs error and refuses parent registration if legacy extensions are active without `-` force-exclude) (`tests/cutover.test.ts`).
 
 ### Phase 3 — Advanced Process Supervision & Telemetry
 - Write failing vitest tests first for every behavior in this phase before implementing any production code.
