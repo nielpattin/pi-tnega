@@ -1,24 +1,11 @@
 {
-  "$schema": "https://unpkg.com/@changesets/config@1.6.4/schema.json",
-  "changelog": ["@changesets/changelog-github", { "repo": "Effect-TS/effect" }],
-  "commit": false,
-  "linked": [],
-  "access": "restricted",
-  "baseBranch": "main",
-  "updateInternalDependencies": "patch",
-  "ignore": [
-    "scratchpad",
-    "scripts"
-  ],
-  "privatePackages": false,
-  "fixed": [
-    [
-      "effect",
-      "@effect/*"
-    ]
-  ],
-  "snapshot": {
-    "useCalculatedVersion": false,
-    "prereleaseTemplate": "{tag}-{commit}"
-  }
+   "$schema": "https://unpkg.com/@changesets/config@3.1.1/schema.json",
+   "changelog": "@changesets/changelog-git",
+   "commit": false,
+   "fixed": [],
+   "linked": [],
+   "access": "public",
+   "baseBranch": "main",
+   "updateInternalDependencies": "patch",
+   "ignore": []
 }
