@@ -11,13 +11,13 @@
 
 Effect is the **async runtime core** for process lifecycle, fiber orchestration, concurrency caps, resource teardown, and typed errors.
 
-| Package | Key Usage |
-| :------ | :-------- |
-| `extensions/tasks` | Task lifecycle, `Context.Service` manager, `Scope` per task, `Stream` event pump, `waitInterest` / `Effect.ensuring`, `ManagedRuntime` + `runTool` |
-| `extensions/background-terminals` | Process supervision, `FiberSet` cleanup, `Deferred` settled signal, `Effect.callback` for child close, tree kill + `Scope` finalizers |
-| `extensions/copy-all` | `Effect.callback` for clipboard process, `Data.TaggedError` |
-| `extensions/ask-user` | `Effect.tryPromise` + `runPromiseExit` for TUI prompts |
-| `packages/pi-harbor` (planned) | Unified `HarborLive` layer: jobs, processes, mail, vibe; same runtime boundary pattern |
+| Package                           | Key Usage                                                                                                                                          |
+| :-------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `extensions/tasks`                | Task lifecycle, `Context.Service` manager, `Scope` per task, `Stream` event pump, `waitInterest` / `Effect.ensuring`, `ManagedRuntime` + `runTool` |
+| `extensions/background-terminals` | Process supervision, `FiberSet` cleanup, `Deferred` settled signal, `Effect.callback` for child close, tree kill + `Scope` finalizers              |
+| `extensions/copy-all`             | `Effect.callback` for clipboard process, `Data.TaggedError`                                                                                        |
+| `extensions/ask-user`             | `Effect.tryPromise` + `runPromiseExit` for TUI prompts                                                                                             |
+| `packages/pi-harbor` (planned)    | Unified `HarborLive` layer: jobs, processes, mail, vibe; same runtime boundary pattern                                                             |
 
 ### When NOT to Use Effect
 
@@ -42,11 +42,11 @@ Effect is the **async runtime core** for process lifecycle, fiber orchestration,
 
 ## 3. Core Type: `Effect<A, E, R>`
 
-| Param | Meaning |
-| :---- | :------ |
-| `A` | Success value |
-| `E` | Expected (typed) failure |
-| `R` | Required services / context |
+| Param | Meaning                     |
+| :---- | :-------------------------- |
+| `A`   | Success value               |
+| `E`   | Expected (typed) failure    |
+| `R`   | Required services / context |
 
 ---
 
@@ -62,30 +62,31 @@ Use generator style. Attach behavior with combinators after the generator body.
 import { Effect, Schema } from "effect";
 
 export class SomeError extends Schema.TaggedErrorClass<SomeError>()("SomeError", {
-  message: Schema.String
+    message: Schema.String
 }) {}
 
-export const processItem = Effect.fn("processItem")(function* (
-  n: number
-): Effect.fn.Return<string, SomeError> {
-  yield* Effect.logInfo("Received number:", n);
-  if (n < 0) {
-    return yield* new SomeError({ message: "negative" });
-  }
-  return String(n);
-}, Effect.catch((error) => Effect.logError(`failed: ${error}`)));
+export const processItem = Effect.fn("processItem")(
+    function* (n: number): Effect.fn.Return<string, SomeError> {
+        yield* Effect.logInfo("Received number:", n);
+        if (n < 0) {
+            return yield* new SomeError({ message: "negative" });
+        }
+        return String(n);
+    },
+    Effect.catch((error) => Effect.logError(`failed: ${error}`))
+);
 // Pass extra combinators as extra args to Effect.fn — do NOT .pipe the Effect.fn result for those.
 ```
 
 ### 4.2 Creating effects
 
-| Need | API |
-| :--- | :-- |
-| Pure value | `Effect.succeed(a)` / `Effect.fail(e)` |
-| Sync throw-prone | `Effect.sync(() => ...)` / `Effect.try({ try, catch })` |
-| Promise | `Effect.tryPromise({ try, catch })` / `Effect.promise` |
+| Need                         | API                                                                 |
+| :--------------------------- | :------------------------------------------------------------------ |
+| Pure value                   | `Effect.succeed(a)` / `Effect.fail(e)`                              |
+| Sync throw-prone             | `Effect.sync(() => ...)` / `Effect.try({ try, catch })`             |
+| Promise                      | `Effect.tryPromise({ try, catch })` / `Effect.promise`              |
 | Node callback / EventEmitter | `Effect.callback((resume) => { ...; return Effect.sync(cleanup) })` |
-| Optional | `Effect.fromOption` / `Effect.fromNullable` patterns as needed |
+| Optional                     | `Effect.fromOption` / `Effect.fromNullable` patterns as needed      |
 
 ### 4.3 Error model
 
@@ -95,8 +96,8 @@ export const processItem = Effect.fn("processItem")(function* (
 import { Schema } from "effect";
 
 export class SpawnError extends Schema.TaggedErrorClass<SpawnError>()("SpawnError", {
-  message: Schema.String,
-  cause: Schema.optional(Schema.Defect())
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect())
 }) {}
 ```
 
@@ -106,8 +107,8 @@ Catch:
 
 ```ts
 effect.pipe(
-  Effect.catchTag("SpawnError", (e) => Effect.succeed(fallback)),
-  Effect.catch((e) => Effect.succeed(defaultValue))
+    Effect.catchTag("SpawnError", (e) => Effect.succeed(fallback)),
+    Effect.catch((e) => Effect.succeed(defaultValue))
 );
 ```
 
@@ -119,14 +120,14 @@ All untrusted input validation goes through `Schema` (decode/encode). Avoid hand
 import { Effect, Schema } from "effect";
 
 export class User extends Schema.Class<User>("harbor/User")({
-  id: Schema.String,
-  name: Schema.NonEmptyString
+    id: Schema.String,
+    name: Schema.NonEmptyString
 }) {}
 
 export const decodeUser = Schema.decodeUnknownEffect(User);
 ```
 
-**Harbor note:** Pi tool *parameter* schemas stay TypeBox (Pi SDK). Harbor *internal* domain + `outputSchema` validation prefer Effect `Schema` where possible; TypeBox remains for tool JSON Schema surfaces.
+**Harbor note:** Pi tool _parameter_ schemas stay TypeBox (Pi SDK). Harbor _internal_ domain + `outputSchema` validation prefer Effect `Schema` where possible; TypeBox remains for tool JSON Schema surfaces.
 
 ### 4.5 Services: `Context.Service` + static `layer`
 
@@ -136,25 +137,23 @@ Canonical shape from LLMS.md and tasks:
 import { Context, Effect, Layer } from "effect";
 
 export interface JobRegistryShape {
-  readonly get: (id: string) => Effect.Effect<Job | undefined>;
-  readonly list: Effect.Effect<ReadonlyArray<Job>>;
+    readonly get: (id: string) => Effect.Effect<Job | undefined>;
+    readonly list: Effect.Effect<ReadonlyArray<Job>>;
 }
 
-export class JobRegistry extends Context.Service<JobRegistry, JobRegistryShape>()(
-  "harbor/JobRegistry"
-) {
-  static readonly layer = Layer.effect(
-    JobRegistry,
-    Effect.gen(function* () {
-      const get = Effect.fn("JobRegistry.get")(function* (id: string) {
-        return undefined as Job | undefined;
-      });
-      return JobRegistry.of({
-        get,
-        list: Effect.succeed([])
-      });
-    })
-  );
+export class JobRegistry extends Context.Service<JobRegistry, JobRegistryShape>()("harbor/JobRegistry") {
+    static readonly layer = Layer.effect(
+        JobRegistry,
+        Effect.gen(function* () {
+            const get = Effect.fn("JobRegistry.get")(function* (id: string) {
+                return undefined as Job | undefined;
+            });
+            return JobRegistry.of({
+                get,
+                list: Effect.succeed([])
+            });
+        })
+    );
 }
 
 export type JobRegistryService = JobRegistry["Service"];
@@ -164,8 +163,8 @@ Compose layers:
 
 ```ts
 const HarborLive = TaskManager.layer.pipe(
-  Layer.provide(JobRegistry.layer),
-  Layer.provideMerge(ProcessSupervisor.layer)
+    Layer.provide(JobRegistry.layer),
+    Layer.provideMerge(ProcessSupervisor.layer)
 );
 ```
 
@@ -176,12 +175,14 @@ const HarborLive = TaskManager.layer.pipe(
 ### 4.6 Resources: `Scope`, `acquireRelease`, finalizers
 
 ```ts
-yield* Effect.addFinalizer(() => Effect.sync(() => cleanup()));
+yield * Effect.addFinalizer(() => Effect.sync(() => cleanup()));
 
-const resource = yield* Effect.acquireRelease(
-  Effect.sync(() => openThing()),
-  (thing) => Effect.sync(() => thing.close())
-);
+const resource =
+    yield *
+    Effect.acquireRelease(
+        Effect.sync(() => openThing()),
+        (thing) => Effect.sync(() => thing.close())
+    );
 ```
 
 Per-job pattern (tasks / terminals): `Scope.make` per entry, `Scope.provide(Effect.forkScoped(work), scope)`, on settle `Scope.close(scope, Exit.void)`.
@@ -200,24 +201,21 @@ Track `waitInterest` and `killInterest`. Prune only when both are 0 and status i
 
 ```ts
 const wait = Effect.gen(function* () {
-  yield* incrementWaitInterest(ids);
-  yield* Effect.ensuring(
-    awaitSettlement(ids),
-    decrementWaitInterest(ids)
-  );
+    yield* incrementWaitInterest(ids);
+    yield* Effect.ensuring(awaitSettlement(ids), decrementWaitInterest(ids));
 });
 ```
 
 ### 4.8 Fibers, FiberSet, Deferred, Queue, Stream
 
-| Primitive | Use |
-| :-------- | :-- |
-| `Effect.forkScoped` | Background pump tied to job `Scope` |
-| `FiberSet` | Batch of cleanup fibers (terminals) |
-| `Deferred` | One-shot "process settled" / wait cell |
-| `Queue` | Backend event buffers (`Stream.fromQueue`) |
-| `Stream.runForEach` | Consume child session events |
-| `Effect.runForkWith(ctx)` | Detached fork preserving manager services |
+| Primitive                 | Use                                        |
+| :------------------------ | :----------------------------------------- |
+| `Effect.forkScoped`       | Background pump tied to job `Scope`        |
+| `FiberSet`                | Batch of cleanup fibers (terminals)        |
+| `Deferred`                | One-shot "process settled" / wait cell     |
+| `Queue`                   | Backend event buffers (`Stream.fromQueue`) |
+| `Stream.runForEach`       | Consume child session events               |
+| `Effect.runForkWith(ctx)` | Detached fork preserving manager services  |
 
 ### 4.9 PubSub (mail / change bus)
 
@@ -226,8 +224,8 @@ For multi-subscriber job-change or mail events:
 ```ts
 import { Effect, Layer, PubSub, Stream, Context } from "effect";
 
-const pubsub = yield* PubSub.bounded<JobEvent>({ capacity: 256, replay: 32 });
-yield* Effect.addFinalizer(() => PubSub.shutdown(pubsub));
+const pubsub = yield * PubSub.bounded<JobEvent>({ capacity: 256, replay: 32 });
+yield * Effect.addFinalizer(() => PubSub.shutdown(pubsub));
 const subscribe = Stream.fromPubSub(pubsub);
 ```
 
@@ -236,8 +234,8 @@ MailBus can use per-recipient queues **or** PubSub + filter; prefer Effect primi
 ### 4.10 Interrupt, timeout, result
 
 ```ts
-yield* child.interrupt.pipe(Effect.timeout("2 seconds"), Effect.ignore);
-const result = yield* work.pipe(Effect.result); // Result.success | Result.failure
+yield * child.interrupt.pipe(Effect.timeout("2 seconds"), Effect.ignore);
+const result = yield * work.pipe(Effect.result); // Result.success | Result.failure
 // Effect v4: Either renamed to Result
 import { Result } from "effect";
 ```
@@ -250,24 +248,21 @@ Pi tools are plain `async` functions. Bridge once:
 import { Cause, Exit, ManagedRuntime, type Effect } from "effect";
 
 export function makeHarborRuntime() {
-  return ManagedRuntime.make(HarborLive);
+    return ManagedRuntime.make(HarborLive);
 }
 
 export async function runTool<A, E>(
-  runtime: ReturnType<typeof makeHarborRuntime>,
-  effect: Effect.Effect<A, E>,
-  options: { signal?: AbortSignal; interruptMessage?: string } = {}
+    runtime: ReturnType<typeof makeHarborRuntime>,
+    effect: Effect.Effect<A, E>,
+    options: { signal?: AbortSignal; interruptMessage?: string } = {}
 ) {
-  const exit = await runtime.runPromiseExit(
-    effect,
-    options.signal ? { signal: options.signal } : undefined
-  );
-  if (Exit.isSuccess(exit)) return exit.value;
-  if (Cause.hasInterruptsOnly(exit.cause)) {
-    throw new Error(options.interruptMessage ?? "Operation was aborted.");
-  }
-  const [first] = Cause.prettyErrors(exit.cause);
-  throw new Error(first?.message ?? Cause.pretty(exit.cause));
+    const exit = await runtime.runPromiseExit(effect, options.signal ? { signal: options.signal } : undefined);
+    if (Exit.isSuccess(exit)) return exit.value;
+    if (Cause.hasInterruptsOnly(exit.cause)) {
+        throw new Error(options.interruptMessage ?? "Operation was aborted.");
+    }
+    const [first] = Cause.prettyErrors(exit.cause);
+    throw new Error(first?.message ?? Cause.pretty(exit.cause));
 }
 ```
 
@@ -280,7 +275,7 @@ Effect also documents `effect/unstable/process` + `ChildProcessSpawner` for Effe
 ### 4.13 Logging / spans
 
 ```ts
-yield* Effect.logInfo("spawn", { id });
+yield * Effect.logInfo("spawn", { id });
 // Effect.fn("name") attaches withSpan automatically
 ```
 

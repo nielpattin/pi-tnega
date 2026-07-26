@@ -348,14 +348,14 @@ If you relied on global `rm -rf *: deny` surviving an agent's `tools.bash: allow
 ```yaml
 # Old agent frontmatter — global "rm -rf *": "deny" survived
 permission:
-  tools:
-    bash: allow
+    tools:
+        bash: allow
 
 # New agent frontmatter — must repeat the deny if you want it preserved
 permission:
-  bash:
-    "*": allow
-    "rm -rf *": deny
+    bash:
+        "*": allow
+        "rm -rf *": deny
 ```
 
 ### `matchedPattern` for `external_directory`

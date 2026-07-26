@@ -425,17 +425,17 @@ Path: `~/.pi/agent/agents/<agent>.md` (respects `PI_CODING_AGENT_DIR`)
 ---
 name: my-agent
 permission:
-  read: allow
-  write: deny
-  mcp: allow
-  bash:
-    git status: allow
-    git *: ask
-  mcp:
-    chrome_devtools_*: deny
-    exa_*: allow
-  skill:
-    "*": ask
+    read: allow
+    write: deny
+    mcp: allow
+    bash:
+        git status: allow
+        git *: ask
+    mcp:
+        chrome_devtools_*: deny
+        exa_*: allow
+    skill:
+        "*": ask
 ---
 ```
 

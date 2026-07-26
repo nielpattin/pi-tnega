@@ -151,7 +151,7 @@ function buildSessionExcerpt(
 
    // Walk parent pointers from leaf to root (the active branch).
    const branch: SessionFileEntry[] = [];
-   for (let current = leaf; current; ) {
+   for (let current = leaf; current;) {
       branch.push(current);
       if (!current.parentId) break;
       current = byId.get(current.parentId) ?? undefined;
@@ -217,6 +217,7 @@ async function loadSessions(): Promise<SessionInfo[]> {
 
    try {
       const sessions = await promise;
+      // oxlint-disable-next-line unicorn/no-array-sort -- ES2022 target does not provide Array.prototype.toSorted.
       return sessions.sort((a, b) => b.created.getTime() - a.created.getTime());
    } catch (error) {
       sessionsCache = undefined;

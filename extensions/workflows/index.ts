@@ -195,6 +195,7 @@ function listRuns(
          // Ignore unreadable artifacts because their session cannot be verified.
       }
    }
+   // oxlint-disable-next-line unicorn/no-array-sort -- ES2022 target does not provide Array.prototype.toSorted.
    return summaries.sort((a, b) => b.startedAt - a.startedAt);
 }
 
@@ -332,7 +333,7 @@ export default function workflows(pi: ExtensionAPI) {
          try {
             prepared = prepareWorkflowScript(params.script);
          } catch (error) {
-            throw new Error(`Workflow script failed to parse: ${errorText(error)}`);
+            throw new Error(`Workflow script failed to parse: ${errorText(error)}`, { cause: error });
          }
 
          let args: unknown;
@@ -442,9 +443,7 @@ export default function workflows(pi: ExtensionAPI) {
                return { ok: false, output: "", error };
             };
 
-            const prompt = buildWorkflowAgentPrompt(
-               typeof promptValue === "string" ? promptValue : String(promptValue ?? "")
-            );
+            const prompt = buildWorkflowAgentPrompt(typeof promptValue === "string" ? promptValue : "");
             if (!prompt.trim()) return fail("agent() requires a non-empty prompt string");
             if (controller.signal.aborted) return fail("Workflow was aborted before this agent started");
 
@@ -479,7 +478,7 @@ export default function workflows(pi: ExtensionAPI) {
                   // Effort → thinking level; default inherits the parent session.
                   let thinkingLevel: ThinkingLevel = pi.getThinkingLevel();
                   if (opts.effort !== undefined) {
-                     const effort = String(opts.effort);
+                     const effort = typeof opts.effort === "string" ? opts.effort : "";
                      if (!(THINKING_LEVELS as readonly string[]).includes(effort)) {
                         return fail(`agent "${label}": invalid effort "${effort}" (use ${THINKING_LEVELS.join("|")})`);
                      }
@@ -570,7 +569,7 @@ export default function workflows(pi: ExtensionAPI) {
             } catch (error) {
                details.status = "failed";
                details.error = `Artifact persistence failed: ${errorText(error)}`;
-               throw new Error(details.error);
+               throw new Error(details.error, { cause: error });
             } finally {
                flushNow();
             }

@@ -339,7 +339,7 @@ export function buildCompactHashlineDiffPreview(
    let addedLines = 0;
    let removedLines = 0;
 
-   for (let index = 0; index < lines.length; ) {
+   for (let index = 0; index < lines.length;) {
       const kind = classifyDiffPreviewLine(lines[index]!);
       let end = index + 1;
       while (end < lines.length && classifyDiffPreviewLine(lines[end]!) === kind) {

@@ -121,7 +121,7 @@ export function guardWorkflowChildTools(session: WorkflowToolSession, timeoutMs?
 
 function isJsonSchema(value: unknown): value is TSchema {
    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-   const seen = new WeakSet<object>();
+   const seen = new WeakSet();
    let nodes = 0;
    const validate = (current: unknown, depth: number): boolean => {
       if (++nodes > 10_000 || depth > 24) return false;
@@ -400,7 +400,6 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
          cwd: options.cwd,
          ...(options.model ? { model: options.model } : {}),
          ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
-         modelRegistry: options.modelRegistry,
          resourceLoader: options.loader,
          settingsManager: options.settingsManager,
          sessionManager: SessionManager.inMemory(options.cwd),

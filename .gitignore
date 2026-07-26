@@ -148,6 +148,7 @@ vite.config.ts.timestamp-*
 
 
 sessions
+/workflows/
 bin/
 cache/
 auth.json
@@ -186,3 +187,4 @@ agents.json
 *.workspace
 
 pi-mcp-adapter/
+agents/

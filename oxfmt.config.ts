@@ -14,7 +14,8 @@ export default defineConfig({
       "*yml",
       "**/pi-mcp-adapter/**",
       ".pi/**",
-      "repos/**"
+      "repos/**",
+      "workflows/**"
    ],
    trailingComma: "none",
    printWidth: 120,

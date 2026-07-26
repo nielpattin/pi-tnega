@@ -15,6 +15,7 @@ import {
    TreeSelectorComponent,
    UserMessageComponent,
    type MessageRenderer,
+   type ModelRegistry,
    type SessionEntry,
    type SessionManager,
    type Theme,
@@ -99,6 +100,7 @@ interface TreeSelectorResult {
 type AgentSessionWithInternals = AgentSession & {
    extensionRunner?: {
       getMessageRenderer?(customType: string): MessageRenderer | undefined;
+      getModelRegistry?(): ModelRegistry;
    };
 };
 
@@ -195,10 +197,8 @@ function getTheme(): Theme {
 }
 
 function normalizeDetail(text: unknown): string {
-   return String(text ?? "")
-      .replace(/\r/g, "")
-      .replace(/\t/g, "    ")
-      .trim();
+   const value = typeof text === "string" ? text : text == null ? "" : stringifyJson(text, 2);
+   return value.replace(/\r/g, "").replace(/\t/g, "    ").trim();
 }
 
 function isAnsiFinalByte(char: string): boolean {
@@ -231,7 +231,7 @@ function getAnsiSequenceLength(text: string, startIndex: number): number {
 
 function stripAnsi(text: string): string {
    let result = "";
-   for (let index = 0; index < text.length; ) {
+   for (let index = 0; index < text.length;) {
       const ansiLength = getAnsiSequenceLength(text, index);
       if (ansiLength) {
          index += ansiLength;
@@ -525,7 +525,7 @@ function describeEntry(treeList: TreeListLike, node: SessionTreeNode): EntryInfo
 
       case "custom_message":
          return {
-            kind: entry.customType ? `${entry.customType}`.toUpperCase() : "CUSTOM MESSAGE",
+            kind: entry.customType ? entry.customType.toUpperCase() : "CUSTOM MESSAGE",
             full: extractDetailContent(treeList, entry.content, { includeToolCalls: true }) || "(empty)"
          };
 
@@ -558,7 +558,7 @@ function describeEntry(treeList: TreeListLike, node: SessionTreeNode): EntryInfo
 
       case "custom":
          return {
-            kind: entry.customType ? `${entry.customType}`.toUpperCase() : "CUSTOM",
+            kind: entry.customType ? entry.customType.toUpperCase() : "CUSTOM",
             full: entry.data === undefined ? `[custom: ${entry.customType}]` : formatCustomEntryData(entry.data)
          };
 
@@ -612,7 +612,9 @@ function getDetailContextUsage(session: AgentSessionWithInternals, entry: Sessio
    const modelIdentity = sessionContext.model ?? findLastAssistantModel(branchEntries);
    if (!modelIdentity) return null;
 
-   const contextWindow = session.modelRegistry.find(modelIdentity.provider, modelIdentity.modelId)?.contextWindow;
+   const contextWindow = session.extensionRunner
+      ?.getModelRegistry?.()
+      .find(modelIdentity.provider, modelIdentity.modelId)?.contextWindow;
    if (!contextWindow) return null;
 
    const latestCompaction = getLatestCompactionEntry(branchEntries);
@@ -1297,7 +1299,9 @@ export function installTreeXNativePatches(
    const proto = InteractiveModeClass.prototype as unknown as InteractiveModePrototype;
    uninstallTreeXNativePatches(InteractiveModeClass);
 
-   const originalShowSelector = proto.showSelector;
+   const descriptor = Object.getOwnPropertyDescriptor(proto, "showSelector");
+   if (typeof descriptor?.value !== "function") return () => {};
+   const originalShowSelector = descriptor.value as InteractiveModePrototype["showSelector"];
    const patchedShowSelector = function treexShowSelector(
       this: InteractiveMode,
       create: (done: () => void) => TreeSelectorResult
