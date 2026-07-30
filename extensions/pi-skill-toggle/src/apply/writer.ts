@@ -11,25 +11,27 @@ export class AtomicSkillChangeWriter implements SkillChangeWriter {
    async apply(changes: SkillChange[]): Promise<ApplyResult> {
       const result: ApplyResult = { applied: [], skipped: [], errors: [] };
 
-      for (const change of changes) {
-         try {
-            const current = await this.fs.readFile(change.filePath);
-            if (current !== change.patch.oldText) {
+      await Promise.all(
+         changes.map(async (change) => {
+            try {
+               const current = await this.fs.readFile(change.filePath);
+               if (current !== change.patch.oldText) {
+                  result.errors.push({
+                     skill: change.skill,
+                     message: `${change.skill.name}: file changed while dialog was open; skipped`
+                  });
+                  return;
+               }
+               await this.fs.writeFileAtomic(change.filePath, change.patch.newText);
+               result.applied.push(change);
+            } catch (error) {
                result.errors.push({
                   skill: change.skill,
-                  message: `${change.skill.name}: file changed while dialog was open; skipped`
+                  message: `${change.skill.name}: ${error instanceof Error ? error.message : String(error)}`
                });
-               continue;
             }
-            await this.fs.writeFileAtomic(change.filePath, change.patch.newText);
-            result.applied.push(change);
-         } catch (error) {
-            result.errors.push({
-               skill: change.skill,
-               message: `${change.skill.name}: ${error instanceof Error ? error.message : String(error)}`
-            });
-         }
-      }
+         })
+      );
 
       return result;
    }

@@ -16,15 +16,17 @@ export class DefaultSkillLocator implements SkillLocator {
       const files: LocatedSkillFile[] = [];
       const seen = new Set<string>();
 
-      for (const root of roots) {
-         if (!(await this.fs.access(root.path))) continue;
-         const found = await this.scanSkillDir(root.path, root.path, root.source, root.includeRootMarkdownFiles);
-         for (const file of found) {
-            if (seen.has(file.filePath)) continue;
-            seen.add(file.filePath);
-            files.push(file);
-         }
-      }
+      await Promise.all(
+         roots.map(async (root) => {
+            if (!(await this.fs.access(root.path))) return;
+            const found = await this.scanSkillDir(root.path, root.path, root.source, root.includeRootMarkdownFiles);
+            for (const file of found) {
+               if (seen.has(file.filePath)) continue;
+               seen.add(file.filePath);
+               files.push(file);
+            }
+         })
+      );
 
       return files.toSorted((a, b) => a.filePath.localeCompare(b.filePath));
    }
@@ -52,19 +54,26 @@ export class DefaultSkillLocator implements SkillLocator {
          return out;
       }
 
-      for (const entry of entries) {
-         if (entry.name.startsWith(".")) continue;
-         if (entry.name === "node_modules") continue;
+      const childResults = await Promise.all(
+         entries.map(async (entry) => {
+            if (entry.name.startsWith(".")) return [] as LocatedSkillFile[];
+            if (entry.name === "node_modules") return [] as LocatedSkillFile[];
 
-         const fullPath = join(dir, entry.name);
-         if (await this.isDirectory(fullPath, entry)) {
-            out.push(...(await this.scanSkillDir(fullPath, root, source, false)));
-            continue;
-         }
+            const fullPath = join(dir, entry.name);
+            if (await this.isDirectory(fullPath, entry)) {
+               return this.scanSkillDir(fullPath, root, source, false);
+            }
 
-         if (includeRootMarkdownFiles && entry.name.endsWith(".md") && (await this.isFile(fullPath, entry))) {
-            out.push({ filePath: fullPath, source, editable: await this.isWritable(fullPath) });
-         }
+            if (includeRootMarkdownFiles && entry.name.endsWith(".md") && (await this.isFile(fullPath, entry))) {
+               const editable = await this.isWritable(fullPath);
+               return [{ filePath: fullPath, source, editable }];
+            }
+            return [] as LocatedSkillFile[];
+         })
+      );
+
+      for (const child of childResults) {
+         out.push(...child);
       }
 
       return out;

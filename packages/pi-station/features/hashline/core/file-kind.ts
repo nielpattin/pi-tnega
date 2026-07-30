@@ -72,11 +72,11 @@ export async function loadFileKindAndText(filePath: string): Promise<LoadedFile>
       const decoder = new TextDecoder("utf-8");
       const parts: string[] = [decoder.decode(sample, { stream: true })];
 
-      let position = bytesRead;
-      while (true) {
+      const readRemainingText = async (position: number): Promise<LoadedFile> => {
          const { bytesRead: chunkBytesRead } = await fileHandle.read(buffer, 0, FILE_TYPE_SNIFF_BYTES, position);
          if (chunkBytesRead === 0) {
-            break;
+            parts.push(decoder.decode());
+            return { kind: "text", text: parts.join("") };
          }
 
          const chunk = buffer.subarray(0, chunkBytesRead);
@@ -87,12 +87,10 @@ export async function loadFileKindAndText(filePath: string): Promise<LoadedFile>
             };
          }
          parts.push(decoder.decode(chunk, { stream: true }));
-         position += chunkBytesRead;
-      }
+         return readRemainingText(position + chunkBytesRead);
+      };
 
-      parts.push(decoder.decode());
-
-      return { kind: "text", text: parts.join("") };
+      return readRemainingText(bytesRead);
    } finally {
       await fileHandle.close();
    }
@@ -102,12 +100,12 @@ export async function classifyFileKind(filePath: string): Promise<FileKind> {
    const loaded = await loadFileKindAndText(filePath);
    switch (loaded.kind) {
       case "directory":
-         return loaded;
       case "image":
-         return loaded;
       case "binary":
          return loaded;
       case "text":
          return { kind: "text" };
+      default:
+         return { kind: "binary", description: "unknown" };
    }
 }

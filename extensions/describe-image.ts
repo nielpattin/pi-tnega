@@ -432,46 +432,52 @@ export default function describeImageExtension(pi: ExtensionAPI) {
          render();
          const heartbeat = setInterval(render, 500);
 
-         try {
-            let lastError: Error | null = null;
-            for (const attempt of attempts) {
-               try {
-                  const result = await analyzeWithModel(
-                     attempt.model,
-                     ctx.modelRegistry,
-                     resolved.data,
-                     resolved.mimeType,
-                     prompt,
-                     combinedSignal,
-                     config.timeout
-                  );
-                  const tokenInfo = result.tokens ? ` | ${result.tokens.input}+${result.tokens.output} tokens` : "";
-                  const meta = `[${result.provider}/${result.model}${tokenInfo}]`;
-                  onUpdate?.({
-                     content: [{ type: "text", text: `describe_image: ${params.filePath}` }],
-                     details: {
-                        source: resolved.source,
-                        provider: result.provider,
-                        model: result.model,
-                        via: attempt.label
-                     }
-                  });
-                  return {
-                     content: [{ type: "text", text: `${result.text}\n\n${meta}` }],
-                     details: {
-                        source: resolved.source,
-                        provider: result.provider,
-                        model: result.model,
-                        via: attempt.label,
-                        tokens: result.tokens
-                     }
-                  };
-               } catch (err) {
-                  lastError = err instanceof Error ? err : new Error(String(err));
-                  // try the next model
-               }
+         async function tryAttempts(remaining: typeof attempts): Promise<ReturnType<typeof analyzeWithModel>> {
+            const attempt = remaining[0];
+            if (!attempt) {
+               throw new Error("describe_image: all vision models failed");
             }
-            throw lastError ?? new Error("describe_image: all vision models failed");
+            try {
+               return await analyzeWithModel(
+                  attempt.model,
+                  ctx.modelRegistry,
+                  resolved.data,
+                  resolved.mimeType,
+                  prompt,
+                  combinedSignal,
+                  config.timeout
+               );
+            } catch (err) {
+               if (remaining.length === 1) {
+                  throw err instanceof Error ? err : new Error(String(err));
+               }
+               return tryAttempts(remaining.slice(1));
+            }
+         }
+
+         try {
+            const result = await tryAttempts(attempts);
+            const tokenInfo = result.tokens ? ` | ${result.tokens.input}+${result.tokens.output} tokens` : "";
+            const meta = `[${result.provider}/${result.model}${tokenInfo}]`;
+            onUpdate?.({
+               content: [{ type: "text", text: `describe_image: ${params.filePath}` }],
+               details: {
+                  source: resolved.source,
+                  provider: result.provider,
+                  model: result.model,
+                  via: attempts[0]?.label ?? ""
+               }
+            });
+            return {
+               content: [{ type: "text", text: `${result.text}\n\n${meta}` }],
+               details: {
+                  source: resolved.source,
+                  provider: result.provider,
+                  model: result.model,
+                  via: attempts[0]?.label ?? "",
+                  tokens: result.tokens
+               }
+            };
          } finally {
             clearInterval(heartbeat);
             clearTimeout(timeoutTimer);

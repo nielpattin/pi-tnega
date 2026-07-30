@@ -155,7 +155,26 @@ export async function waitForForwardedPermissionApproval(
    }
 
    const deadline = Date.now() + PERMISSION_FORWARDING_TIMEOUT_MS;
-   while (Date.now() < deadline) {
+
+   const forwardingLocation = location;
+
+   async function pollForResponse(): Promise<PermissionPromptDecision> {
+      if (Date.now() >= deadline) {
+         logPermissionForwardingWarning(
+            deps.logger,
+            `Timed out waiting for forwarded permission response '${responsePath}'`
+         );
+         deps.writeReviewLog("forwarded_permission.response_timed_out", {
+            requestId,
+            requesterAgentName,
+            targetSessionId,
+            responsePath
+         });
+         safeDeleteFile(deps.logger, requestPath, "forwarded permission request");
+         cleanupPermissionForwardingLocationIfEmpty(deps.logger, forwardingLocation);
+         return { approved: false, state: "denied" };
+      }
+
       if (existsSync(responsePath)) {
          const response = readForwardedPermissionResponse(deps.logger, responsePath);
          deps.writeReviewLog("forwarded_permission.response_received", {
@@ -169,23 +188,15 @@ export async function waitForForwardedPermissionApproval(
          });
          safeDeleteFile(deps.logger, responsePath, "forwarded permission response");
          safeDeleteFile(deps.logger, requestPath, "forwarded permission request");
-         cleanupPermissionForwardingLocationIfEmpty(deps.logger, location);
+         cleanupPermissionForwardingLocationIfEmpty(deps.logger, forwardingLocation);
          return response ?? { approved: false, state: "denied" };
       }
 
       await sleep(PERMISSION_FORWARDING_POLL_INTERVAL_MS);
+      return pollForResponse();
    }
 
-   logPermissionForwardingWarning(deps.logger, `Timed out waiting for forwarded permission response '${responsePath}'`);
-   deps.writeReviewLog("forwarded_permission.response_timed_out", {
-      requestId,
-      requesterAgentName,
-      targetSessionId,
-      responsePath
-   });
-   safeDeleteFile(deps.logger, requestPath, "forwarded permission request");
-   cleanupPermissionForwardingLocationIfEmpty(deps.logger, location);
-   return { approved: false, state: "denied" };
+   return pollForResponse();
 }
 
 export async function processForwardedPermissionRequests(
@@ -207,83 +218,89 @@ export async function processForwardedPermissionRequests(
       return;
    }
 
-   for (const fileName of requestFiles) {
-      const requestPath = join(location.requestsDir, fileName);
-      const request = readForwardedPermissionRequest(deps.logger, requestPath);
-      if (!request) {
-         safeDeleteFile(deps.logger, requestPath, `${location.label} forwarded permission request`);
-         continue;
-      }
-
-      if (!isForwardedPermissionRequestForSession(request, currentSessionId)) {
-         logPermissionForwardingWarning(
-            deps.logger,
-            `Ignoring forwarded permission request '${request.id}' because it targets session '${request.targetSessionId}' instead of '${currentSessionId}'`
-         );
-         safeDeleteFile(deps.logger, requestPath, `${location.label} forwarded permission request`);
-         continue;
-      }
-
-      const forwardedPermissionLogDetails = {
-         requestId: request.id,
-         source: location.label,
-         requesterAgentName: request.requesterAgentName,
-         requesterSessionId: request.requesterSessionId,
-         targetSessionId: request.targetSessionId,
-         requestPath
-      };
-
-      let decision: PermissionPromptDecision = {
-         approved: false,
-         state: "denied"
-      };
-      if (deps.shouldAutoApprove()) {
-         deps.writeReviewLog("forwarded_permission.auto_approved", forwardedPermissionLogDetails);
-         decision = { approved: true, state: "approved" };
-      } else {
-         deps.writeReviewLog("forwarded_permission.prompted", forwardedPermissionLogDetails);
-         try {
-            decision = await deps.requestPermissionDecisionFromUi(
-               ctx.ui,
-               "Permission Required (Subagent)",
-               formatForwardedPermissionPrompt(request)
-            );
-         } catch (error) {
-            logPermissionForwardingError(deps.logger, "Failed to show forwarded permission confirmation dialog", error);
-            decision = { approved: false, state: "denied" };
+   await Promise.all(
+      requestFiles.map(async (fileName) => {
+         const requestPath = join(location.requestsDir, fileName);
+         const request = readForwardedPermissionRequest(deps.logger, requestPath);
+         if (!request) {
+            safeDeleteFile(deps.logger, requestPath, `${location.label} forwarded permission request`);
+            return;
          }
-      }
 
-      const responsePath = join(location.responsesDir, `${request.id}.json`);
-      deps.writeReviewLog(decision.approved ? "forwarded_permission.approved" : "forwarded_permission.denied", {
-         requestId: request.id,
-         source: location.label,
-         requesterAgentName: request.requesterAgentName,
-         requesterSessionId: request.requesterSessionId,
-         targetSessionId: request.targetSessionId,
-         responsePath,
-         resolution: decision.state,
-         denialReason: decision.denialReason ?? null
-      });
-      try {
-         writeJsonFileAtomic(deps.logger, responsePath, {
-            approved: decision.approved,
-            state: decision.state,
-            denialReason: decision.denialReason,
-            responderSessionId: currentSessionId,
-            respondedAt: Date.now()
-         } satisfies ForwardedPermissionResponse);
-      } catch (error) {
-         logPermissionForwardingError(
-            deps.logger,
-            `Failed to write ${location.label} forwarded permission response '${responsePath}'`,
-            error
-         );
-         continue;
-      }
+         if (!isForwardedPermissionRequestForSession(request, currentSessionId)) {
+            logPermissionForwardingWarning(
+               deps.logger,
+               `Ignoring forwarded permission request '${request.id}' because it targets session '${request.targetSessionId}' instead of '${currentSessionId}'`
+            );
+            safeDeleteFile(deps.logger, requestPath, `${location.label} forwarded permission request`);
+            return;
+         }
 
-      safeDeleteFile(deps.logger, requestPath, `${location.label} forwarded permission request`);
-   }
+         const forwardedPermissionLogDetails = {
+            requestId: request.id,
+            source: location.label,
+            requesterAgentName: request.requesterAgentName,
+            requesterSessionId: request.requesterSessionId,
+            targetSessionId: request.targetSessionId,
+            requestPath
+         };
+
+         let decision: PermissionPromptDecision = {
+            approved: false,
+            state: "denied"
+         };
+         if (deps.shouldAutoApprove()) {
+            deps.writeReviewLog("forwarded_permission.auto_approved", forwardedPermissionLogDetails);
+            decision = { approved: true, state: "approved" };
+         } else {
+            deps.writeReviewLog("forwarded_permission.prompted", forwardedPermissionLogDetails);
+            try {
+               decision = await deps.requestPermissionDecisionFromUi(
+                  ctx.ui,
+                  "Permission Required (Subagent)",
+                  formatForwardedPermissionPrompt(request)
+               );
+            } catch (error) {
+               logPermissionForwardingError(
+                  deps.logger,
+                  "Failed to show forwarded permission confirmation dialog",
+                  error
+               );
+               decision = { approved: false, state: "denied" };
+            }
+         }
+
+         const responsePath = join(location.responsesDir, `${request.id}.json`);
+         deps.writeReviewLog(decision.approved ? "forwarded_permission.approved" : "forwarded_permission.denied", {
+            requestId: request.id,
+            source: location.label,
+            requesterAgentName: request.requesterAgentName,
+            requesterSessionId: request.requesterSessionId,
+            targetSessionId: request.targetSessionId,
+            responsePath,
+            resolution: decision.state,
+            denialReason: decision.denialReason ?? null
+         });
+         try {
+            writeJsonFileAtomic(deps.logger, responsePath, {
+               approved: decision.approved,
+               state: decision.state,
+               denialReason: decision.denialReason,
+               responderSessionId: currentSessionId,
+               respondedAt: Date.now()
+            } satisfies ForwardedPermissionResponse);
+         } catch (error) {
+            logPermissionForwardingError(
+               deps.logger,
+               `Failed to write ${location.label} forwarded permission response '${responsePath}'`,
+               error
+            );
+            return;
+         }
+
+         safeDeleteFile(deps.logger, requestPath, `${location.label} forwarded permission request`);
+      })
+   );
 
    cleanupPermissionForwardingLocationIfEmpty(deps.logger, location);
 }

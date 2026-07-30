@@ -345,8 +345,11 @@ async function summarizeSessionWithPi(
    ].join("\n");
    const commandPreview = `node ${PI_CLI_PATH} --provider ${summaryConfig.provider} --model ${summaryConfig.model} --thinking ${summaryConfig.thinking} -p --no-session --no-tools --no-extensions --no-skills --no-prompt-templates --no-context-files`;
 
-   for (let i = 0; i < SESSION_EXCERPT_BUDGETS.length; i += 1) {
-      const excerptBudget = SESSION_EXCERPT_BUDGETS[i]!;
+   async function tryBudgets(budgetIndex: number): Promise<string> {
+      const excerptBudget = SESSION_EXCERPT_BUDGETS[budgetIndex];
+      if (excerptBudget === undefined) {
+         throw new Error("Unable to summarize session after excerpt retries.");
+      }
       const transcript = buildSessionExcerpt(sessionPath, focus, excerptBudget);
       writeSessionLog(
          "summarize:start",
@@ -375,12 +378,12 @@ async function summarizeSessionWithPi(
             "summarize:fail",
             `sessionPath=${sessionPath} code=${code || "<none>"} stderr=${stderr || "<none>"} message=${message}`
          );
-         if (isContextLengthExceeded(stderr) && i < SESSION_EXCERPT_BUDGETS.length - 1) {
+         if (isContextLengthExceeded(stderr) && budgetIndex < SESSION_EXCERPT_BUDGETS.length - 1) {
             writeSessionLog(
                "summarize:retry",
-               `context_length_exceeded; reducing excerpt budget to ${SESSION_EXCERPT_BUDGETS[i + 1]}`
+               `context_length_exceeded; reducing excerpt budget to ${SESSION_EXCERPT_BUDGETS[budgetIndex + 1]}`
             );
-            continue;
+            return tryBudgets(budgetIndex + 1);
          }
          throw error;
       } finally {
@@ -388,7 +391,7 @@ async function summarizeSessionWithPi(
       }
    }
 
-   throw new Error("Unable to summarize session after excerpt retries.");
+   return tryBudgets(0);
 }
 
 // ---------------------------------------------------------------------------

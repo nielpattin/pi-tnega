@@ -41,4 +41,5 @@ export function buildAskUserResultMessage(
       case "selected":
          return `User selected option ${outcome.index}: ${outcome.answer}`;
    }
+   return "";
 }

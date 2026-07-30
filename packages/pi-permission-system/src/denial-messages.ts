@@ -89,6 +89,7 @@ function buildDenyBody(ctx: DenialContext): string {
       case "skill_read":
          return `${subject(ctx.agentName)} is not permitted to access skill '${ctx.skillName}' via '${ctx.readPath}'.`;
    }
+   return "";
 }
 
 function buildToolDenyBody(ctx: Extract<DenialContext, { kind: "tool" }>): string {
@@ -139,6 +140,7 @@ function buildUnavailableBody(ctx: DenialContext): string {
       case "skill_read":
          return `Accessing skill '${ctx.skillName}' requires approval, but no interactive UI is available.`;
    }
+   return "";
 }
 
 function buildUserDeniedBody(ctx: DenialContext, denialReason?: string): string {
@@ -164,6 +166,7 @@ function buildUserDeniedBody(ctx: DenialContext, denialReason?: string): string 
       case "skill_read":
          return `User denied access to skill '${ctx.skillName}'.${reasonSuffix(denialReason)}`;
    }
+   return "";
 }
 
 function isMcpCheck(check: PermissionCheckResult): boolean {

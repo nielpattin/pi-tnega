@@ -124,32 +124,30 @@ function isNetworkError(err: unknown): boolean {
    return NETWORK_ERROR_RE.test(msg);
 }
 
-async function withRetry<T>(op: () => Promise<T>): Promise<T> {
-   let lastError: unknown;
-   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      try {
-         return await op();
-      } catch (err) {
-         lastError = err;
-         // Only retry on transient network errors; fail fast on
-         // legitimate errors (repo not found, bad branch, etc.)
-         if (!isNetworkError(err)) throw err;
-         if (attempt < MAX_RETRIES) {
-            const delay = RETRY_BASE_DELAY_MS * (attempt + 1);
-            await new Promise((resolve) => setTimeout(resolve, delay));
-         }
-      }
+async function withRetry<T>(op: () => Promise<T>, attempt = 0): Promise<T> {
+   try {
+      return await op();
+   } catch (err) {
+      // Only retry on transient network errors; fail fast on
+      // legitimate errors (repo not found, bad branch, etc.)
+      if (!isNetworkError(err)) throw err;
+      if (attempt >= MAX_RETRIES) throw err;
+
+      const delay = RETRY_BASE_DELAY_MS * (attempt + 1);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return withRetry(op, attempt + 1);
    }
-   throw lastError;
 }
 
 async function runBounded<T>(tasks: (() => Promise<T>)[], limit: number): Promise<void> {
    let nextIndex = 0;
    const worker = async (): Promise<void> => {
-      while (nextIndex < tasks.length) {
-         const index = nextIndex++;
-         await tasks[index]();
+      const index = nextIndex++;
+      if (index >= tasks.length) {
+         return;
       }
+      await tasks[index]();
+      return worker();
    };
    const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => worker());
    await Promise.all(workers);
