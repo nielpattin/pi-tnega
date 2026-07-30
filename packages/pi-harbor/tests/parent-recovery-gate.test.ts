@@ -12,7 +12,7 @@ import { ensureParentSessionRecovery } from "../src/services/HarborJobRecovery.j
 import { runTool } from "../src/runtime.js";
 import type { Job } from "../src/domain.js";
 
-const HARBOR_FORCE_EXCLUDES = ["-extensions/tasks/index.ts", "-extensions/background-terminals/index.ts"];
+const HARBOR_FORCE_EXCLUDES: string[] = [];
 
 function buildPersistedJob(overrides: Partial<Job> & Pick<Job, "id" | "status">): Job {
    return {

@@ -104,7 +104,7 @@ describe("task tool dynamic agent metadata", () => {
    }
 
    it("starts with base task metadata when no cwd is known", async () => {
-      const settings = ["-extensions/tasks/index.ts", "-extensions/background-terminals/index.ts"];
+      const settings: string[] = [];
       const mock = createMockPi();
       const runtime = makeFakeHarborRuntime(undefined, undefined, fakeAgentsStore());
       registerHarborExtension(mock.pi, { settingsExtensions: settings, runtime });
@@ -123,7 +123,7 @@ describe("task tool dynamic agent metadata", () => {
    });
 
    it("augments task metadata with enabled agents for the current cwd at session_start", async () => {
-      const settings = ["-extensions/tasks/index.ts", "-extensions/background-terminals/index.ts"];
+      const settings: string[] = [];
       const mock = createMockPi();
       const runtime = makeFakeHarborRuntime(undefined, undefined, fakeAgentsStore());
       registerHarborExtension(mock.pi, { settingsExtensions: settings, runtime });
@@ -179,7 +179,7 @@ describe("task tool dynamic agent metadata", () => {
    });
 
    it("caps dynamic metadata size when many agents or long descriptions exist", async () => {
-      const settings = ["-extensions/tasks/index.ts", "-extensions/background-terminals/index.ts"];
+      const settings: string[] = [];
       const mock = createMockPi();
       const longDescription = "x".repeat(1000);
       const manyAgents = Array.from({ length: 20 }, (_, i) => ({
@@ -252,7 +252,7 @@ describe("task tool dynamic agent metadata", () => {
    });
 
    it("leaves base metadata when the agents store is empty", async () => {
-      const settings = ["-extensions/tasks/index.ts", "-extensions/background-terminals/index.ts"];
+      const settings: string[] = [];
       const mock = createMockPi();
       const emptyStore = Layer.succeed(
          AgentsStore,

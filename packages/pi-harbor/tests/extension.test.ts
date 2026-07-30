@@ -107,22 +107,8 @@ function createMockPi(opts?: {
 
 describe("Harbor Extension Registration & Real Wiring", () => {
 
-   it("fails cutover without force-exclude and does not register parent task tool", () => {
-      const mock = createMockPi({
-         tools: [{ name: "task", sourceInfo: { path: "extensions/tasks/index.ts" } }],
-         settingsExtensions: []
-      });
-
-      const res = registerHarborExtension(mock.pi, { settingsExtensions: [] });
-
-      expect(res.ok).toBe(false);
-      if (!res.ok) expect(res.error).toContain("extensions/tasks");
-      expect(mock.registeredTools.map((t) => t.name).sort()).toEqual(["hub", "submit"]);
-      expect(mock.registeredCommands).toHaveLength(0);
-   });
-
    it("full mode registers parent tools/commands with execute handlers when cutover passes", () => {
-      const settings = ["-extensions/tasks/index.ts", "-extensions/background-terminals/index.ts"];
+      const settings: string[] = [];
       const mock = createMockPi({ settingsExtensions: settings });
       const runtime = makeFakeHarborRuntime();
 
@@ -175,7 +161,7 @@ describe("Harbor Extension Registration & Real Wiring", () => {
    });
 
    it("keeps the unified vibe tool inactive until Vibe mode is enabled", async () => {
-      const settings = ["-extensions/tasks/index.ts", "-extensions/background-terminals/index.ts"];
+      const settings: string[] = [];
       const mock = createMockPi({ settingsExtensions: settings });
       const runtime = makeFakeHarborRuntime();
       registerHarborExtension(mock.pi, { settingsExtensions: settings, runtime });
@@ -530,7 +516,7 @@ describe("Harbor Extension Registration & Real Wiring", () => {
   });
 
   it("task tool execute spawns a job and hub jobs lists it", async () => {
-      const settings = ["-extensions/tasks/index.ts", "-extensions/background-terminals/index.ts"];
+      const settings: string[] = [];
       const mock = createMockPi({ settingsExtensions: settings });
       const runtime = makeFakeHarborRuntime();
       registerHarborExtension(mock.pi, { settingsExtensions: settings, runtime });
@@ -571,7 +557,7 @@ describe("Harbor Extension Registration & Real Wiring", () => {
    });
 
    it("tasks command handler writes a snapshot entry", async () => {
-      const settings = ["-extensions/tasks/index.ts", "-extensions/background-terminals/index.ts"];
+      const settings: string[] = [];
       const mock = createMockPi({ settingsExtensions: settings });
       const runtime = makeFakeHarborRuntime();
       registerHarborExtension(mock.pi, { settingsExtensions: settings, runtime });
@@ -608,7 +594,7 @@ describe("Harbor Extension Registration & Real Wiring", () => {
    }
 
    it("shows an above-editor async task widget while async jobs run", async () => {
-      const settings = ["-extensions/tasks/index.ts", "-extensions/background-terminals/index.ts"];
+      const settings: string[] = [];
       const mock = createMockPi({ settingsExtensions: settings });
       const runtime = makeFakeHarborRuntime();
       registerHarborExtension(mock.pi, { settingsExtensions: settings, runtime });
@@ -664,7 +650,7 @@ describe("Harbor Extension Registration & Real Wiring", () => {
    });
 
    it("clears the async widget when the session shuts down", async () => {
-      const settings = ["-extensions/tasks/index.ts", "-extensions/background-terminals/index.ts"];
+      const settings: string[] = [];
       const mock = createMockPi({ settingsExtensions: settings });
       const runtime = makeFakeHarborRuntime();
       registerHarborExtension(mock.pi, { settingsExtensions: settings, runtime });
@@ -709,7 +695,7 @@ describe("Harbor Extension Registration & Real Wiring", () => {
    });
 
    it("does not display an async widget for synchronous tasks", async () => {
-      const settings = ["-extensions/tasks/index.ts", "-extensions/background-terminals/index.ts"];
+      const settings: string[] = [];
       const mock = createMockPi({ settingsExtensions: settings });
       const runtime = makeFakeHarborRuntime();
       registerHarborExtension(mock.pi, { settingsExtensions: settings, runtime });
@@ -792,7 +778,7 @@ describe("Harbor result message renderer", () => {
    });
 
    function setup() {
-      const settings = ["-extensions/tasks/index.ts", "-extensions/background-terminals/index.ts"];
+      const settings: string[] = [];
       const mock = createMockPi({ settingsExtensions: settings });
       const runtime = makeFakeHarborRuntime();
       registerHarborExtension(mock.pi, { settingsExtensions: settings, runtime });

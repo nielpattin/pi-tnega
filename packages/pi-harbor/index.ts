@@ -27,7 +27,6 @@ export * from "./src/commands/vibe.js";
 export * from "./src/commands/btw.js";
 export * from "./src/ui/log-viewer.js";
 export * from "./src/ui/telemetry.js";
-export * from "./src/cutover.js";
 export * from "./src/extension.js";
 export * from "./src/utils/process-telemetry.js";
 export * from "./src/utils/acp-decoder.js";

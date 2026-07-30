@@ -6,8 +6,6 @@ export default defineConfig({
       include: ["packages/pi-*/**/*.test.ts", "tests/**/*.test.ts"],
       exclude: [
          ...configDefaults.exclude,
-         "extensions/background-terminals/**",
-         "extensions/tasks/**",
          "extensions/workflows/**",
          "extensions/pi-skill-toggle/**",
          "extensions/pi-intercom/**/*.test.ts",

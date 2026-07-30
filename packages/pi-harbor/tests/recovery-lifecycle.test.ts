@@ -108,7 +108,7 @@ function createMockPi(opts?: { settingsExtensions?: string[] }) {
    };
 }
 
-const HARBOR_FORCE_EXCLUDES = ["-extensions/tasks/index.ts", "-extensions/background-terminals/index.ts"];
+const HARBOR_FORCE_EXCLUDES: string[] = [];
 
 describe("Harbor recovery lifecycle", () => {
    it("isolates jobs and manifests when switching parent A -> B -> A", async () => {

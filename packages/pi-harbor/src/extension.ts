@@ -14,7 +14,6 @@ import { Effect } from "effect";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { checkCutover, type CutoverItem } from "./cutover.js";
 import { makeHarborRuntime, runTool } from "./runtime.js";
 import { JobRegistry } from "./services/JobRegistry.js";
 import { ProcessSupervisor } from "./services/ProcessSupervisor.js";
@@ -186,28 +185,6 @@ function customEntries(ctx: ExtensionContext): Array<{ customType?: string; data
          }
          return { customType: anyEntry.customType, data: anyEntry.data };
       });
-   } catch {
-      return [];
-   }
-}
-
-function cutoverItemsFromTools(pi: ExtensionAPI): CutoverItem[] {
-   try {
-      return pi.getAllTools().map((tool) => ({
-         name: tool.name,
-         sourceInfo: tool.sourceInfo ? { path: tool.sourceInfo.path } : undefined
-      }));
-   } catch {
-      return [];
-   }
-}
-
-function cutoverItemsFromCommands(pi: ExtensionAPI): CutoverItem[] {
-   try {
-      return pi.getCommands().map((cmd) => ({
-         name: cmd.name.startsWith("/") ? cmd.name : `/${cmd.name}`,
-         sourceInfo: undefined
-      }));
    } catch {
       return [];
    }
@@ -689,37 +666,8 @@ export function registerHarborExtension(pi: ExtensionAPI, options?: HarborExtens
    // ExtensionAPI has no getSettings(); previous code always saw [] and false-blocked cutover.
    const settingsExtensions = options?.settingsExtensions ?? loadSettingsExtensionsFromDisk();
 
-   const cutover = checkCutover({
-      tools: cutoverItemsFromTools(pi),
-      commands: cutoverItemsFromCommands(pi),
-      settingsExtensions
-   });
-
    // Worker tools always present (submit + restricted hub).
    registerWorkerTools(pi, runtime);
-
-   if (!cutover.ok) {
-      try {
-         console.error(`[harbor] cutover failed: ${cutover.error}`);
-      } catch {
-         // ignore
-      }
-      // Still register session_start so we re-check and notify UI.
-      pi.on("session_start", (_event: SessionStartEvent, ctx) => {
-         if (ctx.hasUI) ctx.ui.notify(cutover.error, "error");
-         // Worker-only surface for this session.
-         const workerOnly = pi
-            .getAllTools()
-            .map((t) => t.name)
-            .filter((name) => name === "submit" || name === "hub");
-         try {
-            pi.setActiveTools(workerOnly);
-         } catch {
-            // setActiveTools may be illegal during some load phases; session_start is OK.
-         }
-      });
-      return { ok: false, error: cutover.error, cutoverOk: false };
-   }
 
    const resultDelivery = createDeferredResultDelivery();
    const asyncWidget = makeAsyncTaskWidgetState(runtime);
@@ -851,26 +799,6 @@ export function registerHarborExtension(pi: ExtensionAPI, options?: HarborExtens
       void deliveryReady.then(() => {
          if (typeof ctx.isIdle === "function" && ctx.isIdle()) flushResults();
       });
-
-      // Parent TUI/RPC: re-validate cutover at session start (re-read disk for live settings edits).
-      const again = checkCutover({
-         tools: cutoverItemsFromTools(pi),
-         commands: cutoverItemsFromCommands(pi),
-         settingsExtensions: options?.settingsExtensions ?? loadSettingsExtensionsFromDisk()
-      });
-      if (!again.ok) {
-         if (ctx.hasUI) ctx.ui.notify(again.error, "error");
-         const workerOnly = pi
-            .getAllTools()
-            .map((t) => t.name)
-            .filter((name) => name === "submit" || name === "hub");
-         try {
-            pi.setActiveTools(workerOnly);
-         } catch {
-            // ignore
-         }
-         return;
-      }
 
       // Refresh task tool metadata with the enabled agents for this cwd before the system prompt is built.
       const taskAugmentation = await resolveTaskToolAugmentation(runtime, ctx.cwd);
