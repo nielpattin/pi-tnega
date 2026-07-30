@@ -232,10 +232,3 @@ export const CodeAstGrepParams = Type.Object({
    topK: Type.Optional(Type.Number({ description: "Max results", minimum: 1, maximum: 200 })),
    projectPath: Type.Optional(Type.String({ description: "Project root (defaults to current project)" }))
 });
-
-export const CodeIndexParams = Type.Object({
-   paths: Type.Optional(
-      Type.String({ description: "Space-separated paths to index. Defaults to '.' (current project root)." })
-   ),
-   projectPath: Type.Optional(Type.String({ description: "Project root to index (defaults to current project)" }))
-});

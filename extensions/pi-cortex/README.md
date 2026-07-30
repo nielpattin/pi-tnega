@@ -13,15 +13,20 @@ Code intelligence for Pi: search, AST analysis, call graph triples, and agent me
 
 ## Tools
 
-**Read-only tools** (agent-callable):
+**Agent-callable tools**:
 
-| Tool                 | Purpose                                                         | UI                                    |
-| -------------------- | --------------------------------------------------------------- | ------------------------------------- |
-| `code_search`        | Semantic / keyword / hybrid search. Auto-blends based on query. | Collapse/expand + elapsed time (ms/s) |
-| `code_symbol_search` | Look up functions, classes, or variables by name.               | Collapse/expand + elapsed time (ms/s) |
-| `code_call_graph`    | Find callers, callees, or all calls in a file.                  | Collapse/expand + elapsed time (ms/s) |
+| Tool                 | Purpose                                                                     | UI                                    |
+| -------------------- | --------------------------------------------------------------------------- | ------------------------------------- |
+| `code_search`        | Semantic / keyword / hybrid search. Auto-blends based on query.             | Collapse/expand + elapsed time (ms/s) |
+| `code_symbol_search` | Look up functions, classes, or variables by name.                           | Collapse/expand + elapsed time (ms/s) |
+| `code_call_graph`    | Find callers, callees, or all calls in a file.                              | Collapse/expand + elapsed time (ms/s) |
+| `code_triple_query`  | Query knowledge-graph triples (subject-predicate-object) from indexed code. | Collapse/expand + elapsed time (ms/s) |
+| `code_ast_grep`      | Structural code search by identifier, node kind, or text.                   | Collapse/expand + elapsed time (ms/s) |
+| `code_remember`      | Store a memory (text + embedding) for later recall.                         | —                                     |
+| `code_recall`        | Recall memories by meaning, keyword, or both.                               | Collapse/expand + elapsed time (ms/s) |
+| `code_forget`        | Delete a memory by ID.                                                      | —                                     |
 
-Indexing and file watching are manual — use the commands below.
+Indexing is manual — use `/cc-index` below.
 
 ---
 
@@ -29,67 +34,71 @@ Indexing and file watching are manual — use the commands below.
 
 | Command          | Description                                                                                                                                                                                                                                                                   |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/ce-index`      | Index files in the current project. Optionally pass paths (e.g. `/ce-index src/`). After indexing, the Rust sidecar auto-starts a file watcher on the project. The watcher polls every 2 seconds for mtime/size changes and re-indexes incrementally until the sidecar exits. |
-| `/cleanup-embed` | Delete the cortex database (index.db + WAL). Run `/ce-index` to rebuild.                                                                                                                                                                                                      |
-| `/ce-status`     | Show model, provider, files/chunks indexed, DB size, watcher status, and storage paths.                                                                                                                                                                                       |
+| `/cc-index`      | Index files in the current project. Optionally pass paths (e.g. `/cc-index src/`). After indexing, the Rust sidecar auto-starts a file watcher on the project. The watcher polls every 2 seconds for mtime/size changes and re-indexes incrementally until the sidecar exits. |
+| `/cc-status`     | Show model, provider, files/chunks indexed, DB size, watcher status, and storage paths.                                                                                                                                                                                       |
+| `/cleanup-embed` | Delete the cortex database (index.db + WAL). Run `/cc-index` to rebuild.                                                                                                                                                                                                      |
+| `/cc-ast`        | Structural code search. Equivalent to `code_ast_grep` but user-invoked.                                                                                                                                                                                                       |
+| `/cc-remember`   | Store a memory in cortex. Equivalent to `code_remember` but user-invoked.                                                                                                                                                                                                     |
+| `/cc-recall`     | Recall memories by query. Equivalent to `code_recall` but user-invoked.                                                                                                                                                                                                       |
+| `/cc-forget`     | Delete a memory by ID. Usage: `/cc-forget <memory_id>`.                                                                                                                                                                                                                       |
 
 ---
 
 ## How it works
 
+### Indexing
+
 ```mermaid
-flowchart TD
-    User[User / LLM] --> code_search
-    User --> code_symbol_search
-    User --> code_call_graph
+flowchart LR
+    Index[/"  /cc-index  "/]
+    Index --> Walk
 
-    subgraph TS[TypeScript extension]
-        code_search
-        code_symbol_search
-        code_call_graph
+    subgraph Rust["⚙️ Rust sidecar"]
+        Walk["Walk + Chunk
+        tree-sitter · chunk 80 · overlap 20"]
+        Embed["ONNX Embed
+        local MiniLM-L6-v2 or remote API"]
+        SQLite[("SQLite
+        chunks · FTS5 · embeddings ·
+        call edges · triples · memories")]
+        Watch["File Watcher
+        polls mtime/size every 2s"]
     end
 
-    subgraph Rust[Rust sidecar]
-        Walk[Walk + Read + Chunk]
-        Embed[ONNX inference]
-        SQLite[(SQLite:\n  chunks\n  files\n  FTS5 index\n  call graph\n  triples\n  memories)]
-        Watcher[Polling Watcher]
-        Walk -->|local| Embed
-        Walk --> SQLite
-        Embed --> SQLite
-        Watcher -->|mtime check| Walk
-    end
-
-    subgraph HTTP[Remote API]
-        API[embeddings endpoint]
-    end
-
-    subgraph Manual[Manual commands]
-        INDEX[/ce-index]
-        STATUS[/ce-status]
-        CLEANUP[/cleanup-embed]
-    end
-
-    INDEX -->|scan + index| Rust
-    INDEX -->|chunk only| Walk
-    INDEX -->|store chunks| Rust
-    INDEX -->|chunk texts| API
-    API -->|embeddings| Rust
-    INDEX -.->|auto-starts| Watcher
-    STATUS -->|stats| SQLite
-    CLEANUP -->|deletes| SQLite
-    code_search -->|embed query| Embed
-    code_search -->|hybrid search| SQLite
-    code_symbol_search -->|regex lookup| SQLite
-    code_call_graph -->|caller/callee query| SQLite
+    Walk --> Embed --> SQLite
+    Walk --> SQLite
+    Watch -.-> Walk
 ```
 
-1. **Indexing** is triggered manually via `/ce-index`. The command sends target paths to the Rust sidecar, which walks directories, reads files, tree-sitter chunks, and either embeds locally or returns chunks for the remote provider path. Unchanged files (mtime + size match) are skipped automatically.
-2. **After indexing**, the Rust sidecar auto-starts a polling file watcher on the project directory. The watcher scans every 2 seconds, comparing mtime and size. Changed, new, or deleted files are re-indexed incrementally.
-3. The Rust sidecar manages all state in a per-project SQLite database (`<project>/.pi/cortex/index.db`): chunks with embeddings, file metadata, FTS5 keyword index, call graph edges, **triple store** (subject-predicate-object), and **memories** (conversation recall).
-4. `code_search` embeds the query, then sends a `search` command with an auto-detected blend weight. Code-like queries (identifiers with `_`, `.`, `::`, camelCase) lean keyword; full sentences lean semantic. Cosine similarity + FTS5 BM25 are blended together, then deterministic reranking. Optional cross-encoder (`Xenova/ms-marco-MiniLM-L-6-v2`) for improved relevance.
-5. `code_symbol_search` extracts symbols via regex on stored chunks.
-6. `code_call_graph` queries caller/callee edges and the triple store.
+### Querying
+
+```mermaid
+flowchart LR
+    subgraph Pi["🔌 Pi Ext"]
+        Tools{{"code_search · code_symbol_search
+        code_call_graph · code_triple_query
+        code_ast_grep"}}
+        Memory{{"code_remember · code_recall
+        code_forget"}}
+        Cmds[/"  /cc-ast  /cc-remember
+        /cc-recall  /cc-forget  "/]
+    end
+
+    subgraph Rust["⚙️ Rust sidecar"]
+        Embed["ONNX Embed"]
+        SQLite[("SQLite
+        chunks · FTS5 · embeddings ·
+        call edges · triples · memories")]
+    end
+
+    Tools --> SQLite
+    Memory --> SQLite
+    Cmds --> SQLite
+    Tools -.->|"semantic search"| Embed
+    Embed -.-> SQLite
+```
+
+Indexing (`/cc-index`) walks dirs, tree-sitter chunks, embeds (local ONNX or remote), stores in SQLite. A polling watcher keeps the index fresh. All tools query the same database. `code_search` auto-blends cosine similarity + FTS5 BM25. `code_symbol_search` and `code_call_graph` query stored symbols and edges. `code_triple_query` queries subject-predicate-object triples. `code_ast_grep` does structural identifier/kind/text search. `code_remember` / `code_recall` / `code_forget` manage persistent memories.
 
 ---
 
