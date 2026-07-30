@@ -87,7 +87,7 @@ export default function (pi: ExtensionAPI) {
          }
 
          // Sort by most recent first
-         const files = Array.from(fileMap.values()).sort((a, b) => b.lastTimestamp - a.lastTimestamp);
+         const files = Array.from(fileMap.values()).toSorted((a, b) => b.lastTimestamp - a.lastTimestamp);
 
          const openSelected = async (file: FileEntry): Promise<void> => {
             try {

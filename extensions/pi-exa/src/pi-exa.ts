@@ -46,11 +46,11 @@ function writeExaCredential(credential: ExaCredential | undefined): void {
 export default async function (pi: ExtensionAPI) {
    let mcpToolsLoaded = false;
 
-   async function getExaApiKey(mcp = false) {
+   async function getExaApiKey(mcp = false): Promise<string | undefined> {
       if (mcp) {
          const config = await getPiExaConfig();
          if (!config.mcpUseApiKey) {
-            return;
+            return undefined;
          }
       }
       const cred = readExaCredential();
@@ -154,7 +154,7 @@ export default async function (pi: ExtensionAPI) {
 
          const activeTools = pi.getActiveTools();
          const advancedSearchEnabled = activeTools.includes("web_search_advanced_exa");
-         const deepSearchEnabled = activeTools.includes("deep_search_exa");
+         const isDeepSearchEnabled = activeTools.includes("deep_search_exa");
 
          ctx.ui.setStatus("pi-exa", "Checking Exa MCP...");
          const mcpHealthy = await (async () => {
@@ -182,7 +182,7 @@ export default async function (pi: ExtensionAPI) {
             `- MCP live check: ${mcpHealthy ? "success" : "failed"}`,
             "",
             "Tool Management",
-            `- deep_search_exa: ${deepSearchEnabled ? "enabled" : "disabled"}`,
+            `- deep_search_exa: ${isDeepSearchEnabled ? "enabled" : "disabled"}`,
             `- web_search_advanced_exa: ${advancedSearchEnabled ? "enabled" : "disabled"}`
          ];
          ctx.ui.notify(lines.join("\n"), "info");

@@ -108,9 +108,9 @@ export function createWorkflowPersistence(
    };
 
    return {
-      checkpoint(options: { immediate?: boolean } = {}) {
+      checkpoint(checkpointOptions: { immediate?: boolean } = {}) {
          dirty = true;
-         if (options.immediate) {
+         if (checkpointOptions.immediate) {
             if (timer) clearTimeout(timer);
             timer = undefined;
             savePending();

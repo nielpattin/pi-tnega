@@ -129,7 +129,7 @@ export function aggregateUsageEntries(entries: UsageEntry[]): DailyUsageRow[] {
       row.cost += numberValue(usage.cost?.total);
    }
 
-   return Array.from(byDate.values()).sort(
+   return Array.from(byDate.values()).toSorted(
       (a, b) => b.date.localeCompare(a.date) || a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model)
    );
 }
@@ -143,13 +143,20 @@ async function listJsonlFiles(dir: string): Promise<string[]> {
       return files;
    }
 
-   for (const entry of entries) {
-      const path = join(dir, entry.name);
-      if (entry.isDirectory()) {
-         files.push(...(await listJsonlFiles(path)));
-      } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
-         files.push(path);
-      }
+   const childFiles = await Promise.all(
+      entries.map(async (entry) => {
+         const path = join(dir, entry.name);
+         if (entry.isDirectory()) {
+            return listJsonlFiles(path);
+         } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+            return [path];
+         }
+         return [] as string[];
+      })
+   );
+
+   for (const child of childFiles) {
+      files.push(...child);
    }
    return files;
 }
@@ -164,42 +171,44 @@ async function loadUsageDataset(): Promise<UsageDataset> {
    let filesSkipped = 0;
    let linesSkipped = 0;
 
-   for (const file of files) {
-      let text: string;
-      try {
-         text = await readFile(file, "utf8");
-         filesRead += 1;
-      } catch {
-         filesSkipped += 1;
-         continue;
-      }
-
-      for (const line of text.split(/\r?\n/)) {
-         if (!line.trim()) continue;
+   await Promise.all(
+      files.map(async (file) => {
+         let text: string;
          try {
-            const entry = JSON.parse(line);
-            if (typeof entry !== "object" || entry === null) continue;
-            if (entry.type !== "message" || entry.message?.role !== "assistant" || !entry.message.usage) continue;
-            if (typeof entry.message.provider === "string" && entry.message.provider.length > 0) {
-               providers.add(entry.message.provider);
-            }
-            if (typeof entry.message.model === "string" && entry.message.model.length > 0) {
-               models.add(entry.message.model);
-            }
-            entries.push(entry);
+            text = await readFile(file, "utf8");
+            filesRead += 1;
          } catch {
-            linesSkipped += 1;
+            filesSkipped += 1;
+            return;
          }
-      }
-   }
+
+         for (const line of text.split(/\r?\n/)) {
+            if (!line.trim()) continue;
+            try {
+               const entry = JSON.parse(line);
+               if (typeof entry !== "object" || entry === null) continue;
+               if (entry.type !== "message" || entry.message?.role !== "assistant" || !entry.message.usage) continue;
+               if (typeof entry.message.provider === "string" && entry.message.provider.length > 0) {
+                  providers.add(entry.message.provider);
+               }
+               if (typeof entry.message.model === "string" && entry.message.model.length > 0) {
+                  models.add(entry.message.model);
+               }
+               entries.push(entry);
+            } catch {
+               linesSkipped += 1;
+            }
+         }
+      })
+   );
 
    return {
       entries,
       filesRead,
       filesSkipped,
       linesSkipped,
-      providers: Array.from(providers).sort(),
-      models: Array.from(models).sort()
+      providers: Array.from(providers).toSorted(),
+      models: Array.from(models).toSorted()
    };
 }
 
@@ -221,7 +230,7 @@ function filterUsage(dataset: UsageDataset, filters: UsageFilters = {}): UsageSc
       filesSkipped: dataset.filesSkipped,
       linesSkipped: dataset.linesSkipped,
       providers: dataset.providers,
-      models: Array.from(models).sort(),
+      models: Array.from(models).toSorted(),
       filters
    };
 }

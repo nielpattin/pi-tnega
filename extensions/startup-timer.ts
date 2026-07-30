@@ -298,7 +298,7 @@ function buildOutput(
          overhead: r.ms > baselineMs ? r.ms - baselineMs : 0,
          error: r.error
       }))
-      .sort((a, b) => b.overhead - a.overhead);
+      .toSorted((a, b) => b.overhead - a.overhead);
 
    // Column widths
    const maxNameLen = Math.max(...sorted.map((r) => r.label.length), 20);

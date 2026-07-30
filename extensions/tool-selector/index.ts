@@ -40,12 +40,12 @@ export default function toolsExtension(pi: ExtensionAPI) {
    }
 
    function isDefaultDisabledBuiltInTool(toolName: string): boolean {
-      const tool = allTools.find((tool) => tool.name === toolName);
+      const tool = allTools.find((t) => t.name === toolName);
       return tool?.sourceInfo.source === "builtin" && !defaultBuiltInTools.includes(toolName);
    }
 
    function hasPromptGuidelines(toolName: string): boolean {
-      const tool = allTools.find((tool) => tool.name === toolName) as
+      const tool = allTools.find((t) => t.name === toolName) as
          | (ToolInfo & { promptGuidelines?: string[] })
          | undefined;
       return tool?.promptGuidelines?.some((guideline: string) => guideline.trim().length > 0) ?? false;

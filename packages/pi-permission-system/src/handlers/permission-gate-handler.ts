@@ -80,8 +80,8 @@ export class PermissionGateHandler {
       const emitDecision: GateRunnerDeps["emitDecision"] = (e) => emitDecisionEvent(this.events, e);
       // eslint-disable-next-line @typescript-eslint/unbound-method -- logger.review is a plain function closure; no this-binding issue
       const writeReviewLog = this.session.logger.review;
-      const checkPermission: GateRunnerDeps["checkPermission"] = (surface, input, agent, sessionRules) =>
-         this.session.checkPermission(surface, input, agent, sessionRules);
+      const checkPermission: GateRunnerDeps["checkPermission"] = (surface, permissionInput, agent, sessionRules) =>
+         this.session.checkPermission(surface, permissionInput, agent, sessionRules);
       const getSessionRuleset = () => this.session.getSessionRuleset();
       const approveSessionRule = (surface: string, pattern: string) =>
          this.session.approveSessionRule(surface, pattern);

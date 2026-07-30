@@ -426,6 +426,7 @@ function describeEdit(edit: HashlineEdit): string {
       case "replace_text":
          return `replace_text "${previewText(edit.oldText)}"`;
    }
+   throw new Error("unreachable");
 }
 
 function throwEditConflict(
@@ -466,6 +467,7 @@ function cloneHashlineEdit(edit: HashlineEdit): HashlineEdit {
             newText: edit.newText
          };
    }
+   throw new Error("unreachable");
 }
 
 function computeInsertionBoundary(
@@ -485,6 +487,7 @@ function computeInsertionBoundary(
       case "prepend":
          return edit.pos ? edit.pos.line - 1 : 0;
    }
+   throw new Error("unreachable");
 }
 
 function findExactUniqueTextMatch(content: string, oldText: string): { start: number; end: number } {
@@ -544,7 +547,7 @@ function resolveEditToSpan(
          const originalLines = fileLines.slice(startLine - 1, endLine);
          if (
             originalLines.length === edit.lines.length &&
-            originalLines.every((line, lineIndex) => line === edit.lines[lineIndex])
+            originalLines.every((line, idx) => line === edit.lines[idx])
          ) {
             noopEdits.push({
                editIndex: index,
@@ -691,6 +694,7 @@ function resolveEditToSpan(
          };
       }
    }
+   throw new Error("unreachable");
 }
 
 function assertNoConflictingSpans(spans: ResolvedEditSpan[]): void {

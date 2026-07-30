@@ -1,3 +1,5 @@
+/// <reference lib="es2023" />
+
 /**
  * /workflows dashboard: a full-screen overlay with a run list and a per-run
  * detail view (phases sidebar + agents panel), modeled after:
@@ -237,7 +239,7 @@ export function loadRunEntries(
          // Skip unreadable runs.
       }
    }
-   return entries.sort((a, b) => b.details.startedAt - a.details.startedAt);
+   return entries.toSorted((a, b) => b.details.startedAt - a.details.startedAt);
 }
 
 function buildReport(details: WorkflowDetails): string {
@@ -651,8 +653,8 @@ export class WorkflowDashboard {
                   ? theme.fg("accent", agent.label.padEnd(Math.min(maxLabel, 40)))
                   : theme.fg("text", agent.label.padEnd(Math.min(maxLabel, 40)));
             const left = ` ${marker} ${stateSquare(agent.state, theme)} ${label}  ${theme.fg("dim", stats)}`;
-            const right = theme.fg("dim", `${formatElapsed(agent.startedAt, agent.finishedAt)} `);
-            agentRows.push(this.split(left, right, agentsInner));
+            const elapsed = theme.fg("dim", `${formatElapsed(agent.startedAt, agent.finishedAt)} `);
+            agentRows.push(this.split(left, elapsed, agentsInner));
             if (agent.error) {
                agentRows.push(truncateToWidth(`       ${theme.fg("error", agent.error)}`, agentsInner, "…"));
             }

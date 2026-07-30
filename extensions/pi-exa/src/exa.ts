@@ -1,6 +1,6 @@
-import Exa from "exa-js";
+import ExaClient from "exa-js";
 
-let exa: Exa | undefined;
+let exa: ExaClient | undefined;
 
 export function resetExa() {
    exa = undefined;
@@ -13,7 +13,7 @@ export function getExa(apiKey: string | undefined) {
    }
 
    if (!exa) {
-      exa = new Exa(apiKey);
+      exa = new ExaClient(apiKey);
    }
 
    return exa;
