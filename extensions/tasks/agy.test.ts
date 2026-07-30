@@ -23,8 +23,8 @@ import {
   resolveAgyCliModel,
   type AgySpawnFn,
 } from "./src/backends/agy.ts";
-import type { ParentContext, SpawnTask, SubagentEvent } from "./src/domain.ts";
-import type { SubagentSession } from "./src/backend.ts";
+import type { ParentContext, SpawnTask, TaskEvent } from "./src/domain.ts";
+import type { TaskSession } from "./src/backend.ts";
 
 const parent: ParentContext = {
   parentCwd: process.cwd(),
@@ -91,7 +91,7 @@ function makeControllableSpawn(options: { pid?: number } = {}): ControllableSpaw
 async function withSession(
   backend: ReturnType<typeof createAgyBackend>,
   spawnTask: SpawnTask,
-  run: (session: SubagentSession) => Promise<void>,
+  run: (session: TaskSession) => Promise<void>,
 ) {
   const scope = Effect.runSync(Scope.make());
   try {
@@ -105,11 +105,11 @@ async function withSession(
 }
 
 async function takeEvents(
-  events: Stream.Stream<SubagentEvent>,
+  events: Stream.Stream<TaskEvent>,
   count: number,
   timeoutMs = 1_000,
-): Promise<SubagentEvent[]> {
-  const collected: SubagentEvent[] = [];
+): Promise<TaskEvent[]> {
+  const collected: TaskEvent[] = [];
   await Effect.runPromise(
     Stream.take(events, count).pipe(
       Stream.runForEach((event) =>

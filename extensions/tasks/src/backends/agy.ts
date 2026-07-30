@@ -5,7 +5,16 @@
  * deltas, settle when the process exits. No multi-turn steering.
  */
 
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn } from "node:child_process";
+// Local alias — recent @types/node marks ChildProcessWithoutNullStreams as a
+// deprecated "error" type. We use the inferred spawn return type narrowed to
+// the streams we *actually* configure: agy spawns with stdio: ["ignore","pipe","pipe"],
+// so stdout/stderr are non-null pipes at runtime, but stdin is intentionally null.
+import type { Readable } from "node:stream";
+type ChildProcessWithoutNullStreams = ReturnType<typeof spawn> & {
+   stdout: Readable;
+   stderr: Readable;
+};
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";

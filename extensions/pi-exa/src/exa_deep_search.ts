@@ -1,5 +1,5 @@
 import {
-   Static,
+   type Static,
    Type,
    type TArray,
    type TNumber,
@@ -39,7 +39,7 @@ const DeepSearchProperties: DeepSearchPropertySchemas = {
       })
    ),
    category: Type.Optional(
-      StringEnum(["company", "research paper", "news", "pdf", "personal site", "financial report", "people"] as const, {
+      StringEnum(["company", "publication", "news", "personal site", "financial report", "people"] as const, {
          description: "Use category filter only when the desired retrieval surface is clear."
       })
    ),
