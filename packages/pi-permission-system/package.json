@@ -59,7 +59,7 @@
    },
    "dependencies": {
       "tree-sitter-bash": "^0.25.1",
-      "web-tree-sitter": "^0.26.8"
+      "web-tree-sitter": "^0.26.11"
    },
    "peerDependencies": {
       "@earendil-works/pi-coding-agent": "*",

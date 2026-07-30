@@ -27,6 +27,7 @@ allowBuilds:
   tree-sitter-bash: true
   onnxruntime-node: true
   sharp: true
+  usearch: true
 
 # Supply chain security
 minimumReleaseAge: 0

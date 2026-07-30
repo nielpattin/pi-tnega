@@ -2,7 +2,16 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { spawn } from "node:child_process";
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
+// Local alias — recent @types/node marks ChildProcessWithoutNullStreams as a
+// deprecated "error" type. Use the inferred spawn return type, narrowed so
+// callers can keep assuming non-null stdin/stdout/stderr at the call sites
+// where we set stdio: ["pipe","pipe","pipe"].
+import type { Readable, Writable } from "node:stream";
+type ChildProcessWithoutNullStreams = ReturnType<typeof spawn> & {
+   stdin: Writable;
+   stdout: Readable;
+   stderr: Readable;
+};
 import type { BashTranscriptStore } from "./transcript.ts";
 import type { ShellSessionState } from "./types.ts";
 

@@ -12,7 +12,10 @@
  * and issue fire-and-forget kills without touching the Effect runtime.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
+// Local alias — recent @types/node marks ChildProcess as a deprecated
+// "error" type. Use the inferred spawn return type instead.
+type ChildProcess = ReturnType<typeof spawn>;
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";

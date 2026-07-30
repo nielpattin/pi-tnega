@@ -188,3 +188,6 @@ agents.json
 
 pi-mcp-adapter/
 agents/
+.pi/cortex
+**/target/
+*-sync.json

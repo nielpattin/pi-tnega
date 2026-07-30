@@ -14,8 +14,12 @@ export default defineConfig({
       "*yml",
       "**/pi-mcp-adapter/**",
       ".pi/**",
+      "**/.pi/**",
       "repos/**",
-      "workflows/**"
+      "workflows/**",
+      "**/rust-embedder/models/**",
+      "**/rust-embedder/target/**",
+      ".basezero-sync.json"
    ],
    trailingComma: "none",
    printWidth: 120,

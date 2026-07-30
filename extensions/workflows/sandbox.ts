@@ -1,5 +1,8 @@
 import { randomBytes } from "node:crypto";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
+// Local alias — recent @types/node marks ChildProcess as a deprecated
+// "error" type. Use the inferred spawn return type instead.
+type ChildProcess = ReturnType<typeof spawn>;
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { safeStringify, toSerializable } from "./serialization.ts";

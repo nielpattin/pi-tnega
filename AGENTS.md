@@ -1,38 +1,66 @@
-<guidelines_constraints>
+# Repository Instructions
 
-- When writing Effect code, read @repos/effect/LLMS.md for examples of idiomatic usage, tests, module structure, and API design. Treat it as the source of truth for Effect patterns.
-- Read the docs/effect-v4-cheatsheet.md for a quick reference of Effect v4 patterns and idioms for writing Effect code for this project.
-- **No Unprompted Git Commits / Pushes**: Do NOT execute `git commit`, `git push`, or `pnpm release` unless explicitly requested by the user.
-- **Surgical Edits**: Touch only what is necessary for the task. Preserve comments and structure.
-- **Always Verify**: Verify changes with `pnpm check` or `pnpm test` before declaring success.
+## Non-negotiable rules
 
-</guidelines_constraints>
+- **No unprompted releases or Git mutations:** Do not run `git commit`, `git push`, or `pnpm release` unless the user explicitly requests it.
+- **Use surgical edits:** Touch only what the task requires. Preserve existing comments and structure unless changing them is necessary.
+- **Always verify:** After completing changes, run `pnpm check` from the repository root. Do not declare success until linting, type checking, and tests pass across all packages and extensions.
 
-<vendored_repositories>
+## Repository layout and commands
 
-This project vendors external repositories under @repos/
+- This repository is a single pnpm monorepo.
+- Packages live under `packages/<package-name>`.
+- Extensions live under `extensions/`.
+- Run `pnpm install` from the repository root to install dependencies for all packages and extensions.
+- Run package-specific commands from the repository root with:
 
-- Use vendored repositories as read-only reference material when working with related libraries
-- Prefer examples and patterns from the vendored source code over generated guesses or web search results
-- Do not edit files under @repos/ unless explicitly asked
-- Do not import from @repos/ - application code should continue importing from normal package dependencies
+    ```text
+    pnpm --dir packages/<package-name> <command>
+    ```
 
-</vendored_repositories>
+    Examples:
 
-<workflow>
-Contributor monorepo workflow (create package, changesets, version, publish) lives in [DEVELOPMENT.md](./DEVELOPMENT.md).
-Follow DEVELOPMENT.md for package work. Do not invent alternate release flows.
-</workflow>
+    ```text
+    pnpm --dir packages/pi-harbor check
+    pnpm --dir packages/pi-harbor test
+    ```
 
-<validation>
-- `pnpm lint` for linting.
-- `pnpm check` for lint, type, test checks.
-- Test with vitest, write tests in tests/ directory in their own extension folder, name with *.test.ts
-- Or if the extension is small and one file (no folder), write the test in the root `tests/` directory and run them with `pnpm test tests/<extension-name>.test.ts`
-</validation>
+## Effect code
 
-<environment>
-- The agent root is a single pnpm monorepo with packages located under `packages/<package-name>`.
-- Run `pnpm install` in the agent root directory to install dependencies for all packages and extensions.
-- Run package commands from root using `pnpm --dir packages/<package-name> <command>` (e.g. `pnpm --dir packages/pi-permission-system check` or `pnpm --dir packages/pi-permission-system test`).
-</environment>
+When writing Effect code:
+
+1. Read [`repos/effect/LLMS.md`](./repos/effect/LLMS.md). Treat it as the source of truth for idiomatic Effect usage, tests, module structure, and API design.
+2. Read [`docs/effect-v4-cheatsheet.md`](./docs/effect-v4-cheatsheet.md) for a quick reference to this project's Effect v4 patterns and idioms.
+
+## Vendored repositories
+
+External repositories are vendored under `repos/` as read-only reference material.
+
+- Prefer examples and patterns from vendored source code over generated guesses or web search results.
+- Do not edit files under `repos/` unless the user explicitly asks.
+- Do not import application code from `repos/`. Continue importing from normal package dependencies.
+
+## Contributor workflow
+
+The contributor monorepo workflow for creating packages, adding changesets, versioning, and publishing lives in [`DEVELOPMENT.md`](./DEVELOPMENT.md).
+
+- Follow `DEVELOPMENT.md` for package work.
+- Do not invent an alternate release flow.
+
+## Extension conventions
+
+- Every extension must have its entry point at `extensions/<extension-name-folder>/index.ts`.
+- Re-export each extension from `extensions/index.ts` with:
+
+    ```ts
+    export * from "./<extension-name>.ts";
+    ```
+
+## Tests and validation
+
+- Use Vitest for tests.
+- Place tests in the same directory as the code under test.
+- Name test files with the `.test.ts` suffix.
+- Run `pnpm lint` for lint-only validation.
+- Run `pnpm test` for test-only validation.
+- Run `pnpm check` from the repository root for the authoritative lint, type-check, and test validation.
