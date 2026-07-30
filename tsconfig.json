@@ -7,10 +7,8 @@
       { "path": "packages/pi-station" },
       { "path": "extensions/pi-cortex" },
       { "path": "extensions/ask-user" },
-      { "path": "extensions/background-terminals" },
       { "path": "extensions/copy-all" },
       { "path": "extensions/pi-exa" },
-      { "path": "extensions/pi-skill-toggle" },
-      { "path": "extensions/tasks" }
+      { "path": "extensions/pi-skill-toggle" }
    ]
 }

@@ -10,12 +10,12 @@
    },
    "oxc.requireConfig": true,
    "oxc.typeAware": true,
-   // "oxc.tsConfigPath": "tsconfig.json",
+   "oxc.tsConfigPath": "tsconfig.json",
    "[json]": {
       "editor.defaultFormatter": "oxc.oxc-vscode"
    },
    "[jsonc]": {
-      "editor.defaultFormatter": "vscode.json-language-features"
+      "editor.defaultFormatter": "oxc.oxc-vscode"
    },
    "oxc.enable.oxlint": true,
    // UI Setting:

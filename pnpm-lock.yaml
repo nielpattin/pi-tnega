@@ -83,16 +83,6 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
-  extensions/background-terminals:
-    dependencies:
-      effect:
-        specifier: 4.0.0-beta.101
-        version: 4.0.0-beta.101
-    devDependencies:
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-
   extensions/copy-all:
     dependencies:
       effect:
@@ -160,16 +150,6 @@ importers:
       tsx:
         specifier: ^4.23.1
         version: 4.23.1
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-
-  extensions/tasks:
-    dependencies:
-      effect:
-        specifier: 4.0.0-beta.101
-        version: 4.0.0-beta.101
-    devDependencies:
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
