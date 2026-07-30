@@ -17,6 +17,81 @@ describe("AGY Control FSM", () => {
     expect(argv[argv.length - 1]).toBe("Hello agy");
   });
 
+  it("settles on Agy's completed-stream lifecycle event while the process stays open", async () => {
+    let settledResult: any = null;
+    const kill = vi.fn();
+    const fakeSpawn = vi.fn((_cmd, _opts, _onClose, onData) => {
+      onData("Final assistant response");
+      return { pid: 1200, kill };
+    });
+    let logText = "";
+
+    const session = createAgyFsmSession({
+      prompt: "Initial task",
+      spawnProc: fakeSpawn,
+      readLogChunk: async () => {
+        const chunk = logText;
+        logText = "";
+        return chunk;
+      },
+      logPollIntervalMs: 5,
+      onSettled: (result) => {
+        settledResult = result;
+      }
+    });
+
+    await Effect.runPromise(session.start());
+    logText += "Print mode: conversation=conv-final, sending message\n";
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    expect(session.conversationId).toBe("conv-final");
+    expect(session.state).toBe("running");
+
+    logText += "Stream completed for conv-final, clearing ResponsePending\n";
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(session.state).toBe("settled");
+    expect(settledResult?.status).toBe("completed");
+    expect(settledResult?.finalText).toContain("Final assistant response");
+    expect(kill).toHaveBeenCalledOnce();
+  });
+
+  it("chains a queued follow-up from the completed-stream event without intermediate settlement", async () => {
+    const spawnedCmds: string[] = [];
+    const outputs: string[] = [];
+    const settled = vi.fn();
+    let logText = "";
+    const fakeSpawn = vi.fn((cmd, _opts, _onClose, onData) => {
+      spawnedCmds.push(cmd);
+      onData(`response-${spawnedCmds.length}`);
+      return { pid: 1300 + spawnedCmds.length, kill: vi.fn() };
+    });
+    const session = createAgyFsmSession({
+      prompt: "Initial task",
+      conversationId: "conv-chain",
+      spawnProc: fakeSpawn,
+      readLogChunk: async () => {
+        const chunk = logText;
+        logText = "";
+        return chunk;
+      },
+      logPollIntervalMs: 5,
+      onOutput: (text) => outputs.push(text),
+      onSettled: settled
+    });
+
+    await Effect.runPromise(session.start());
+    await Effect.runPromise(session.control("Queued follow-up", "followUp"));
+    logText = "Stream completed for conv-chain, clearing ResponsePending\n";
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(settled).not.toHaveBeenCalled();
+    expect(session.state).toBe("running");
+    expect(spawnedCmds).toHaveLength(2);
+    expect(spawnedCmds[1]).toContain("--conversation conv-chain");
+    expect(spawnedCmds[1]).toContain('--print "Queued follow-up"');
+    expect(outputs).toEqual(["response-1", "response-2"]);
+  });
+
   it("handles exit 0 with empty queue: settles Completed once", async () => {
     let settledResult: any = null;
     const fakeSpawn = vi.fn((cmd, opts, onClose, onData) => {
@@ -40,6 +115,38 @@ describe("AGY Control FSM", () => {
     expect(settledResult?.status).toBe("completed");
     expect(settledResult?.finalText).toBe("Print mode: conversation=conv-100\nDone output");
   });
+
+  it.each(["steer", "followUp"] as const)(
+    "resumes the retained conversation for post-result %s control",
+    async (mode) => {
+      const spawnedCmds: string[] = [];
+      let processClose: ((code: number | null) => void) | undefined;
+      const fakeSpawn = vi.fn((cmd, _opts, onClose, onData) => {
+        spawnedCmds.push(cmd);
+        processClose = onClose;
+        onData("response");
+        return { pid: 1900 + spawnedCmds.length, kill: vi.fn() };
+      });
+      const session = createAgyFsmSession({
+        prompt: "Initial prompt",
+        conversationId: "conv-resume",
+        spawnProc: fakeSpawn
+      });
+
+      await Effect.runPromise(session.start());
+      processClose?.(0);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(session.state).toBe("settled");
+
+      await Effect.runPromise(session.control("Post-result prompt", mode));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(session.state).toBe("running");
+      expect(spawnedCmds).toHaveLength(2);
+      expect(spawnedCmds[1]).toContain("--conversation conv-resume");
+      expect(spawnedCmds[1]).toContain('--print "Post-result prompt"');
+    }
+  );
 
   it("handles followUp while running: enqueues FIFO and chains continuation spawn", async () => {
     const spawnedCmds: string[] = [];

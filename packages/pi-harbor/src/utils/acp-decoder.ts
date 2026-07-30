@@ -1,4 +1,7 @@
 import { Effect, Schedule } from "effect";
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 export interface AcpRecord {
    readonly id?: string;
@@ -34,6 +37,74 @@ export type AcpDecodedEvent =
         readonly delta: string;
         readonly timestamp?: number;
      };
+
+interface AgyTranscriptToolCall {
+   readonly name?: unknown;
+   readonly args?: unknown;
+}
+
+interface AgyTranscriptRow {
+   readonly step_index?: unknown;
+   readonly source?: unknown;
+   readonly type?: unknown;
+   readonly status?: unknown;
+   readonly content?: unknown;
+   readonly tool_calls?: unknown;
+}
+
+/**
+ * Read Agy's live per-conversation transcript and normalize tool activity for Harbor.
+ */
+export async function readAgyTranscriptRecords(
+   conversationId: string,
+   lastProcessedIndex: number,
+   brainRoot: string = join(homedir(), ".gemini", "antigravity-cli", "brain")
+): Promise<AcpRecord[]> {
+   const transcriptPath = join(brainRoot, conversationId, ".system_generated", "logs", "transcript.jsonl");
+   const text = await readFile(transcriptPath, "utf8").catch(() => "");
+   const rows: AgyTranscriptRow[] = [];
+   for (const line of text.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      try {
+         const parsed: unknown = JSON.parse(line);
+         if (parsed && typeof parsed === "object") rows.push(parsed as AgyTranscriptRow);
+      } catch {
+         // Agy may be appending the final JSONL line while Harbor reads it. Retry on the next poll.
+      }
+   }
+
+   const records: AcpRecord[] = [];
+   let pendingCalls: Array<{ id: string; name: string }> = [];
+   for (const row of rows) {
+      if (Array.isArray(row.tool_calls)) {
+         pendingCalls = row.tool_calls.flatMap((value: unknown, index: number) => {
+            if (!value || typeof value !== "object") return [];
+            const call = value as AgyTranscriptToolCall;
+            if (typeof call.name !== "string") return [];
+            const step = typeof row.step_index === "number" ? row.step_index : records.length;
+            const id = `agy-${step}-${index}`;
+            records.push({ id, toolCallId: id, toolName: call.name, status: "in_progress", args: call.args });
+            return [{ id, name: call.name }];
+         });
+         continue;
+      }
+
+      if (pendingCalls.length > 0 && row.source === "MODEL" && typeof row.content === "string") {
+         const call = pendingCalls.shift();
+         if (call) {
+            records.push({
+               id: call.id,
+               toolCallId: call.id,
+               toolName: call.name,
+               status: "completed",
+               result: row.content,
+               isError: row.status !== "DONE"
+            });
+         }
+      }
+   }
+   return records.slice(lastProcessedIndex);
+}
 
 export function decodeAcpRecord(record: AcpRecord): AcpDecodedEvent | null {
    if (record.delta != null && record.delta.length > 0) {

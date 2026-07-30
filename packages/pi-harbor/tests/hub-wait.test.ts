@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { ManagedRuntime, Layer } from "effect";
-import { HubToolParamsSchema, hubToolDefinition, handleHub } from "../src/tools/hub.js";
+import {
+  HubToolParamsSchema,
+  ParentHubToolParamsSchema,
+  WorkerHubToolParamsSchema,
+  hubToolDefinition,
+  handleHub
+} from "../src/tools/hub.js";
 import { JobRegistry } from "../src/services/JobRegistry.js";
 import { ProcessSupervisor } from "../src/services/ProcessSupervisor.js";
 import { ShellExecutor } from "../src/services/ShellExecutor.js";
@@ -17,9 +23,44 @@ describe("hub tool & validation guards", () => {
     return ManagedRuntime.make(TestLayer);
   }
 
-  it("exports valid hub tool definition and schema", () => {
+  it("exports operation-specific parent and worker schemas", () => {
     expect(hubToolDefinition.name).toBe("hub");
-    expect(HubToolParamsSchema).toBeDefined();
+    expect(HubToolParamsSchema).toBe(ParentHubToolParamsSchema);
+    expect((ParentHubToolParamsSchema as any).type).toBe("object");
+    expect((WorkerHubToolParamsSchema as any).type).toBe("object");
+
+    const parentBranches = (ParentHubToolParamsSchema as any).anyOf as any[];
+    const workerBranches = (WorkerHubToolParamsSchema as any).anyOf as any[];
+    expect(parentBranches.length).toBeGreaterThan(workerBranches.length);
+
+    const operations = (branches: any[]) =>
+      branches.map((branch) => branch.properties.op.const).filter((op, index, all) => all.indexOf(op) === index);
+    expect(operations(parentBranches)).toEqual(
+      expect.arrayContaining([
+        "jobs",
+        "wait",
+        "cancel",
+        "exec",
+        "start",
+        "ps",
+        "logs",
+        "stop",
+        "restart",
+        "describe",
+        "send",
+        "inbox",
+        "list",
+        "wait-from"
+      ])
+    );
+    expect(operations(workerBranches).sort()).toEqual(["exec", "inbox", "list", "send", "wait-from"]);
+
+    const jobWait = parentBranches.find(
+      (branch) => branch.properties.op.const === "wait" && branch.properties.target?.const === "jobs"
+    );
+    expect(jobWait.required).toEqual(expect.arrayContaining(["op", "target", "ids"]));
+    expect(jobWait.properties.ids.minItems).toBe(1);
+    expect(jobWait.properties.ids.description).toContain("job IDs");
   });
 
   describe("guards & param validation", () => {
@@ -83,6 +124,44 @@ describe("hub tool & validation guards", () => {
       const res: any = await runtime.runPromise(handleHub({ op: "jobs" }));
       expect(res.ok).toBe(true);
       expect(res.jobs.length).toBe(1);
+    });
+
+    it("blocks on a running job until it settles and returns its output", async () => {
+      const runtime = makeTestRuntime();
+      await runtime.runPromise(
+        JobRegistry.use((svc) =>
+          svc.register({
+            id: "task-blocking",
+            ownerSessionId: "parent",
+            name: "blocking",
+            kind: "agent",
+            promptOrCommand: "test"
+          })
+        )
+      );
+      await runtime.runPromise(JobRegistry.use((svc) => svc.updateStatus("task-blocking", "running")));
+
+      let resolved = false;
+      const waiting = runtime
+        .runPromise(handleHub({ op: "wait", target: "jobs", ids: ["task-blocking"] }))
+        .then((result) => {
+          resolved = true;
+          return result;
+        });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(resolved).toBe(false);
+
+      await runtime.runPromise(
+        JobRegistry.use((svc) =>
+          svc.updateStatus("task-blocking", "completed", { resultData: { summary: "finished work" } })
+        )
+      );
+      const result: any = await waiting;
+      expect(result.jobs[0]).toMatchObject({
+        id: "task-blocking",
+        status: "completed",
+        resultData: { summary: "finished work" }
+      });
     });
 
     it("waits for job settlement via op: 'wait' target: 'jobs'", async () => {

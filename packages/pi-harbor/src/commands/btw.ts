@@ -15,6 +15,7 @@ export function buildBtwJobFields(prompt: string, parentModel?: string): TaskSpe
       task: prompt,
       agent: "task",
       model: parentModel,
+      name: "btw",
       origin: "btw"
    };
 }
@@ -40,6 +41,7 @@ export function formatBtwResultEntry(job: {
 export interface HandleBtwParams {
    prompt: string;
    parentModel?: string;
+   parentSessionFile?: string;
    activeBtwCount: number;
    taskManager: TaskManagerShape;
 }
@@ -54,11 +56,13 @@ export async function handleBtwCommand(
       };
    }
 
-   const spec = buildBtwJobFields(params.prompt, params.parentModel);
+   const fields = buildBtwJobFields(params.prompt, params.parentModel);
+   const { origin: _origin, ...spec } = fields;
 
    const jobEffect = params.taskManager.spawnTask(spec, {
       origin: "btw",
-      skipAgentSlot: true
+      skipAgentSlot: true,
+      parentSessionFile: params.parentSessionFile
    });
 
    try {

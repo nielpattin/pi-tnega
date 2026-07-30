@@ -1,15 +1,21 @@
 import { Context, Effect, Layer, Deferred } from "effect";
-import { CapacityError, type Job, type JobKind, type JobStatus } from "../domain.js";
+import { CapacityError, DuplicateJobError, type Job, type JobKind, type JobStatus } from "../domain.js";
+import { HARBOR_JOB_MANIFEST_LIMITS, pruneTerminalJobsForRetention } from "./HarborJobManifest.js";
 
 export const MAX_TRACKED_JOBS = 64;
 
 export interface JobRegistryShape {
    readonly register: (
       job: Omit<Job, "status" | "createdAt" | "waitInterest" | "killInterest">
-   ) => Effect.Effect<Job, CapacityError>;
+   ) => Effect.Effect<Job, CapacityError | DuplicateJobError>;
+   readonly restore: (job: Job) => Effect.Effect<Job, CapacityError>;
    readonly get: (id: string) => Effect.Effect<Job | undefined>;
    readonly list: (filter?: { kind?: JobKind; status?: JobStatus }) => Effect.Effect<ReadonlyArray<Job>>;
    readonly updateStatus: (id: string, status: JobStatus, patch?: Partial<Job>) => Effect.Effect<Job>;
+   readonly onSettled: (listener: (job: Job) => void) => Effect.Effect<() => void>;
+   readonly onChange: (listener: (jobs: ReadonlyArray<Job>) => void) => Effect.Effect<() => void>;
+   readonly replaceAll: (jobs: ReadonlyArray<Job>) => Effect.Effect<void, CapacityError>;
+   readonly clear: () => Effect.Effect<void>;
    readonly incrementWaitInterest: (ids: ReadonlyArray<string>) => Effect.Effect<void>;
    readonly decrementWaitInterest: (ids: ReadonlyArray<string>) => Effect.Effect<void>;
    readonly incrementKillInterest: (ids: ReadonlyArray<string>) => Effect.Effect<void>;
@@ -24,38 +30,51 @@ export class JobRegistry extends Context.Service<JobRegistry, JobRegistryShape>(
          yield* Effect.void;
          const jobs = new Map<string, Job>();
          const waiters = new Map<string, Array<Deferred.Deferred<void>>>();
+         const settledListeners = new Set<(job: Job) => void>();
+         const changeListeners = new Set<(jobs: ReadonlyArray<Job>) => void>();
 
-         const prune = () => {
-            if (jobs.size < MAX_TRACKED_JOBS) return;
-
-            const candidates: Job[] = [];
-            for (const job of jobs.values()) {
-               if (job.status !== "running" && job.waitInterest === 0 && job.killInterest === 0) {
-                  candidates.push(job);
+         const notifyChange = () => {
+            const snapshot = Array.from(jobs.values());
+            for (const listener of changeListeners) {
+               try {
+                  listener(snapshot);
+               } catch {
+                  // A change listener cannot break registry updates.
                }
             }
+         };
 
-            candidates.sort((a, b) => {
-               const aTime = a.settledAt ?? a.createdAt;
-               const bTime = b.settledAt ?? b.createdAt;
-               if (aTime !== bTime) return aTime - bTime;
-               return a.createdAt - b.createdAt;
-            });
+         const prune = () => {
+            const limit = HARBOR_JOB_MANIFEST_LIMITS.maxTrackedJobs;
+            const retained = pruneTerminalJobsForRetention(Array.from(jobs.values()), Date.now(), limit - 1);
+            if (retained.length === jobs.size) return;
 
-            while (jobs.size >= MAX_TRACKED_JOBS && candidates.length > 0) {
-               const victim = candidates.shift();
-               if (victim) {
-                  jobs.delete(victim.id);
+            const retainedIds = new Set(retained.map((job) => job.id));
+            const toDelete: string[] = [];
+            for (const id of jobs.keys()) {
+               if (!retainedIds.has(id)) {
+                  toDelete.push(id);
                }
+            }
+            for (const id of toDelete) {
+               jobs.delete(id);
             }
          };
 
          const register = Effect.fn("JobRegistry.register")(function* (jobInit) {
             prune();
-            if (jobs.size >= MAX_TRACKED_JOBS) {
+            const limit = HARBOR_JOB_MANIFEST_LIMITS.maxTrackedJobs;
+            if (jobs.size >= limit) {
                return yield* new CapacityError({
-                  message: `Job registry full. Maximum tracked jobs cap (${MAX_TRACKED_JOBS}) reached.`,
-                  limit: MAX_TRACKED_JOBS
+                  message: `Job registry full. Maximum tracked jobs cap (${limit}) reached.`,
+                  limit
+               });
+            }
+
+            if (jobs.has(jobInit.id)) {
+               return yield* new DuplicateJobError({
+                  message: `Job ${jobInit.id} already exists in the registry.`,
+                  id: jobInit.id
                });
             }
 
@@ -68,6 +87,7 @@ export class JobRegistry extends Context.Service<JobRegistry, JobRegistryShape>(
             };
 
             jobs.set(newJob.id, newJob);
+            notifyChange();
             return newJob;
          });
 
@@ -117,17 +137,93 @@ export class JobRegistry extends Context.Service<JobRegistry, JobRegistryShape>(
                startedAt: status === "running" ? (existing.startedAt ?? now) : existing.startedAt,
                settledAt:
                   status === "completed" || status === "failed" || status === "cancelled"
-                     ? (existing.settledAt ?? now)
-                     : existing.settledAt
+                     ? existing.status === "running" || existing.status === "pending"
+                        ? now
+                        : (existing.settledAt ?? now)
+                     : status === "running"
+                       ? undefined
+                       : existing.settledAt
             };
 
             jobs.set(id, updated);
+            notifyChange();
 
-            if (status === "completed" || status === "failed" || status === "cancelled") {
+            const becameSettled =
+               (status === "completed" || status === "failed" || status === "cancelled") &&
+               existing.status !== "completed" &&
+               existing.status !== "failed" &&
+               existing.status !== "cancelled";
+            if (becameSettled) {
+               for (const listener of settledListeners) {
+                  try {
+                     listener({ ...updated });
+                  } catch {
+                     // A delivery listener cannot break registry settlement.
+                  }
+               }
                notifyWaiters(id);
             }
 
             return updated;
+         });
+
+         const onSettled = Effect.fn("JobRegistry.onSettled")(function* (listener: (job: Job) => void) {
+            yield* Effect.sync(() => settledListeners.add(listener));
+            return () => settledListeners.delete(listener);
+         });
+
+         const onChange = Effect.fn("JobRegistry.onChange")(function* (listener: (jobs: ReadonlyArray<Job>) => void) {
+            yield* Effect.sync(() => changeListeners.add(listener));
+            return () => changeListeners.delete(listener);
+         });
+
+         const restore = Effect.fn("JobRegistry.restore")(function* (job: Job) {
+            if (jobs.has(job.id)) {
+               return jobs.get(job.id)!;
+            }
+            const limit = HARBOR_JOB_MANIFEST_LIMITS.maxTrackedJobs;
+            if (jobs.size >= limit) {
+               return yield* new CapacityError({
+                  message: `Job registry full. Maximum tracked jobs cap (${limit}) reached.`,
+                  limit
+               });
+            }
+            jobs.set(job.id, job);
+            notifyChange();
+            return job;
+         });
+
+         const releaseAllWaiters = () => {
+            for (const [, deferreds] of waiters) {
+               for (const d of deferreds) {
+                  Effect.runFork(Deferred.succeed(d, undefined));
+               }
+            }
+            waiters.clear();
+         };
+
+         const clear = Effect.fn("JobRegistry.clear")(() =>
+            Effect.sync(() => {
+               releaseAllWaiters();
+               jobs.clear();
+            })
+         );
+
+         const replaceAll = Effect.fn("JobRegistry.replaceAll")(function* (newJobs: ReadonlyArray<Job>) {
+            const limit = HARBOR_JOB_MANIFEST_LIMITS.maxTrackedJobs;
+            if (newJobs.length > limit) {
+               return yield* new CapacityError({
+                  message: `Job registry full. Maximum tracked jobs cap (${limit}) reached.`,
+                  limit
+               });
+            }
+
+            releaseAllWaiters();
+            jobs.clear();
+            for (const job of newJobs) {
+               jobs.set(job.id, job);
+            }
+            return yield* Effect.void;
          });
 
          const incrementWaitInterest = Effect.fn("JobRegistry.incrementWaitInterest")(function* (
@@ -224,6 +320,11 @@ export class JobRegistry extends Context.Service<JobRegistry, JobRegistryShape>(
             get,
             list,
             updateStatus,
+            onSettled,
+            onChange,
+            restore,
+            replaceAll,
+            clear,
             incrementWaitInterest,
             decrementWaitInterest,
             incrementKillInterest,

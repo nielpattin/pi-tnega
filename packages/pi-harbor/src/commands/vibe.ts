@@ -26,8 +26,8 @@ export function handleVibeCommand(facade: PiVibeFacade, vibeState: VibeStateInte
       // ENTER ON
       // 1. getActiveTools()
       const currentActive = facade.getActiveTools();
-      // 2. baseline = filter out vibe_*
-      const savedTools = currentActive.filter((name) => !name.startsWith("vibe_"));
+      // 2. baseline excludes the Vibe-only tool and legacy vibe_* names.
+      const savedTools = currentActive.filter((name) => name !== "vibe" && !name.startsWith("vibe_"));
       // 3. appendEntry("vibe-state", { savedTools, timestamp })
       facade.appendEntry("vibe-state", { savedTools, timestamp: Date.now() });
       // 4. setActiveTools(directorToolNames)

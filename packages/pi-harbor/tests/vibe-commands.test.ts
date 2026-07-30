@@ -2,24 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { handleVibeCommand, type PiVibeFacade } from "../src/commands/vibe.js";
 
 describe("/vibe Command Orchestration (Algorithm D)", () => {
-   const mockAllTools = [
-      "read",
-      "write",
-      "edit",
-      "grep",
-      "vibe_spawn",
-      "vibe_send",
-      "vibe_wait",
-      "vibe_kill",
-      "vibe_list",
-      "custom_tool"
-   ];
+   const mockAllTools = ["read", "write", "edit", "grep", "vibe", "custom_tool"]; 
 
    function createMockFacade(opts?: {
       activeTools?: string[];
       entries?: any[];
    }) {
-      let activeTools = opts?.activeTools ?? ["read", "write", "edit", "custom_tool", "vibe_spawn"];
+      let activeTools = opts?.activeTools ?? ["read", "write", "edit", "custom_tool"]; 
       const entries: any[] = opts?.entries ?? [];
       let widgetText: string | undefined = undefined;
 
@@ -89,9 +78,7 @@ describe("/vibe Command Orchestration (Algorithm D)", () => {
       expect(mockF.setStatusWidget).toHaveBeenCalledWith("🎬 vibe");
 
       // setActiveTools called with director tools
-      expect(mockF.setActiveTools).toHaveBeenCalledWith(
-         expect.arrayContaining(["read", "vibe_spawn", "vibe_send", "vibe_wait", "vibe_kill", "vibe_list"])
-      );
+      expect(mockF.setActiveTools).toHaveBeenCalledWith(expect.arrayContaining(["read", "vibe"]));
       const setTools = mockF.setActiveTools.mock.calls[0][0];
       expect(setTools).not.toContain("write");
       expect(setTools).not.toContain("custom_tool");

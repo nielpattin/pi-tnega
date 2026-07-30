@@ -4,6 +4,7 @@ import { resolvePiModel, mapThinkingLevel } from "../src/backends/pi-model.js";
 describe("pi-model", () => {
   const fakeRegistry = {
     models: [
+      { provider: "proxy", id: "cfai/@cf/moonshotai/kimi-k2.7-code" },
       { provider: "anthropic", id: "claude-3-5-sonnet" },
       { provider: "openai", id: "gpt-4o" },
       { provider: "openai", id: "claude-3-5-sonnet" }, // duplicate id across provider for testing
@@ -20,6 +21,11 @@ describe("pi-model", () => {
   it("resolves model by provider/id", () => {
     const model = resolvePiModel(fakeRegistry, "anthropic/claude-3-5-sonnet");
     expect(model).toEqual({ provider: "anthropic", id: "claude-3-5-sonnet" });
+  });
+
+  it("resolves a provider model whose id contains additional slashes", () => {
+    const model = resolvePiModel(fakeRegistry, "proxy/cfai/@cf/moonshotai/kimi-k2.7-code");
+    expect(model).toEqual({ provider: "proxy", id: "cfai/@cf/moonshotai/kimi-k2.7-code" });
   });
 
   it("throws error for unknown provider/id model", () => {

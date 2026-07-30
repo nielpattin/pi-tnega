@@ -19,7 +19,6 @@ describe("Agy Backend Phase 1a One-Shot Execution", () => {
 
     expect(argv).toEqual([
       "--model", "gemini-3.6-flash-medium",
-      "--effort", "medium",
       "--mode", "accept-edits",
       "--dangerously-skip-permissions",
       "--add-dir", "/workspace",
@@ -30,6 +29,27 @@ describe("Agy Backend Phase 1a One-Shot Execution", () => {
     // Ensure --print is the last argument
     expect(argv[argv.length - 2]).toBe("--print");
     expect(argv[argv.length - 1]).toBe("Fix bug in index.ts");
+  });
+
+  it.each([
+    "claude-sonnet-4-6",
+    "claude-opus-4-6-thinking",
+    "gemini-3.6-flash-low",
+    "gpt-oss-120b-medium"
+  ])("never combines explicit Agy model %s with --effort", (model) => {
+    const argv = buildAgyArgv({ model, effort: "medium", prompt: "Test" });
+
+    expect(argv).toContain("--model");
+    expect(argv).toContain(model);
+    expect(argv).not.toContain("--effort");
+  });
+
+  it("uses --effort when no explicit Agy model is selected", () => {
+    const argv = buildAgyArgv({ effort: "high", prompt: "Test" });
+
+    expect(argv).not.toContain("--model");
+    expect(argv).toContain("--effort");
+    expect(argv).toContain("high");
   });
 
   it("executes one-shot print command and returns completed state on exit 0", async () => {

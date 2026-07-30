@@ -1,54 +1,207 @@
-import { Type, type Static } from "typebox";
+import { Type } from "typebox";
 import { Effect } from "effect";
 import { JobRegistry } from "../services/JobRegistry.js";
 import { ProcessSupervisor } from "../services/ProcessSupervisor.js";
 import { ShellExecutor } from "../services/ShellExecutor.js";
 import { MailBus } from "../services/MailBus.js";
 
-export const HubToolParamsSchema = Type.Object({
-   op: Type.Union([
-      Type.Literal("jobs"),
-      Type.Literal("wait"),
-      Type.Literal("cancel"),
-      Type.Literal("exec"),
-      Type.Literal("start"),
-      Type.Literal("ps"),
-      Type.Literal("logs"),
-      Type.Literal("stop"),
-      Type.Literal("restart"),
-      Type.Literal("describe"),
-      Type.Literal("send"),
-      Type.Literal("inbox"),
-      Type.Literal("list"),
-      Type.Literal("wait-from")
-   ]),
-   target: Type.Optional(Type.Union([Type.Literal("jobs"), Type.Literal("process"), Type.Literal("message")])),
-   ids: Type.Optional(Type.Array(Type.String())),
-   id: Type.Optional(Type.String()),
-   name: Type.Optional(Type.String()),
-   command: Type.Optional(Type.String()),
-   cwd: Type.Optional(Type.String()),
-   env: Type.Optional(Type.Record(Type.String(), Type.String())),
-   async: Type.Optional(Type.Boolean()),
-   timeoutMs: Type.Optional(Type.Number()),
-   signal: Type.Optional(Type.Union([Type.Literal("SIGTERM"), Type.Literal("SIGKILL")])),
+const TimeoutMsSchema = Type.Optional(Type.Number({ description: "Maximum blocking time in milliseconds." }));
+const ProcessNameSchema = Type.String({
+   description: "Supervised OS process name, for example api. Not a task job ID."
+});
+const JobIdSchema = Type.String({ description: "Agent job ID returned by task, for example task-1." });
+const PeerIdSchema = Type.String({ description: "Mailbox peer ID." });
+const EnvironmentSchema = Type.Optional(
+   Type.Record(Type.String(), Type.String(), { description: "Environment variables added to the command." })
+);
+
+const JobsOperationSchema = Type.Object({
+   op: Type.Literal("jobs", { description: "List all tracked agent jobs." })
+});
+const WaitJobsOperationSchema = Type.Object({
+   op: Type.Literal("wait", { description: "Wait for one or more resources." }),
+   target: Type.Literal("jobs", { description: "Wait for agent jobs." }),
+   ids: Type.Array(JobIdSchema, { minItems: 1, description: "Exact agent job IDs to wait for." }),
+   timeoutMs: TimeoutMsSchema
+});
+const WaitProcessOperationSchema = Type.Object({
+   op: Type.Literal("wait", { description: "Wait for one or more resources." }),
+   target: Type.Literal("process", { description: "Wait for a supervised OS process." }),
+   name: ProcessNameSchema,
+   timeoutMs: TimeoutMsSchema
+});
+const WaitMessageOperationSchema = Type.Object({
+   op: Type.Literal("wait", { description: "Wait for one or more resources." }),
+   target: Type.Literal("message", { description: "Wait for a mailbox message." }),
+   from: PeerIdSchema,
+   to: Type.Optional(PeerIdSchema),
+   timeoutMs: TimeoutMsSchema
+});
+const CancelOperationSchema = Type.Object({
+   op: Type.Literal("cancel", { description: "Cancel one agent job." }),
+   id: JobIdSchema
+});
+const ExecOperationSchema = Type.Object({
+   op: Type.Literal("exec", { description: "Execute a shell command." }),
+   command: Type.String({ description: "Shell command to execute." }),
+   cwd: Type.Optional(Type.String({ description: "Working directory. Defaults to the session directory." })),
+   env: EnvironmentSchema,
+   async: Type.Optional(Type.Boolean({ description: "Start a retained process instead of waiting for completion." })),
+   timeoutMs: TimeoutMsSchema,
+   name: Type.Optional(ProcessNameSchema)
+});
+const WorkerExecOperationSchema = Type.Object({
+   op: Type.Literal("exec", { description: "Execute a synchronous shell command." }),
+   command: Type.String({ description: "Shell command to execute synchronously." }),
+   cwd: Type.Optional(Type.String({ description: "Working directory. Defaults to the worker directory." })),
+   env: EnvironmentSchema,
+   timeoutMs: TimeoutMsSchema
+});
+const StartOperationSchema = Type.Object({
+   op: Type.Literal("start", { description: "Start and retain a named OS process." }),
+   name: ProcessNameSchema,
+   command: Type.String({ description: "Shell command used to start the process." }),
+   cwd: Type.Optional(Type.String({ description: "Working directory. Defaults to the session directory." })),
+   env: EnvironmentSchema,
    ready: Type.Optional(
-      Type.Object({
-         log: Type.Optional(Type.String()),
-         port: Type.Optional(Type.Number()),
-         timeoutSec: Type.Optional(Type.Number())
+      Type.Object(
+         {
+            log: Type.Optional(Type.String({ description: "Log text that marks the process ready." })),
+            port: Type.Optional(Type.Number({ description: "TCP port that marks the process ready." })),
+            timeoutSec: Type.Optional(Type.Number({ description: "Readiness timeout in seconds." }))
+         },
+         { description: "Optional process readiness condition." }
+      )
+   )
+});
+const PsOperationSchema = Type.Object({
+   op: Type.Literal("ps", { description: "List supervised OS processes." })
+});
+const LogsOperationSchema = Type.Object({
+   op: Type.Literal("logs", { description: "Read retained logs for a supervised OS process." }),
+   name: ProcessNameSchema,
+   lines: Type.Optional(Type.Number({ description: "Maximum number of trailing lines." })),
+   grep: Type.Optional(Type.String({ description: "Filter log lines by this text or pattern." }))
+});
+const StopOperationSchema = Type.Object({
+   op: Type.Literal("stop", { description: "Stop a supervised OS process." }),
+   name: ProcessNameSchema,
+   signal: Type.Optional(
+      Type.Union([Type.Literal("SIGTERM"), Type.Literal("SIGKILL")], {
+         description: "Signal used to stop the process."
       })
-   ),
-   to: Type.Optional(Type.String()),
-   from: Type.Optional(Type.String()),
-   message: Type.Optional(Type.String()),
-   replyTo: Type.Optional(Type.String()),
-   peek: Type.Optional(Type.Boolean()),
-   lines: Type.Optional(Type.Number()),
-   grep: Type.Optional(Type.String())
+   )
+});
+const RestartOperationSchema = Type.Object({
+   op: Type.Literal("restart", { description: "Restart a supervised OS process." }),
+   name: ProcessNameSchema
+});
+const DescribeJobOperationSchema = Type.Object({
+   op: Type.Literal("describe", { description: "Inspect one agent job or supervised process." }),
+   id: JobIdSchema
+});
+const DescribeProcessOperationSchema = Type.Object({
+   op: Type.Literal("describe", { description: "Inspect one agent job or supervised process." }),
+   name: ProcessNameSchema
+});
+const SendOperationSchema = Type.Object({
+   op: Type.Literal("send", { description: "Send a mailbox message to one peer." }),
+   to: PeerIdSchema,
+   message: Type.String({ description: "Message payload." }),
+   from: Type.Optional(PeerIdSchema),
+   replyTo: Type.Optional(Type.String({ description: "Message ID this message replies to." }))
+});
+const InboxOperationSchema = Type.Object({
+   op: Type.Literal("inbox", { description: "Read queued mailbox messages." }),
+   to: Type.Optional(PeerIdSchema),
+   from: Type.Optional(PeerIdSchema),
+   peek: Type.Optional(Type.Boolean({ description: "Keep returned messages unconsumed." }))
+});
+const ListOperationSchema = Type.Object({
+   op: Type.Literal("list", { description: "List mailbox peers. This does not list jobs or processes." })
+});
+const WaitFromOperationSchema = Type.Object({
+   op: Type.Literal("wait-from", { description: "Wait for a mailbox message from one peer." }),
+   from: PeerIdSchema,
+   to: Type.Optional(PeerIdSchema),
+   timeoutMs: TimeoutMsSchema
 });
 
-export type HubToolParams = Static<typeof HubToolParamsSchema>;
+/** Provider-facing schema for the full parent Hub tool. */
+export const ParentHubToolParamsSchema = Type.Union(
+   [
+      JobsOperationSchema,
+      WaitJobsOperationSchema,
+      WaitProcessOperationSchema,
+      WaitMessageOperationSchema,
+      CancelOperationSchema,
+      ExecOperationSchema,
+      StartOperationSchema,
+      PsOperationSchema,
+      LogsOperationSchema,
+      StopOperationSchema,
+      RestartOperationSchema,
+      DescribeJobOperationSchema,
+      DescribeProcessOperationSchema,
+      SendOperationSchema,
+      InboxOperationSchema,
+      ListOperationSchema,
+      WaitFromOperationSchema
+   ],
+   { type: "object" }
+);
+
+/** Provider-facing schema restricted to operations available inside Pi workers. */
+export const WorkerHubToolParamsSchema = Type.Union(
+   [WorkerExecOperationSchema, SendOperationSchema, InboxOperationSchema, ListOperationSchema, WaitFromOperationSchema],
+   { type: "object" }
+);
+
+/** Backward-compatible name for the parent Hub parameter schema. */
+export const HubToolParamsSchema = ParentHubToolParamsSchema;
+
+/**
+ * Runtime Hub input after Pi schema validation.
+ *
+ * Fields remain optional here because renderers receive partial streaming arguments
+ * and compatibility tests call the handler directly to verify actionable errors.
+ * The registered parent and worker schemas enforce operation-specific required fields.
+ */
+export interface HubToolParams {
+   readonly op:
+      | "jobs"
+      | "wait"
+      | "cancel"
+      | "exec"
+      | "start"
+      | "ps"
+      | "logs"
+      | "stop"
+      | "restart"
+      | "describe"
+      | "send"
+      | "inbox"
+      | "list"
+      | "wait-from";
+   readonly target?: "jobs" | "process" | "message";
+   readonly ids?: string[];
+   readonly id?: string;
+   readonly name?: string;
+   readonly command?: string;
+   readonly cwd?: string;
+   readonly env?: Record<string, string>;
+   readonly async?: boolean;
+   readonly timeoutMs?: number;
+   readonly signal?: "SIGTERM" | "SIGKILL";
+   readonly ready?: { readonly log?: string; readonly port?: number; readonly timeoutSec?: number };
+   readonly to?: string;
+   readonly from?: string;
+   readonly message?: string;
+   readonly replyTo?: string;
+   readonly peek?: boolean;
+   readonly lines?: number;
+   readonly grep?: string;
+}
 
 export const hubToolDefinition = {
    name: "hub",

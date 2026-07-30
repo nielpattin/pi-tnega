@@ -1,12 +1,16 @@
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 
-export const VibeSpawnParamsSchema = Type.Object({
-   cli: Type.Union([Type.Literal("fast"), Type.Literal("good")]),
-   prompt: Type.String({ description: "Instruction prompt for profile worker." }),
-   name: Type.Optional(Type.String())
+const VibeSpawnOperationSchema = Type.Object({
+   op: Type.Literal("spawn"),
+   cli: Type.Union([Type.Literal("fast"), Type.Literal("good")], {
+      description: "Vibe profile to use."
+   }),
+   prompt: Type.String({ description: "Instruction prompt for the profile worker." }),
+   name: Type.Optional(Type.String({ description: "Optional display name for the worker." }))
 });
 
-export const VibeSendParamsSchema = Type.Object({
+const VibeSendOperationSchema = Type.Object({
+   op: Type.Literal("send"),
    session: Type.String({ description: "Target session ID handle." }),
    message: Type.String({ description: "Follow-up message text." }),
    mode: Type.Optional(
@@ -17,13 +21,32 @@ export const VibeSendParamsSchema = Type.Object({
    )
 });
 
-export const VibeWaitParamsSchema = Type.Object({
-   sessions: Type.Optional(Type.Array(Type.String())),
-   timeout: Type.Optional(Type.Number())
+const VibeWaitOperationSchema = Type.Object({
+   op: Type.Literal("wait"),
+   sessions: Type.Optional(Type.Array(Type.String(), { description: "Session IDs to wait for." })),
+   timeout: Type.Optional(Type.Number({ description: "Maximum wait time in milliseconds." }))
 });
 
-export const VibeKillParamsSchema = Type.Object({
+const VibeKillOperationSchema = Type.Object({
+   op: Type.Literal("kill"),
    session: Type.String({ description: "Session ID to cancel." })
 });
 
-export const VibeListParamsSchema = Type.Object({});
+const VibeListOperationSchema = Type.Object({
+   op: Type.Literal("list")
+});
+
+/** Parameters for the single Vibe Director control tool. */
+export const VibeToolParamsSchema = Type.Union(
+   [
+      VibeSpawnOperationSchema,
+      VibeSendOperationSchema,
+      VibeWaitOperationSchema,
+      VibeKillOperationSchema,
+      VibeListOperationSchema
+   ],
+   { type: "object" }
+);
+
+/** Parsed input accepted by the single Vibe Director control tool. */
+export type VibeToolParams = Static<typeof VibeToolParamsSchema>;

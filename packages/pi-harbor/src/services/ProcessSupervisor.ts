@@ -5,7 +5,10 @@ import { OutputBuffer } from "../utils/output-buffer.js";
 import { killTree } from "../utils/kill-tree.js";
 import { filterLogLines, paginateLogLines, formatMultiProcessLogLines, selectLogStream } from "../ui/log-viewer.js";
 import { defaultTelemetryReader, type ProcessTelemetry, type TelemetryReader } from "../utils/process-telemetry.js";
-import type { ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
+// Local alias — recent @types/node marks ChildProcess as a deprecated
+// "error" type. Use the inferred spawn return type instead.
+type ChildProcess = ReturnType<typeof spawn>;
 
 export const MAX_RUNNING_PROCESSES = 8;
 export const MAX_TRACKED_PROCESSES = 32;
@@ -155,12 +158,38 @@ export class ProcessSupervisor extends Context.Service<ProcessSupervisor, Proces
                   const str = chunk.toString("utf8");
                   stdoutBuffer.push(str);
                   entry.stdoutBytes += Buffer.byteLength(str, "utf8");
+                  if (params.ready?.log && !entry.readyState.logMatched) {
+                     let matched = false;
+                     try {
+                        matched = new RegExp(params.ready.log).test(str) || str.includes(params.ready.log);
+                     } catch {
+                        matched = str.includes(params.ready.log);
+                     }
+                     if (matched) {
+                        entry.readyState.logMatched = true;
+                        const portOk = params.ready.port ? entry.readyState.portMatched : true;
+                        if (portOk) entry.readyState.ready = true;
+                     }
+                  }
                });
 
                child.stderr?.on("data", (chunk: Buffer | string) => {
                   const str = chunk.toString("utf8");
                   stderrBuffer.push(str);
                   entry.stderrBytes += Buffer.byteLength(str, "utf8");
+                  if (params.ready?.log && !entry.readyState.logMatched) {
+                     let matched = false;
+                     try {
+                        matched = new RegExp(params.ready.log).test(str) || str.includes(params.ready.log);
+                     } catch {
+                        matched = str.includes(params.ready.log);
+                     }
+                     if (matched) {
+                        entry.readyState.logMatched = true;
+                        const portOk = params.ready.port ? entry.readyState.portMatched : true;
+                        if (portOk) entry.readyState.ready = true;
+                     }
+                  }
                });
 
                child.once("close", (code, signal) => {
@@ -188,14 +217,25 @@ export class ProcessSupervisor extends Context.Service<ProcessSupervisor, Proces
                throw new Error(`Process not found: ${name}`);
             }
 
-            if (tracked.entry.status === "running" || tracked.entry.status === "starting") {
-               killTree(tracked.child, signal);
-               tracked.entry.status = "exited";
-               tracked.entry.settledAt = Date.now();
-               Effect.runFork(Deferred.succeed(tracked.exitDeferred, tracked.entry));
-            }
-
-            return tracked.entry;
+            tracked.entry.processKillInterest++;
+            return yield* Effect.gen(function* () {
+               yield* Effect.void;
+               if (tracked.entry.status === "running" || tracked.entry.status === "starting") {
+                  killTree(tracked.child, signal);
+                  tracked.entry.status = "exited";
+                  tracked.entry.settledAt = Date.now();
+                  Effect.runFork(Deferred.succeed(tracked.exitDeferred, tracked.entry));
+               }
+               return tracked.entry;
+            }).pipe(
+               Effect.ensuring(
+                  Effect.sync(() => {
+                     if (tracked.entry.processKillInterest > 0) {
+                        tracked.entry.processKillInterest--;
+                     }
+                  })
+               )
+            );
          });
 
          const restart = Effect.fn("ProcessSupervisor.restart")(function* (name) {
@@ -253,12 +293,11 @@ export class ProcessSupervisor extends Context.Service<ProcessSupervisor, Proces
                throw new Error(`Process not found: ${name}`);
             }
 
-            if (tracked.entry.status === "exited" || tracked.entry.status === "failed") {
-               return tracked.entry;
-            }
-
             tracked.entry.processWaitInterest++;
             return yield* Effect.gen(function* () {
+               if (tracked.entry.status === "exited" || tracked.entry.status === "failed") {
+                  return tracked.entry;
+               }
                if (timeoutMs !== undefined && timeoutMs > 0) {
                   yield* Deferred.await(tracked.exitDeferred).pipe(
                      Effect.timeout(`${timeoutMs} millis`),

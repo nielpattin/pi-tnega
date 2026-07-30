@@ -18,7 +18,7 @@ export const submitToolDefinition = {
 export interface HandleSubmitOptions {
    jobId?: string;
    expectedSchema?: unknown;
-   schemaMode?: "strict" | "permissive";
+   settleJob?: boolean;
 }
 
 export const handleSubmit = Effect.fn("submit.handleSubmit")(function* (
@@ -33,7 +33,7 @@ export const handleSubmit = Effect.fn("submit.handleSubmit")(function* (
    }
 
    if ("error" in resultObj && typeof resultObj.error === "string") {
-      if (options?.jobId) {
+      if (options?.jobId && options.settleJob !== false) {
          yield* registry.updateStatus(options.jobId, "failed", {
             errorText: resultObj.error
          });
@@ -45,38 +45,28 @@ export const handleSubmit = Effect.fn("submit.handleSubmit")(function* (
       const data = resultObj.data;
       if (options?.expectedSchema) {
          const validator = yield* SchemaValidator;
-         const converted = yield* validator
-            .convertSchema(options.expectedSchema)
-            .pipe(Effect.catch(() => Effect.succeed(undefined)));
+         const converted = yield* validator.convertSchema(options.expectedSchema).pipe(
+            Effect.match({
+               onFailure: (err) => ({ ok: false as const, error: err.message }),
+               onSuccess: (schema) => ({ ok: true as const, schema })
+            })
+         );
+         if (!converted.ok) {
+            return { ok: false, error: converted.error };
+         }
 
-         if (converted) {
-            const validationResult = yield* validator
-               .validateData(converted, data)
-               .pipe(Effect.catch((err: any) => Effect.succeed({ _error: err.message })));
-
-            if (validationResult && typeof validationResult === "object" && "_error" in validationResult) {
-               const errMsg = String((validationResult as any)._error);
-               if (options?.schemaMode === "permissive") {
-                  if (options?.jobId) {
-                     yield* registry.updateStatus(options.jobId, "completed", {
-                        resultData: data,
-                        schemaWarning: errMsg
-                     });
-                  }
-                  return { ok: true, status: "completed", schemaWarning: errMsg };
-               } else {
-                  if (options?.jobId) {
-                     yield* registry.updateStatus(options.jobId, "failed", {
-                        errorText: `Schema validation failed: ${errMsg}`
-                     });
-                  }
-                  return { ok: true, status: "failed", errorText: errMsg };
-               }
-            }
+         const validated = yield* validator.validateData(converted.schema, data).pipe(
+            Effect.match({
+               onFailure: (err) => ({ ok: false as const, error: err.message }),
+               onSuccess: () => ({ ok: true as const })
+            })
+         );
+         if (!validated.ok) {
+            return { ok: false, error: validated.error };
          }
       }
 
-      if (options?.jobId) {
+      if (options?.jobId && options.settleJob !== false) {
          yield* registry.updateStatus(options.jobId, "completed", {
             resultData: data
          });

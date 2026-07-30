@@ -1,60 +1,66 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
+import { Effect, ManagedRuntime } from "effect";
+import { Value } from "typebox/value";
 import { isDirectorTool, restoreVibeState, VibeState } from "../src/services/VibeState.js";
-import { VibeSpawnParamsSchema, VibeSendParamsSchema, VibeWaitParamsSchema, VibeKillParamsSchema, VibeListParamsSchema } from "../src/tools/vibe.js";
-import { ManagedRuntime, Effect } from "effect";
+import { VibeToolParamsSchema } from "../src/tools/vibe.js";
 
 describe("VibeState & Director Mode Helpers", () => {
-  it("correctly identifies director tools with isDirectorTool predicate", () => {
-    const directorTools = [
-      "vibe_spawn", "vibe_send", "vibe_wait", "vibe_kill", "vibe_list",
-      "read", "describe_image", "web_search_exa", "deep_search_exa",
-      "web_fetch_exa", "read_session", "workflow", "mcp", "mcp_server_tool"
-    ];
-    for (const name of directorTools) {
-      expect(isDirectorTool(name)).toBe(true);
-    }
+   it("identifies the single vibe tool and research tools as director tools", () => {
+      const directorTools = [
+         "vibe",
+         "read",
+         "describe_image",
+         "web_search_exa",
+         "deep_search_exa",
+         "web_fetch_exa",
+         "read_session",
+         "workflow",
+         "mcp",
+         "mcp_server_tool"
+      ];
+      for (const name of directorTools) expect(isDirectorTool(name)).toBe(true);
 
-    const nonDirectorTools = ["write", "edit", "bash", "task", "hub", "random_tool"];
-    for (const name of nonDirectorTools) {
-      expect(isDirectorTool(name)).toBe(false);
-    }
-  });
+      const nonDirectorTools = ["vibe_spawn", "vibe_send", "write", "edit", "bash", "task", "hub", "random_tool"];
+      for (const name of nonDirectorTools) expect(isDirectorTool(name)).toBe(false);
+   });
 
-  it("restores tool catalog from LAST vibe-state session entry intersected with registered tools", () => {
-    const registeredTools = ["read", "write", "edit", "grep", "find", "hub", "vibe_spawn"];
-    const entries = [
-      { customType: "vibe-state", data: { savedTools: ["read", "write"] } },
-      { customType: "vibe-state", data: { savedTools: ["read", "write", "edit", "unknown_old_tool"] } }
-    ];
+   it("restores the last saved non-Vibe tool catalog", () => {
+      const registeredTools = ["read", "write", "edit", "grep", "find", "hub", "vibe"];
+      const entries = [
+         { customType: "vibe-state", data: { savedTools: ["read", "write"] } },
+         { customType: "vibe-state", data: { savedTools: ["read", "write", "edit", "unknown_old_tool"] } }
+      ];
 
-    const restored = restoreVibeState(entries, registeredTools);
-    expect(restored).toEqual(["read", "write", "edit"]);
-  });
+      expect(restoreVibeState(entries, registeredTools)).toEqual(["read", "write", "edit"]);
+   });
 
-  it("falls back to all non-vibe registered tools if no vibe-state entry exists", () => {
-    const registeredTools = ["read", "write", "vibe_spawn", "vibe_send"];
-    const restored = restoreVibeState([], registeredTools);
-    expect(restored).toEqual(["read", "write"]);
-  });
+   it("falls back to all registered tools except Vibe tools", () => {
+      expect(restoreVibeState([], ["read", "write", "vibe", "vibe_spawn"])).toEqual(["read", "write"]);
+   });
 
-  it("VibeState service tracks vibe active status", async () => {
-    const runtime = ManagedRuntime.make(VibeState.layer);
-    const status = await runtime.runPromise(
-      VibeState.use((vs) =>
-        Effect.gen(function* () {
-          yield* vs.setVibeActive(true);
-          return yield* vs.isVibeActive;
-        })
-      )
-    );
-    expect(status).toBe(true);
-  });
+   it("tracks Vibe active status", async () => {
+      const runtime = ManagedRuntime.make(VibeState.layer);
+      const status = await runtime.runPromise(
+         VibeState.use((state) =>
+            Effect.gen(function* () {
+               yield* state.setVibeActive(true);
+               return yield* state.isVibeActive;
+            })
+         )
+      );
+      expect(status).toBe(true);
+   });
 
-  it("exports valid TypeBox schemas for vibe tools", () => {
-    expect(VibeSpawnParamsSchema).toBeDefined();
-    expect(VibeSendParamsSchema).toBeDefined();
-    expect(VibeWaitParamsSchema).toBeDefined();
-    expect(VibeKillParamsSchema).toBeDefined();
-    expect(VibeListParamsSchema).toBeDefined();
-  });
+   it("accepts every operation through one discriminated vibe schema", () => {
+      expect((VibeToolParamsSchema as any).type).toBe("object");
+      const validInputs = [
+         { op: "spawn", cli: "fast", prompt: "Investigate this" },
+         { op: "send", session: "task-1", message: "Continue", mode: "followUp" },
+         { op: "wait", sessions: ["task-1"], timeout: 1000 },
+         { op: "kill", session: "task-1" },
+         { op: "list" }
+      ];
+      for (const input of validInputs) expect(Value.Check(VibeToolParamsSchema, input)).toBe(true);
+      expect(Value.Check(VibeToolParamsSchema, { op: "spawn", prompt: "Missing profile" })).toBe(false);
+   });
 });

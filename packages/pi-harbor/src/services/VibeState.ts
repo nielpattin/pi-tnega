@@ -1,11 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 
 const DIRECTOR_TOOLS = new Set([
-   "vibe_spawn",
-   "vibe_send",
-   "vibe_wait",
-   "vibe_kill",
-   "vibe_list",
+   "vibe",
    "read",
    "describe_image",
    "web_search_exa",
@@ -30,7 +26,7 @@ export function restoreVibeState(entries: ReadonlyArray<any>, registeredToolName
    if (lastEntry && Array.isArray(lastEntry.data?.savedTools)) {
       savedList = lastEntry.data.savedTools;
    } else {
-      savedList = registeredToolNames.filter((name) => !name.startsWith("vibe_"));
+      savedList = registeredToolNames.filter((name) => name !== "vibe" && !name.startsWith("vibe_"));
    }
 
    return savedList.filter((name) => registeredToolNames.includes(name));

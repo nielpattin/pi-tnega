@@ -1,5 +1,14 @@
 import { describe, it, expect, vi } from "vitest";
-import { decodeAcpRecord, pollAgyDb, type AcpRecord, type AcpDecodedEvent } from "../src/utils/acp-decoder.js";
+import {
+  decodeAcpRecord,
+  pollAgyDb,
+  readAgyTranscriptRecords,
+  type AcpRecord,
+  type AcpDecodedEvent
+} from "../src/utils/acp-decoder.js";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Effect, Scope, Exit } from "effect";
 
 describe("ACP Decoder", () => {
@@ -51,6 +60,54 @@ describe("ACP Decoder", () => {
       delta: "Hello world",
       timestamp: undefined
     });
+  });
+});
+
+describe("Agy transcript adapter", () => {
+  it("normalizes real Agy JSONL tool calls and results incrementally", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harbor-agy-transcript-"));
+    const logDir = join(root, "conv-real", ".system_generated", "logs");
+    await mkdir(logDir, { recursive: true });
+    await writeFile(
+      join(logDir, "transcript.jsonl"),
+      [
+        JSON.stringify({
+          step_index: 2,
+          source: "MODEL",
+          type: "PLANNER_RESPONSE",
+          status: "DONE",
+          tool_calls: [{ name: "list_dir", args: { DirectoryPath: "C:\\work", toolSummary: "Directory listing" } }]
+        }),
+        JSON.stringify({
+          step_index: 3,
+          source: "MODEL",
+          type: "LIST_DIRECTORY",
+          status: "DONE",
+          content: '{"name":"src", "isDir":true}'
+        })
+      ].join("\n") + "\n",
+      "utf8"
+    );
+
+    const first = await readAgyTranscriptRecords("conv-real", 0, root);
+    expect(first).toEqual([
+      {
+        id: "agy-2-0",
+        toolCallId: "agy-2-0",
+        toolName: "list_dir",
+        status: "in_progress",
+        args: { DirectoryPath: "C:\\work", toolSummary: "Directory listing" }
+      },
+      {
+        id: "agy-2-0",
+        toolCallId: "agy-2-0",
+        toolName: "list_dir",
+        status: "completed",
+        result: '{"name":"src", "isDir":true}',
+        isError: false
+      }
+    ]);
+    expect(await readAgyTranscriptRecords("conv-real", 2, root)).toEqual([]);
   });
 });
 

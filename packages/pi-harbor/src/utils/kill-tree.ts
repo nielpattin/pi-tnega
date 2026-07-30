@@ -1,4 +1,7 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
+// Local alias — recent @types/node marks ChildProcess as a deprecated
+// "error" type. Use the inferred spawn return type instead.
+type ChildProcess = ReturnType<typeof spawn>;
 
 export function killTree(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM"): void {
    if (process.platform === "win32" && child.pid) {

@@ -23,9 +23,17 @@ export const NAME_COLLISION_TOOLS = [
 
 export const NAME_COLLISION_COMMANDS = ["/ps", "/tasks", "/agents", "/vibe", "/btw"];
 
+function normalizePath(value: string): string {
+   return value.replace(/\\/g, "/").toLowerCase();
+}
+
 export function hasForceExclude(settingsExtensions: string[] | undefined, target: string): boolean {
    if (!settingsExtensions) return false;
-   return settingsExtensions.some((ext) => ext.startsWith("-") && ext.includes(target));
+   const needle = normalizePath(target);
+   return settingsExtensions.some((ext) => {
+      const normalized = normalizePath(ext);
+      return normalized.startsWith("-") && normalized.includes(needle);
+   });
 }
 
 export interface CutoverItem {
@@ -45,6 +53,17 @@ export function checkCutover(params: CheckCutoverParams): CutoverResult {
    const settings = params.settingsExtensions ?? [];
    const tasksExcluded = hasForceExclude(settings, "extensions/tasks");
    const bgTerminalsExcluded = hasForceExclude(settings, "extensions/background-terminals");
+
+   // Product gate: both legacy packages must be force-excluded before parent registration.
+   if (!tasksExcluded || !bgTerminalsExcluded) {
+      const missing: string[] = [];
+      if (!tasksExcluded) missing.push("-extensions/tasks/index.ts");
+      if (!bgTerminalsExcluded) missing.push("-extensions/background-terminals/index.ts");
+      return {
+         ok: false,
+         error: `Harbor cutover blocked. Force-exclude legacy extensions in settings: ${missing.join(", ")}`
+      };
+   }
 
    if (tasksExcluded && bgTerminalsExcluded) {
       return { ok: true };

@@ -1,5 +1,8 @@
 import { Context, Effect, Layer } from "effect";
-import { spawn, exec, type ChildProcess } from "node:child_process";
+import { spawn, exec } from "node:child_process";
+// Local alias — recent @types/node marks ChildProcess as a deprecated
+// "error" type. Use the inferred spawn return type instead.
+type ChildProcess = ReturnType<typeof spawn>;
 import { buildChildEnv } from "../utils/shell-env.js";
 
 export interface ShellExecutorShape {

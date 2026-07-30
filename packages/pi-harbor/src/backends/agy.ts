@@ -3,7 +3,10 @@ import { ShellExecutor, type ShellExecutorShape } from "../services/ShellExecuto
 import { killTree } from "../utils/kill-tree.js";
 import { pollAgyDb, type AcpRecord, type AcpDecodedEvent } from "../utils/acp-decoder.js";
 import { CancelError, ControlError, type ControlMode } from "../domain.js";
-import type { ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
+// Local alias — recent @types/node marks ChildProcess as a deprecated
+// "error" type. Use the inferred spawn return type instead.
+type ChildProcess = ReturnType<typeof spawn>;
 
 export function buildAgyArgv(params: {
    model?: string;
@@ -17,7 +20,9 @@ export function buildAgyArgv(params: {
    if (params.model) {
       argv.push("--model", params.model);
    }
-   argv.push("--effort", params.effort ?? "medium");
+   if (!params.model) {
+      argv.push("--effort", params.effort ?? "medium");
+   }
    argv.push("--mode", "accept-edits");
    argv.push("--dangerously-skip-permissions");
    if (params.cwd) {
@@ -63,6 +68,10 @@ export interface CreateAgyFsmSessionOptions {
    logFilePath?: string;
    readDb?: (conversationId: string, lastProcessedIndex: number) => Promise<AcpRecord[]>;
    onEvent?: (evt: AcpDecodedEvent) => void;
+   onOutput?: (rawText: string) => void;
+   /** Reads only log content appended since the previous call. */
+   readLogChunk?: () => Promise<string>;
+   logPollIntervalMs?: number;
    onSettled?: (result: AgyOneShotResult) => void;
    executor?: ShellExecutorShape;
    spawnProc?: (
@@ -94,6 +103,8 @@ export function createAgyFsmSession(options: CreateAgyFsmSessionOptions): AgyFsm
    let accumulatedStdout = "";
    let accumulatedStderr = "";
    let activeScope: Scope.Scope | null = null;
+   let logPollTimer: ReturnType<typeof setInterval> | undefined;
+   let processGeneration = 0;
    let actionChain: Promise<any> = Promise.resolve();
 
    const runSerial = <A>(fn: () => Promise<A> | A): Promise<A> => {
@@ -105,6 +116,67 @@ export function createAgyFsmSession(options: CreateAgyFsmSessionOptions): AgyFsm
    const extractConversationId = (text: string): string | undefined => {
       const match = text.match(/Print mode: conversation=([a-zA-Z0-9_-]+)/);
       return match ? match[1] : undefined;
+   };
+
+   const stopLogPoller = () => {
+      if (logPollTimer !== undefined) {
+         clearInterval(logPollTimer);
+         logPollTimer = undefined;
+      }
+   };
+
+   const handleCompletedTurn = () => {
+      if (state !== "running") return;
+      stopLogPoller();
+      const completedProc = activeProc;
+      activeProc = null;
+
+      const continuation = pendingSteerText ?? pendingFollowUps.shift();
+      pendingSteerText = undefined;
+      if (continuation && conversationId) {
+         state = "chainingFollowUp";
+         completedProc?.kill();
+         void Effect.runPromise(Scope.make()).then((scope) => {
+            activeScope = scope;
+            state = "running";
+            spawnStep(continuation, true);
+         });
+         return;
+      }
+
+      state = "settled";
+      options.onSettled?.({
+         status: "completed",
+         finalText: accumulatedStdout.trim(),
+         rawText: accumulatedStdout,
+         exitCode: 0
+      });
+      completedProc?.kill();
+   };
+
+   const startLogPoller = () => {
+      if (!options.readLogChunk || logPollTimer !== undefined) return;
+      logPollTimer = setInterval(() => {
+         void options.readLogChunk!()
+            .then((text) => {
+               if (!conversationId) {
+                  const extracted = extractConversationId(text);
+                  if (extracted) {
+                     conversationId = extracted;
+                     if (activeScope) startDbPoller(extracted, activeScope);
+                  }
+               }
+               if (!conversationId) return;
+               const completion = `Stream completed for ${conversationId}, clearing ResponsePending`;
+               if (text.includes(completion)) void runSerial(handleCompletedTurn);
+            })
+            .catch(() => {});
+      }, options.logPollIntervalMs ?? 200);
+   };
+
+   const acceptStdout = (chunk: string) => {
+      accumulatedStdout += chunk;
+      options.onOutput?.(accumulatedStdout);
    };
 
    const startDbPoller = (convId: string, scope: Scope.Scope) => {
@@ -123,6 +195,12 @@ export function createAgyFsmSession(options: CreateAgyFsmSessionOptions): AgyFsm
    };
 
    const spawnStep = (promptText: string, isContinuation: boolean) => {
+      if (isContinuation) {
+         accumulatedStdout = "";
+         accumulatedStderr = "";
+      }
+      const generation = ++processGeneration;
+      startLogPoller();
       const argv = buildAgyArgv({
          model: options.model,
          effort: options.effort,
@@ -139,14 +217,15 @@ export function createAgyFsmSession(options: CreateAgyFsmSessionOptions): AgyFsm
             commandString,
             { cwd: options.cwd, env: { HARBOR_CHILD_SESSION: "1" } },
             (code) => {
-               void runSerial(() => handleProcessClose(code));
+               if (generation === processGeneration) void runSerial(() => handleProcessClose(code));
             },
             (chunk) => {
-               accumulatedStdout += chunk;
+               acceptStdout(chunk);
                if (!conversationId) {
                   const extracted = extractConversationId(chunk);
                   if (extracted) {
                      conversationId = extracted;
+                     startLogPoller();
                      if (activeScope) {
                         startDbPoller(extracted, activeScope);
                      }
@@ -180,11 +259,12 @@ export function createAgyFsmSession(options: CreateAgyFsmSessionOptions): AgyFsm
                };
                child.stdout?.on("data", (chunk: Buffer | string) => {
                   const str = chunk.toString("utf8");
-                  accumulatedStdout += str;
+                  acceptStdout(str);
                   if (!conversationId) {
                      const extracted = extractConversationId(str);
                      if (extracted) {
                         conversationId = extracted;
+                        startLogPoller();
                         if (activeScope) {
                            startDbPoller(extracted, activeScope);
                         }
@@ -202,7 +282,7 @@ export function createAgyFsmSession(options: CreateAgyFsmSessionOptions): AgyFsm
                   accumulatedStderr += chunk.toString("utf8");
                });
                child.once("close", (code: number | null) => {
-                  void runSerial(() => handleProcessClose(code));
+                  if (generation === processGeneration) void runSerial(() => handleProcessClose(code));
                });
             },
             () => {
@@ -222,7 +302,8 @@ export function createAgyFsmSession(options: CreateAgyFsmSessionOptions): AgyFsm
    };
 
    const handleProcessClose = (code: number | null) => {
-      if (state === "cancelled") return;
+      if (state === "cancelled" || state === "settled") return;
+      stopLogPoller();
 
       if (activeScope) {
          void Effect.runPromise(Scope.close(activeScope, undefined as any)).catch(() => {});
@@ -310,8 +391,22 @@ export function createAgyFsmSession(options: CreateAgyFsmSessionOptions): AgyFsm
          yield* Effect.void;
          return yield* Effect.promise(() =>
             runSerial(() => {
-               if (state === "settled" || state === "cancelled") {
+               if (state === "cancelled") {
                   throw new ControlError({ message: `Session is ${state}` });
+               }
+
+               if (state === "settled") {
+                  if (!conversationId) {
+                     throw new ControlError({ message: "Settled session has no conversation ID to resume" });
+                  }
+                  accumulatedStdout = "";
+                  accumulatedStderr = "";
+                  state = "running";
+                  void Effect.runPromise(Scope.make()).then((scope) => {
+                     activeScope = scope;
+                     spawnStep(text, true);
+                  });
+                  return;
                }
 
                if (mode === "followUp") {
@@ -319,6 +414,7 @@ export function createAgyFsmSession(options: CreateAgyFsmSessionOptions): AgyFsm
                      pendingFollowUps.push(text);
                   }
                } else if (mode === "steer") {
+                  stopLogPoller();
                   pendingFollowUps.length = 0; // Clear follow-ups per Rule 9 & 10
                   pendingSteerText = text;
 
@@ -344,6 +440,7 @@ export function createAgyFsmSession(options: CreateAgyFsmSessionOptions): AgyFsm
          yield* Effect.void;
          return yield* Effect.promise(() =>
             runSerial(() => {
+               stopLogPoller();
                pendingFollowUps.length = 0;
                pendingSteerText = undefined;
                state = "cancelled";

@@ -54,35 +54,37 @@ describe("Cutover Fail-Closed Gate", () => {
       }
    });
 
-   it("fallback: fails when path is empty but tool name collides and legacy extension listed in settings without '-'", () => {
-      const res = checkCutover({
-         tools: [{ name: "task" }],
-         commands: [],
-         settingsExtensions: ["extensions/tasks/index.ts", "-extensions/background-terminals/index.ts"]
-      });
-      expect(res.ok).toBe(false);
-      if (!res.ok) {
-         expect(res.error).toContain("NAME_COLLISION_TOOLS");
-      }
-   });
-
-   it("fallback: fails when command name collides and legacy extension listed in settings without '-'", () => {
-      const res = checkCutover({
-         tools: [],
-         commands: [{ name: "/ps" }],
-         settingsExtensions: ["extensions/background-terminals/index.ts"]
-      });
-      expect(res.ok).toBe(false);
-      if (!res.ok) {
-         expect(res.error).toContain("NAME_COLLISION_COMMANDS");
-      }
-   });
-
-   it("passes when no legacy tools, commands, or paths exist", () => {
+   it("fails when force-excludes are missing even with no live collisions", () => {
       const res = checkCutover({
          tools: [{ name: "custom_tool" }],
          commands: [{ name: "/custom" }],
          settingsExtensions: []
+      });
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+         expect(res.error).toContain("Force-exclude");
+         expect(res.error).toContain("-extensions/tasks/index.ts");
+         expect(res.error).toContain("-extensions/background-terminals/index.ts");
+      }
+   });
+
+   it("fails when only one of the two force-excludes is present", () => {
+      const res = checkCutover({
+         tools: [],
+         commands: [],
+         settingsExtensions: ["-extensions/tasks/index.ts"]
+      });
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+         expect(res.error).toContain("-extensions/background-terminals/index.ts");
+      }
+   });
+
+   it("passes with force-excludes and no live collisions", () => {
+      const res = checkCutover({
+         tools: [{ name: "custom_tool" }],
+         commands: [{ name: "/custom" }],
+         settingsExtensions: ["-extensions/tasks/index.ts", "-extensions/background-terminals/index.ts"]
       });
       expect(res.ok).toBe(true);
    });
