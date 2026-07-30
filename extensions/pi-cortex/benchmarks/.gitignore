@@ -1,0 +1,8 @@
+# Cloned repositories for benchmarking
+fixtures/
+
+# Saved results (persistent locally, but not tracked in git)
+results/
+
+# Temporary files
+*.tmp

@@ -1,0 +1,30 @@
+{
+   "repos": [
+      {
+         "name": "pi-code-embedding",
+         "path": "extensions/pi-code-embedding",
+         "desc": "Own extension source (small, quick iteration)"
+      },
+      {
+         "name": "pi-agent",
+         "path": ".",
+         "desc": "Full pi agent workspace (medium, mixed TS/Rust)"
+      },
+      {
+         "name": "solana",
+         "git_url": "https://github.com/solana-labs/solana.git",
+         "desc": "Large Rust monorepo (~3M lines)",
+         "skip": true
+      },
+      {
+         "name": "nest",
+         "git_url": "https://github.com/nestjs/nest.git",
+         "desc": "Medium TypeScript monorepo (AFT uses this)"
+      },
+      {
+         "name": "vite",
+         "git_url": "https://github.com/vitejs/vite.git",
+         "desc": "Medium TypeScript project"
+      }
+   ]
+}

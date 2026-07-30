@@ -1,0 +1,44 @@
+[package]
+name = "pi-embedder"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["directml"]
+directml = ["ort/directml"]
+
+[dependencies]
+ort = { version = "2.0.0-rc.13", default-features = false, features = [
+   "api-21",
+   "ndarray",
+   "download-binaries",
+   "directml",
+   "tls-native-vendored"
+] }
+tokenizers = "0.22"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+ureq = "2.10"
+ndarray = { version = "0.17", features = ["std"] }
+tree-sitter = "0.23"
+tree-sitter-typescript = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-python = "0.23"
+tree-sitter-rust = "0.23"
+tree-sitter-go = "0.23"
+tree-sitter-java = "0.23"
+tree-sitter-c = "0.23"
+tree-sitter-cpp = "0.23"
+rusqlite = { version = "0.32", features = ["bundled"] }
+regex = "1.10"
+
+[[bin]]
+name = "pi-embedder"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
