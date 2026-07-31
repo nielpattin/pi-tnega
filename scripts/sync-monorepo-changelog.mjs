@@ -7,9 +7,19 @@ const endMarker = "<!-- /package-changelog-summary -->";
 const rootChangelogPath = "CHANGELOG.md";
 
 function packageDirs() {
-   return readdirSync("packages", { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => join("packages", entry.name));
+   return ["packages", "extensions"].flatMap((root) =>
+      readdirSync(root, { withFileTypes: true })
+         .filter((entry) => entry.isDirectory())
+         .map((entry) => join(root, entry.name))
+         .filter((dir) => {
+            try {
+               readFileSync(join(dir, "package.json"));
+               return true;
+            } catch {
+               return false;
+            }
+         })
+   );
 }
 
 function latestSection(changelog) {

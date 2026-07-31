@@ -1,7 +1,7 @@
 # Harbor Monorepo Package Product Design & Specification
 
 > **Package Name**: `@nielpattin/pi-harbor`  
-> **Package Path**: `packages/pi-harbor`  
+> **Package Path**: `extensions/pi-harbor`  
 > **Effect Version**: `effect@4.0.0-beta.101`  
 > **Architecture**: Standalone all-in-one Effect v4 monorepo package for agent task execution, process supervision, inter-agent messaging, and director mode management.
 
@@ -659,7 +659,7 @@ Current acceptance checklist:
 
 ## 1. Identity, Scope & Hard Constraints
 
-`@nielpattin/pi-harbor` is a greenfield publishable monorepo package located in `packages/pi-harbor/` (following the same local package pattern as `packages/pi-permission-system` and `packages/pi-station`). It provides complete infrastructure for subagent spawning, background OS process supervision, shell execution, inter-agent message routing, agent definition management, vibe/director workflows, and side-task execution.
+`@nielpattin/pi-harbor` is a greenfield publishable monorepo package located in `extensions/pi-harbor/` (following the same local package pattern as `extensions/pi-permission-system` and `extensions/pi-station`). It provides complete infrastructure for subagent spawning, background OS process supervision, shell execution, inter-agent message routing, agent definition management, vibe/director workflows, and side-task execution.
 
 ### 1.1 Local Package Registration Pattern & Manifest Requirements
 
@@ -731,15 +731,15 @@ Harbor refuses to register parent tools/commands until the legacy extensions are
 {
     "packages": [
         {
-            "source": "./packages/pi-permission-system",
-            "extensions": ["+src/index.ts"]
+            "source": "./extensions/pi-permission-system",
+            "extensions": ["+index.ts"]
         },
         {
-            "source": "./packages/pi-station",
-            "extensions": ["+dist/index.js"]
+            "source": "./extensions/pi-station",
+            "extensions": ["+index.ts"]
         },
         {
-            "source": "./packages/pi-harbor",
+            "source": "./extensions/pi-harbor",
             "extensions": ["+index.ts"]
         }
     ],
@@ -747,7 +747,7 @@ Harbor refuses to register parent tools/commands until the legacy extensions are
 }
 ```
 
-The agent loader loads `@nielpattin/pi-harbor` directly from `packages/pi-harbor` on startup.
+The agent loader loads `@nielpattin/pi-harbor` directly from `extensions/pi-harbor` on startup.
 
 ### 1.2 Greenfield Framing & Reference Codebases
 
@@ -759,7 +759,7 @@ This package is a **greenfield product design**, not a migration guide. Existing
 
 ### 1.3 Hard Architectural Constraints
 
-1. **Zero External Extension Imports**: `packages/pi-harbor` imports zero code from `extensions/shared/**` and zero code from any other `extensions/` directory. All utilities (`shell-env.ts`, `output-buffer.ts`, `kill-tree.ts`, `ready-poller.ts`, `stream-close.ts`, `acp-decoder.ts`) exist as local module copies under `packages/pi-harbor/src/utils/`.
+1. **Zero External Extension Imports**: `extensions/pi-harbor` imports zero code from `extensions/shared/**` and zero code from any other `extensions/` directory. All utilities (`shell-env.ts`, `output-buffer.ts`, `kill-tree.ts`, `ready-poller.ts`, `stream-close.ts`, `acp-decoder.ts`) exist as local module copies under `extensions/pi-harbor/src/utils/`.
 2. **Monorepo Dependencies**:
     - Depends on `effect@4.0.0-beta.101` (exact pin).
     - Depends on `typebox@1.3.8` (root monorepo resolved version after `pnpm up --latest`) for Pi tool parameter JSON Schema surfaces.
@@ -770,7 +770,7 @@ This package is a **greenfield product design**, not a migration guide. Existing
 4. **Pi API & Session Contracts**:
     - `createAgentSession` and `DefaultResourceLoader` are imported directly from `@earendil-works/pi-coding-agent`.
     - `DefaultResourceLoader` takes `{ cwd, agentDir, settingsManager, systemPrompt: <agent body + worker guidance> }`. Call `await loader.reload()` before passing as `resourceLoader`. The worker guidance block is appended to the agent body so every child session receives the current Harbor completion and persistence contracts. `CreateAgentSessionOptions` does NOT include `customPrompt` or `modelRegistry`.
-    - Model resolution uses `resolvePiModel(registry, model, inheritedModel)` in `packages/pi-harbor/src/backends/pi-model.ts`. Reasoning effort maps to Pi `thinkingLevel`. Pi SDK 0.82 `ThinkingLevel` may include `"max"`. Harbor maps parent `reasoning_effort: "max"` to `thinkingLevel: "max"` when the SDK type accepts it. If the selected model clamp rejects `"max"`, Harbor falls back to `"xhigh"`. Agy `--effort` maps `"off"`, `"minimal"`, `"low"` → `"low"`; `"medium"` → `"medium"`; `"high"`, `"xhigh"`, `"max"` → `"high"`.
+    - Model resolution uses `resolvePiModel(registry, model, inheritedModel)` in `extensions/pi-harbor/src/backends/pi-model.ts`. Reasoning effort maps to Pi `thinkingLevel`. Pi SDK 0.82 `ThinkingLevel` may include `"max"`. Harbor maps parent `reasoning_effort: "max"` to `thinkingLevel: "max"` when the SDK type accepts it. If the selected model clamp rejects `"max"`, Harbor falls back to `"xhigh"`. Agy `--effort` maps `"off"`, `"minimal"`, `"low"` → `"low"`; `"medium"` → `"medium"`; `"high"`, `"xhigh"`, `"max"` → `"high"`.
     - Child sessions are created via `const { session: childSession } = await createAgentSession({ cwd, agentDir, sessionManager, settingsManager, resourceLoader: loader, model, thinkingLevel, customTools: [submitTool, hubWorkerTools], excludeTools: ["task", "bash"] })`. If parent can provide `modelRuntime`, pass it; if omitted, `createAgentSession` creates a fresh runtime.
     - Child sessions execute `await childSession.bindExtensions({ mode: "print" })`.
     - Child tool surface: requested profile tools are intersected with `childSession.getAllTools().map(t => t.name)` and set via `childSession.setActiveToolsByName(allowedTools)` on the `AgentSession` instance. Parent ExtensionAPI methods remain `pi.setActiveTools(string[])` and `pi.getActiveTools(): string[]`.
@@ -808,7 +808,7 @@ This package is a **greenfield product design**, not a migration guide. Existing
 ### 1.4 Package Source Directory Layout
 
 ```text
-packages/pi-harbor/
+extensions/pi-harbor/
 ├── index.ts                     # Package entry point & pi extension registration export
 ├── package.json                 # Monorepo manifest (@nielpattin/pi-harbor with pi.extensions)
 ├── tsconfig.json                # TypeScript build configuration
@@ -867,7 +867,7 @@ packages/pi-harbor/
 
 | Surface Category                       | Identification                                                           | Operational Role & Access Scope                                                                                       |
 | -------------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| **Package Location**                   | `packages/pi-harbor`                                                     | Publishable monorepo package tree.                                                                                    |
+| **Package Location**                   | `extensions/pi-harbor`                                                   | Publishable monorepo package tree.                                                                                    |
 | **Parent Surface Tools (Normal Mode)** | `task`, `hub`                                                            | Registered on parent session for subagent spawning, job control, process supervision, shell execution, and messaging. |
 | **Parent Surface Tools (Vibe Mode)**   | `vibe`, `read`, info tools                                               | Active when Vibe Director mode is ON. Hard `tool_call` block rejects normal editing/execution tools.                  |
 | **Worker Surface Tool**                | `submit`                                                                 | Injected into `pi` child sessions via `createAgentSession` `customTools` for structured result returns.               |
@@ -1180,7 +1180,7 @@ stateDiagram-v2
 
 1. **Slot Ownership**: Capacity is `JobRegistry` status, not a long-lived `reservedAgentSlots` hold. `reservedAgentSlots` is only a spawn-window guard: increment before spawn, set status `"running"`, then decrement in `Effect.ensuring` of that uninterruptible window. Between chain/resume steps the job stays `status: "running"`, so it continues to count toward `MAX_RUNNING_AGENTS` via `runningCount` with no second reservation. Chain/resume spawns do not re-increment `reservedAgentSlots`. The capacity slot is released only when the job leaves `running` (`settled` Completed/Failed or `cancelled`).
 2. **Initial Spawn**: Spawn `agy --print <prompt>` with full argv (long form `--print` only). Capture `conversationId` from the `--log-file` private output line (`Print mode: conversation=`) / from the new `.db` stem under `$AGY_CONVERSATIONS_DIR` / `$ANTIGRAVITY_CLI_HOME/conversations`, defaulting to `~/.gemini/antigravity-cli/conversations`. Transition → `running` only after the process has started and the conversation id is recovered / accepted as pending. If initial spawn fails, settle the job `Failed`, clear all queues, release the agent slot, and close the job Scope.
-3. **DB Poller Lifecycle**: Start the poller only after `conversationId` is known. Each agy process spawn creates a child Scope under the job Scope. One DB-poll fiber is `forkScoped` inside that child Scope when the process is `running` **and** `conversationId` is set. If the process is running but the id is not yet known, do not open a poller; start it when the id is recovered. The poller stops when the child Scope closes. A new child Scope and new poller are created for every `--conversation` chain/resume spawn. Polling interval is 200 ms. The poller reads `$AGY_CONVERSATIONS_DIR/<id>.db`, decodes protobuf step records with local `packages/pi-harbor/src/utils/acp-decoder.ts`, and maps `in_progress` → `ToolStart`, completed → `ToolEnd`, stdout deltas → `AssistantDelta`.
+3. **DB Poller Lifecycle**: Start the poller only after `conversationId` is known. Each agy process spawn creates a child Scope under the job Scope. One DB-poll fiber is `forkScoped` inside that child Scope when the process is `running` **and** `conversationId` is set. If the process is running but the id is not yet known, do not open a poller; start it when the id is recovered. The poller stops when the child Scope closes. A new child Scope and new poller are created for every `--conversation` chain/resume spawn. Polling interval is 200 ms. The poller reads `$AGY_CONVERSATIONS_DIR/<id>.db`, decodes protobuf step records with local `extensions/pi-harbor/src/utils/acp-decoder.ts`, and maps `in_progress` → `ToolStart`, completed → `ToolEnd`, stdout deltas → `AssistantDelta`.
 4. **Natural Exit 0 + Empty Queue**: `pendingFollowUps` is empty. Settle job `Completed` with final stdout text. Transition → `settled`.
 5. **Natural Exit 0 + Non-Empty Queue**: `pendingFollowUps` has items. Transition → `chainingFollowUp`. Shift the next prompt from FIFO `pendingFollowUps`. Do NOT emit parent `Completed` settlement. Spawn:
    `agy --conversation <id> --model <model> --effort <effort> --mode accept-edits --dangerously-skip-permissions --add-dir <cwd> --print-timeout 15m --print <nextPrompt>`
@@ -2210,7 +2210,7 @@ export class MailBus extends Context.Service<MailBus, MailBusShape>()("harbor/Ma
 #### Runtime boundary
 
 ```typescript
-// packages/pi-harbor/src/runtime.ts
+// extensions/pi-harbor/src/runtime.ts
 import { Cause, Exit, ManagedRuntime, type Effect } from "effect";
 
 export function makeHarborRuntime() {
@@ -2462,8 +2462,8 @@ Evaluate code changes and pull request diffs.
 
 ### 12.0 TDD & Tooling Contract
 
-- Runner: **vitest** via monorepo root. Run `pnpm test`. Run `pnpm --dir packages/pi-harbor test` once package scripts exist.
-- Test files: `packages/pi-harbor/tests/**/*.test.ts` (colocated under `tests/`).
+- Runner: **vitest** via monorepo root. Run `pnpm test`. Run `pnpm --dir extensions/pi-harbor test` once package scripts exist.
+- Test files: `extensions/pi-harbor/tests/**/*.test.ts` (colocated under `tests/`).
 - Imports: `import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"`.
 - Effect tests: prefer `ManagedRuntime` + real service layers with injected fakes at seams; use `@effect/vitest` `it.effect` when available, otherwise vitest + `runtime.runPromise`.
 - Forbidden: `node:test`, `node:assert` as the primary harness for harbor.
@@ -2683,7 +2683,7 @@ Each bullet below represents one testable behavior. Implementers write a dedicat
 ### Phase 1a — Core Infrastructure & One-Shot Print Agy (No UI, No Agy FSM)
 
 - [x] Write failing vitest tests first for every behavior in this phase before implementing any production code.
-- [x] Scaffold package: `packages/pi-harbor/package.json` with `"pi": { "extensions": ["./index.ts"] }`, `tsconfig.json`, vitest config.
+- [x] Scaffold package: `extensions/pi-harbor/package.json` with `"pi": { "extensions": ["./index.ts"] }`, `tsconfig.json`, vitest config.
 - [x] FAILING load/smoke test first confirming package entry loads clean (§12.2 A).
 - [x] Implement `domain.ts` and tagged errors with vitest suite (`tests/domain.test.ts`).
 - [x] Implement `utils/shell-env.ts`, `output-buffer.ts`, `kill-tree.ts`, `ready-poller.ts`, `stream-close.ts` with vitest suites (§12.2 B, G).
@@ -2754,7 +2754,7 @@ Definition of done for this package:
 9. [x] Vitest proves tools/commands are registered with execute/handler functions (not description-only stubs).
 10. [x] `HarborJobPersistence`, `HarborJobRecovery`, and `ParentSessionGate` are wired into `HarborLive` and exercised in tests.
 11. [x] `session_start` triggers `activateParentSession` when the parent session file is available; switching parents isolates registries and manifests.
-12. [x] `pnpm --dir packages/pi-harbor check` green with all product tests passing.
+12. [x] `pnpm --dir extensions/pi-harbor check` green with all product tests passing.
 
 - [x] Rewrite `src/extension.ts` + `index.ts` as real ExtensionAPI product shell (`tests/extension.test.ts` updated).
 - [x] Wire `task`, `hub`, `submit` tools with TypeBox params + execute → `runTool`.
@@ -2779,7 +2779,7 @@ Definition of done for this package:
 - [x] Harbor tests use vitest exclusively (no `node:test`).
 - [x] TDD is required: failing vitest tests precede every production code change.
 - [x] §12 behavior catalog covers package registration, domain, capacity limits, reservation, pi backend, agy FSM races, processes, submit pipeline, hub wait, vibe state, cutover, and integration.
-- [x] Harbor is designed as a standalone publishable monorepo package under `packages/pi-harbor/` with package name `@nielpattin/pi-harbor`.
+- [x] Harbor is designed as a standalone publishable monorepo package under `extensions/pi-harbor/` with package name `@nielpattin/pi-harbor`.
 - [x] Package manifest declares `"pi": { "extensions": ["./index.ts"] }`. User `settings.json` uses `+index.ts` or omits filter arrays. Zero `-index.ts` paths used for loading.
 - [x] Legacy extensions (`extensions/tasks` and `extensions/background-terminals`) are explicitly disabled in `settings.json` when Harbor is enabled to prevent command/tool collisions (`task`, `/tasks`, `/ps`). Cutover logs error and fails closed if legacy extensions remain registered without `-` force-exclude.
 - [x] Zero external extension imports from `extensions/shared/**` and zero from other `extensions/` directories.

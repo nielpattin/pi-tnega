@@ -3,7 +3,14 @@ import { configDefaults, defineConfig } from "vitest/config";
 export default defineConfig({
    test: {
       environment: "node",
-      include: ["packages/pi-*/**/*.test.ts", "tests/**/*.test.ts"],
+      include: [
+         "packages/pi-*/**/*.test.ts",
+         "extensions/pi-harbor/**/*.test.ts",
+         "extensions/pi-permission-system/**/*.test.ts",
+         "extensions/pi-reference/**/*.test.ts",
+         "extensions/pi-station/**/*.test.ts",
+         "tests/**/*.test.ts"
+      ],
       exclude: [
          ...configDefaults.exclude,
          "extensions/workflows/**",

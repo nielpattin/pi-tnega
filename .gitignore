@@ -191,3 +191,4 @@ agents/
 .pi/cortex
 **/target/
 *-sync.json
+pi-acks.json

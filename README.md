@@ -4,15 +4,15 @@
 
 Independent [Pi coding agent](https://github.com/earendil-works/pi-coding-agent) extensions focused on developer workflow. This repo keeps small Pi packages in one workspace while preserving independent package versions, release notes, and npm publishing.
 
-Most packages publish raw TypeScript source that Pi loads through jiti, so they are not built to `dist/`. The exception is `pi-station` (esbuild-bundled entrypoint), which builds to `dist/` via `pnpm --dir packages/pi-station build`.
+All extensions publish raw TypeScript source that Pi loads through jiti, so they are not built to `dist/`.
 
 ## Packages
 
-| Package                                                 | Role                                                                                                                                                                   | Install                           | npm                                                         | Version |
-| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- | ----------------------------------------------------------- | ------- |
-| [pi-permission-system](./packages/pi-permission-system) | Central permission gates for tools, bash, MCP, skills, file paths, and subagents. Edit permission prompt is status-only; the diff lives in the chat via the edit tool. | `<NONE>`                          |                                                             | 0.2.2   |
-| [pi-reference](./packages/pi-reference)                 | Project references: declare local dirs and Git repos as agent-accessible with @alias autocomplete.                                                                     | `<NONE>`                          |                                                             | 0.2.1   |
-| [pi-station](./packages/pi-station)                     | Station bar, fixed editor layout, bash mode, stash, prompt history, undo/redo, hashline read/edit with in-chat diff preview, and configurable segments for the Pi TUI. | `pnpm add @nielpattin/pi-station` | [npm](https://www.npmjs.com/package/@nielpattin/pi-station) | 0.9.0   |
+| Package                                                   | Role                                                                                                                                                                   | Install                           | npm                                                         | Version |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- | ----------------------------------------------------------- | ------- |
+| [pi-permission-system](./extensions/pi-permission-system) | Central permission gates for tools, bash, MCP, skills, file paths, and subagents. Edit permission prompt is status-only; the diff lives in the chat via the edit tool. | `<NONE>`                          |                                                             | 0.2.2   |
+| [pi-reference](./extensions/pi-reference)                 | Project references: declare local dirs and Git repos as agent-accessible with @alias autocomplete.                                                                     | `<NONE>`                          |                                                             | 0.2.1   |
+| [pi-station](./extensions/pi-station)                     | Station bar, fixed editor layout, bash mode, stash, prompt history, undo/redo, hashline read/edit with in-chat diff preview, and configurable segments for the Pi TUI. | `pnpm add @nielpattin/pi-station` | [npm](https://www.npmjs.com/package/@nielpattin/pi-station) | 0.9.0   |
 
 ## Prerequisites
 
@@ -49,10 +49,10 @@ agent-root/
 ├── .husky/
 │   ├── pre-commit                # pnpm lint-staged
 │   └── pre-push                  # pnpm test + changeset gate
-├── packages/
-│   ├── pi-permission-system      # permission system package
-│   ├── pi-reference              # project references package
-│   └── pi-station                # published npm package
+├── extensions/
+│   ├── pi-permission-system      # permission system extension
+│   ├── pi-reference              # project references extension
+│   └── pi-station                # published npm extension
 ├── scripts/                      # release & changelog scripts
 ├── publish.sh                    # gh workflow dispatch helper
 ├── CHANGELOG.md                  # generated package changelog summary

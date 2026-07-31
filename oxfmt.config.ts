@@ -19,7 +19,7 @@ export default defineConfig({
       "workflows/**",
       "**/rust-embedder/models/**",
       "**/rust-embedder/target/**",
-      ".basezero-sync.json"
+      "*.json"
    ],
    trailingComma: "none",
    printWidth: 120,

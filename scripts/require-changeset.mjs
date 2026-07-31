@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 
 const baseRef = process.argv[2] ?? "origin/main";
 
@@ -27,7 +28,9 @@ function changedFiles(ref) {
 
 const files = changedFiles(baseRef);
 const packageChanges = files.filter((file) => {
-   if (!file.startsWith("packages/")) return false;
+   const [root, packageName] = file.split("/");
+   if (root !== "packages" && root !== "extensions") return false;
+   if (!packageName || !existsSync(`${root}/${packageName}/package.json`)) return false;
    if (file.endsWith("/CHANGELOG.md")) return false;
    if (file.endsWith("/README.md")) return false;
    return true;

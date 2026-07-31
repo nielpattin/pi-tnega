@@ -1,8 +1,6 @@
 {
    "compilerOptions": {
-      "composite": true,
-      "declaration": true,
-      "emitDeclarationOnly": true,
+      "noEmit": true,
       "lib": ["ESNext", "es2023"],
       "types": ["node"],
       "target": "ESNext",

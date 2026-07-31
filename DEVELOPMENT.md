@@ -9,10 +9,10 @@ This document provides the full contributor workflow for developing, testing, ve
 - **Root Directory**: `C:/Users/niel/.pi/agent`
 - **Node.js**: `>=24`
 - **Package Manager**: `pnpm 11` (workspace defined in `pnpm-workspace.yaml`)
-- **Package Location**: `packages/*`
-    - [`pi-permission-system`](./packages/pi-permission-system): Central permission gates for tools, bash, MCP, skills, file paths, and subagents.
-    - [`pi-reference`](./packages/pi-reference): Project reference declaration & resolution with `@alias` autocomplete.
-    - [`pi-station`](./packages/pi-station): Status bar, layout manager, bash mode, hashline editor with in-chat diff preview.
+- **Extension Location**: `extensions/*`
+    - [`pi-permission-system`](./extensions/pi-permission-system): Central permission gates for tools, bash, MCP, skills, file paths, and subagents.
+    - [`pi-reference`](./extensions/pi-reference): Project reference declaration & resolution with `@alias` autocomplete.
+    - [`pi-station`](./extensions/pi-station): Status bar, layout manager, bash mode, hashline editor with in-chat diff preview.
 - **Workflow & Automation Tools**:
     - `.changeset/`: Changesets configuration and pending change notes.
     - `.github/workflows/publish.yml`: GitHub Actions manual tag-based package publish workflow.
@@ -35,10 +35,10 @@ agent-root/
 │   └── pre-push                  # pnpm test + changeset gate
 ├── .nvmrc                        # Node 24
 ├── openspec/                     # change proposals and specs
-├── packages/
-│   ├── pi-permission-system      # permission system package
-│   ├── pi-reference              # project references package
-│   └── pi-station                # published npm package
+├── extensions/
+│   ├── pi-permission-system      # permission system extension
+│   ├── pi-reference              # project references extension
+│   └── pi-station                # published npm extension
 ├── scripts/
 │   ├── release.mjs               # legacy per-package release orchestrator
 │   ├── require-changeset.mjs     # local changeset gate
@@ -48,7 +48,7 @@ agent-root/
 ├── oxlint.config.ts              # oxlint config
 ├── oxfmt.config.ts               # oxfmt config
 ├── package.json                  # workspaces, shared devDeps, scripts
-├── pnpm-workspace.yaml           # packages/* workspace definition
+├── pnpm-workspace.yaml           # packages/* and extensions/* workspace definitions
 ├── tsconfig.json                 # shared TS config
 └── vitest.config.ts              # tests and coverage
 ```
@@ -74,7 +74,7 @@ Run checks and tests from root:
 | `pnpm check`     | Full verification: formatting check, linting, typechecking, and unit tests |
 | `pnpm test`      | Run Vitest unit test suite (`vitest run`)                                  |
 | `pnpm coverage`  | Run test coverage with Vitest                                              |
-| `pnpm typecheck` | Run TypeScript type check (`tsc --noEmit`)                                 |
+| `pnpm typecheck` | Run TypeScript 7 type check (`tsc --noEmit`)                               |
 | `pnpm lint`      | Run `oxlint` across all files                                              |
 | `pnpm lint:fix`  | Auto-fix linting issues                                                    |
 | `pnpm fmt`       | Format files using `oxfmt`                                                 |
@@ -85,9 +85,9 @@ Run checks and tests from root:
 Run scripts for individual packages from the root using `pnpm --dir`:
 
 ```bash
-pnpm --dir packages/pi-permission-system test
-pnpm --dir packages/pi-permission-system check
-pnpm --dir packages/pi-station build
+pnpm --dir extensions/pi-permission-system test
+pnpm --dir extensions/pi-permission-system check
+pnpm --dir extensions/pi-station test
 ```
 
 ---
@@ -113,20 +113,18 @@ pnpm --dir packages/pi-station build
         "files": ["*.ts", "README.md", "CHANGELOG.md"]
     }
     ```
-3. **Add `tsconfig.json`**: Extend the monorepo root TypeScript configuration (`../../tsconfig.json`).
-4. **Workspace Link**: `pnpm-workspace.yaml` automatically detects any folder inside `packages/*`. Run `pnpm install` to update workspace links.
+3. **Add `tsconfig.json`**: Extend the monorepo root TypeScript configuration (`../../tsconfig.base.json`).
+4. **Workspace Link**: `pnpm-workspace.yaml` automatically detects folders inside `packages/*` and `extensions/*`. Run `pnpm install` to update workspace links.
 5. **Add Initial Changeset**: Run `pnpm changeset` to record the initial package intent.
 
 ---
 
 ## 5. Editing an Existing Package
 
-- **Raw TypeScript Packages** (`pi-permission-system`, `pi-reference`):
+- **Raw TypeScript Extensions** (`pi-permission-system`, `pi-reference`, `pi-station`, `pi-harbor`, and others):
     - Published directly as raw TypeScript source files (`.ts`).
     - Loaded by Pi harness at runtime via `jiti`. No `dist/` build step is required.
-- **Bundled Packages** (`pi-station`):
-    - Requires a build step (`pnpm --dir packages/pi-station build`) to generate entrypoints into `dist/`.
-- Ensure changes pass `pnpm check` and add appropriate tests in `packages/<name>/test/` or root `tests/`.
+- Ensure changes pass `pnpm check` and add appropriate tests in `extensions/<name>/test/` or root `tests/`.
 
 ---
 
@@ -136,7 +134,7 @@ Packages use independent versioning managed by Changesets.
 
 ### Step 6.1: Record a Changeset
 
-When modifying any file inside `packages/`:
+When modifying any file inside `extensions/`:
 
 ```bash
 pnpm changeset
@@ -168,7 +166,7 @@ pnpm version-packages
 
 What `pnpm version-packages` does:
 
-1. `changeset version`: Consumes `.changeset/*.md` files, bumps versions in `packages/*/package.json`, and appends entries to `packages/*/CHANGELOG.md`.
+1. `changeset version`: Consumes `.changeset/*.md` files, bumps versions in `extensions/*/package.json`, and appends entries to `extensions/*/CHANGELOG.md`.
 2. `pnpm changelog:sync`: Executes `scripts/sync-monorepo-changelog.mjs`, which extracts the latest version entry from each package changelog and syncs them into the root `CHANGELOG.md` between `<!-- package-changelog-summary -->` comments.
 
 ---
@@ -178,13 +176,13 @@ What `pnpm version-packages` does:
 Before publishing, verify the contents of the generated tarball:
 
 ```bash
-pnpm --dir packages/pi-permission-system pack --dry-run
-pnpm --dir packages/pi-reference pack --dry-run
-pnpm --dir packages/pi-station pack --dry-run
+pnpm --dir extensions/pi-permission-system pack --dry-run
+pnpm --dir extensions/pi-reference pack --dry-run
+pnpm --dir extensions/pi-station pack --dry-run
 ```
 
 - **Raw TS packages**: Confirm output contains `.ts` source files, `package.json`, and `README.md` (no `dist/`).
-- **Bundled packages**: Confirm output includes compiled `dist/` artifacts.
+- **Bundled packages**: Confirm output includes the package's documented runtime artifacts.
 
 ---
 
@@ -209,9 +207,9 @@ Use the helper script `publish.sh` to trigger GitHub Actions:
 
 1. Checks out the exact tag commit: `git checkout --detach "<tag>"`.
 2. Validates package version matches tag: `@nielpattin/<pkg>@<version>`.
-3. Runs build script if defined in package `package.json` (`pnpm --dir packages/<pkg> run build`).
+3. Runs build script if defined in package `package.json` (`pnpm --dir extensions/<pkg> run build`).
 4. Performs `pack --dry-run`.
-5. Publishes package to npm: `pnpm --dir packages/<pkg> publish --access public --no-git-checks`.
+5. Publishes package to npm: `pnpm --dir extensions/<pkg> publish --access public --no-git-checks`.
 
 ---
 

@@ -8,7 +8,7 @@
  *   node scripts/release.mjs <package> <x.y.z>
  *
  * Before running:
- *   1. Draft [Unreleased] entries in packages/<pkg>/CHANGELOG.md
+ *   1. Draft [Unreleased] entries in extensions/<pkg>/CHANGELOG.md
  *   2. Commit or stash any uncommitted changes
  */
 
@@ -17,7 +17,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "..");
-const PACKAGES_DIR = join(ROOT, "packages");
+const WORKSPACE_DIRS = [join(ROOT, "extensions"), join(ROOT, "packages")];
 const PKG = process.argv[2];
 const TARGET = process.argv[3];
 const BUMP_TYPES = new Set(["major", "minor", "patch"]);
@@ -29,14 +29,13 @@ if (!PKG || !TARGET || (!BUMP_TYPES.has(TARGET) && !SEMVER_RE.test(TARGET))) {
    process.exit(1);
 }
 
-const PKG_DIR = join(PACKAGES_DIR, PKG);
-const PKG_JSON_PATH = join(PKG_DIR, "package.json");
-const CHANGELOG_PATH = join(PKG_DIR, "CHANGELOG.md");
-
-if (!existsSync(PKG_JSON_PATH)) {
+const PKG_DIR = WORKSPACE_DIRS.map((root) => join(root, PKG)).find((dir) => existsSync(join(dir, "package.json")));
+if (!PKG_DIR) {
    console.error(`Error: package not found: ${PKG}`);
    process.exit(1);
 }
+const PKG_JSON_PATH = join(PKG_DIR, "package.json");
+const CHANGELOG_PATH = join(PKG_DIR, "CHANGELOG.md");
 
 function shouldUseShell(command) {
    return process.platform === "win32" && command === "pnpm";
@@ -105,19 +104,19 @@ function stageChangedFiles() {
 
 function validateChangelog() {
    if (!existsSync(CHANGELOG_PATH)) {
-      console.error(`Error: missing changelog: packages/${PKG}/CHANGELOG.md`);
+      console.error(`Error: missing changelog: ${CHANGELOG_PATH}`);
       process.exit(1);
    }
 
    const content = readFileSync(CHANGELOG_PATH, "utf8");
    const unreleasedMatch = content.match(/^## \[Unreleased\]\s*$(?<body>[\s\S]*?)(?=^## \[|$(?![\s\S]))/m);
    if (!unreleasedMatch?.groups) {
-      console.error(`Error: packages/${PKG}/CHANGELOG.md must contain ## [Unreleased]`);
+      console.error(`Error: ${CHANGELOG_PATH} must contain ## [Unreleased]`);
       process.exit(1);
    }
 
    if (!/^\s*-\s+\S/m.test(unreleasedMatch.groups.body)) {
-      console.warn(`Warning: packages/${PKG}/CHANGELOG.md [Unreleased] has no bullet entries.`);
+      console.warn(`Warning: ${CHANGELOG_PATH} [Unreleased] has no bullet entries.`);
    }
 }
 
@@ -140,7 +139,7 @@ console.log("Running pre-release gates...");
 run("pnpm", ["check"]);
 run("pnpm", ["test"]);
 run("pnpm", ["coverage"]);
-run("pnpm", ["--dir", join("packages", PKG), "pack", "--dry-run"]);
+run("pnpm", ["--dir", PKG_DIR, "pack", "--dry-run"]);
 console.log("  Gates pass\n");
 
 const OLD_VERSION = getVersion();

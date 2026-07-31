@@ -9,20 +9,20 @@
 ## Repository layout and commands
 
 - This repository is a single pnpm monorepo.
-- Packages live under `packages/<package-name>`.
+- Packages live under `packages/<package-name>`; extensions live under `extensions/<extension-name>`.
 - Extensions live under `extensions/`.
 - Run `pnpm install` from the repository root to install dependencies for all packages and extensions.
 - Run package-specific commands from the repository root with:
 
     ```text
-    pnpm --dir packages/<package-name> <command>
+    pnpm --dir <workspace-root>/<package-name> <command>
     ```
 
     Examples:
 
     ```text
-    pnpm --dir packages/pi-harbor check
-    pnpm --dir packages/pi-harbor test
+    pnpm --dir extensions/pi-harbor check
+    pnpm --dir extensions/pi-harbor test
     ```
 
 ## Effect code

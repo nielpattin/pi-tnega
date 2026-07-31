@@ -17,7 +17,7 @@ Effect is the **async runtime core** for process lifecycle, fiber orchestration,
 | `extensions/background-terminals` | Process supervision, `FiberSet` cleanup, `Deferred` settled signal, `Effect.callback` for child close, tree kill + `Scope` finalizers              |
 | `extensions/copy-all`             | `Effect.callback` for clipboard process, `Data.TaggedError`                                                                                        |
 | `extensions/ask-user`             | `Effect.tryPromise` + `runPromiseExit` for TUI prompts                                                                                             |
-| `packages/pi-harbor` (planned)    | Unified `HarborLive` layer: jobs, processes, mail, vibe; same runtime boundary pattern                                                             |
+| `extensions/pi-harbor` (planned)  | Unified `HarborLive` layer: jobs, processes, mail, vibe; same runtime boundary pattern                                                             |
 
 ### When NOT to Use Effect
 
@@ -303,7 +303,7 @@ Do not invent `isRecord` / `isString` helpers. Use `Predicate` from `effect`.
 
 ## 6. Harbor-Oriented Checklist
 
-When implementing `packages/pi-harbor`, every service must:
+When implementing `extensions/pi-harbor`, every service must:
 
 1. Use `Context.Service<Name, Shape>()("harbor/Name")` with `static layer`.
 2. Implement methods with `Effect.fn("Name.method")`.
@@ -323,6 +323,6 @@ pnpm --filter background-terminals check
 pnpm --filter copy-all check
 pnpm --filter ask-user check
 # after harbor exists:
-pnpm --dir packages/pi-harbor check
-pnpm --dir packages/pi-harbor test
+pnpm --dir extensions/pi-harbor check
+pnpm --dir extensions/pi-harbor test
 ```
