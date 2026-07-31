@@ -51,6 +51,14 @@ let buf = "";
 let ready = false;
 let startingPromise: Promise<void> | null = null;
 
+// Watcher events arrive as unsolicited JSON lines on stdout (no `id`).
+// Set this callback to forward them to the Pi chat UI.
+let watcherCallback: ((event: Record<string, unknown>) => void) | null = null;
+
+export function setWatcherCallback(cb: ((event: Record<string, unknown>) => void) | null) {
+   watcherCallback = cb;
+}
+
 export function rustSend(msg: Record<string, unknown>, timeout = 10000, signal?: AbortSignal): Promise<unknown> {
    return new Promise((resolve, reject) => {
       if (!child?.stdin?.writable || !ready) {
@@ -188,6 +196,9 @@ function doStartSidecar(model: string, dbPath: string): Promise<void> {
          // or diagnostic dump would make post-ready crashes look like startup
          // failures and spam the log on every warm restart.
          if (text.includes("[embedder] ready")) return;
+         // Skip ONNX runtime warnings — verbose node-assignment diagnostics
+         // that fire on every model load. They're harmless and drown real errors.
+         if (text.includes("onnxruntime")) return;
          stderrBuf += text;
          // Append to pi-cortex.log. Logging failures (disk full, EACCES,
          // file locked) must NEVER kill the sidecar — writes are best-effort.
@@ -226,6 +237,10 @@ function doStartSidecar(model: string, dbPath: string): Promise<void> {
                   } else {
                      p.resolve(parsed);
                   }
+               }
+               // Unsolicited watcher events have no `id` field.
+               if (parsed.watcher_event && !parsed.id && watcherCallback) {
+                  watcherCallback(parsed.watcher_event as Record<string, unknown>);
                }
             } catch {
                // partial parse — keep buffering
@@ -310,7 +325,8 @@ export async function rustSearch(
    topK: number,
    keywordWeight: number,
    pathFilter?: string,
-   rerank?: boolean
+   rerank?: boolean,
+   signal?: AbortSignal
 ): Promise<SearchResult[]> {
    const r = await rustSend(
       {
@@ -323,7 +339,8 @@ export async function rustSearch(
             rerank: rerank ?? false
          }
       },
-      15000
+      15000,
+      signal
    );
    return (r as any).results;
 }
@@ -337,13 +354,22 @@ export async function rustStatus(): Promise<StatusResult> {
    return rustSend({ status: {} }, 5000) as any;
 }
 
-export async function rustSymbolSearch(symbol: string, pathFilter?: string): Promise<SymbolResult[]> {
-   const r = await rustSend({ symbol_search: { symbol, path_filter: pathFilter ?? null } }, 15000);
+export async function rustSymbolSearch(
+   symbol: string,
+   pathFilter?: string,
+   signal?: AbortSignal
+): Promise<SymbolResult[]> {
+   const r = await rustSend({ symbol_search: { pattern: symbol, path_filter: pathFilter ?? null } }, 15000, signal);
    return (r as any).results ?? [];
 }
 
-export async function rustCallGraph(symbol: string, direction: string, filePath?: string): Promise<CallGraphResult[]> {
-   const r = await rustSend({ call_graph: { symbol, direction, path: filePath ?? null } }, 15000);
+export async function rustCallGraph(
+   symbol: string,
+   direction: string,
+   filePath?: string,
+   signal?: AbortSignal
+): Promise<CallGraphResult[]> {
+   const r = await rustSend({ call_graph: { symbol, direction, path: filePath ?? null } }, 15000, signal);
    return (r as any).results ?? [];
 }
 
@@ -361,9 +387,10 @@ export async function rustTripleQuery(
    subject: string,
    predicate: string,
    object: string,
-   limit = 100
+   limit = 100,
+   signal?: AbortSignal
 ): Promise<Array<{ subject: string; predicate: string; object: string; subject_type: string; object_type: string }>> {
-   const r = await rustSend({ triple_query: { subject, predicate, object, limit } }, 15000);
+   const r = await rustSend({ triple_query: { subject, predicate, object, limit } }, 15000, signal);
    return (r as any).results ?? [];
 }
 
@@ -372,9 +399,10 @@ export async function rustMemoryStore(
    embedding: number[],
    source = "",
    importance = 0.5,
-   scope = "session"
+   scope = "session",
+   signal?: AbortSignal
 ): Promise<number> {
-   const r = await rustSend({ memory_store: { content, embedding, source, importance, scope } }, 15000);
+   const r = await rustSend({ memory_store: { content, embedding, source, importance, scope } }, 15000, signal);
    return (r as any).memory_id ?? 0;
 }
 
@@ -387,21 +415,43 @@ export interface MemoryRecallHit {
    scope: string;
 }
 
-export async function rustMemoryRecall(embedding: number[], topK = 5, scope = ""): Promise<MemoryRecallHit[]> {
-   const r = await rustSend({ memory_recall: { embedding, top_k: topK, scope } }, 15000);
+export async function rustMemoryRecall(
+   embedding: number[],
+   topK = 5,
+   scope = "",
+   signal?: AbortSignal
+): Promise<MemoryRecallHit[]> {
+   const r = await rustSend({ memory_recall: { embedding, top_k: topK, scope } }, 15000, signal);
    return (r as any).results ?? [];
 }
 
-export async function rustMemoryForget(memoryId: number): Promise<void> {
-   await rustSend({ memory_forget: { memory_id: memoryId } }, 15000);
+export async function rustMemoryForget(memoryId: number, signal?: AbortSignal): Promise<void> {
+   await rustSend({ memory_forget: { memory_id: memoryId } }, 15000, signal);
 }
 
 export async function rustAstGrep(
    pattern: string,
    lang = "",
    pathFilter = "",
-   topK = 20
+   topK = 20,
+   signal?: AbortSignal
 ): Promise<Array<{ path: string; start_line: number; end_line: number; snippet: string }>> {
-   const r = await rustSend({ ast_grep: { pattern, lang, path_filter: pathFilter, top_k: topK } }, 15000);
+   const r = await rustSend({ ast_grep: { pattern, lang, path_filter: pathFilter, top_k: topK } }, 15000, signal);
+   return (r as any).results ?? [];
+}
+
+export async function rustAstReplace(
+   pattern: string,
+   rewrite: string,
+   lang = "",
+   pathFilter = "",
+   dryRun = false,
+   signal?: AbortSignal
+): Promise<Array<{ file: string; matches: number; diff?: string }>> {
+   const r = await rustSend(
+      { ast_replace: { pattern, rewrite, lang, path_filter: pathFilter, dry_run: dryRun } },
+      30000,
+      signal
+   );
    return (r as any).results ?? [];
 }

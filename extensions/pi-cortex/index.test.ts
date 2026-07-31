@@ -25,6 +25,9 @@ let child: ChildProcess | null = null;
 let nextId = 1;
 const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 let buf = "";
+// Accumulates unsolicited watcher_event lines from the sidecar's stdout.
+// Cleared each time startSidecar() is called.
+const watcherEvents: Record<string, unknown>[] = [];
 
 function send(msg: Record<string, unknown>, timeout = 10000): Promise<unknown> {
    return new Promise((resolve, reject) => {
@@ -41,6 +44,7 @@ function send(msg: Record<string, unknown>, timeout = 10000): Promise<unknown> {
 
 function startSidecar(dbPath: string) {
    return new Promise<void>((resolve, reject) => {
+      watcherEvents.length = 0;
       rmSync(dbPath, { force: true });
       const modelDir = join(testRoot, "models");
       mkdirSync(modelDir, { recursive: true });
@@ -74,6 +78,10 @@ function startSidecar(dbPath: string) {
                   pending.delete(resp.id);
                   if (resp.error) p.reject(new Error(resp.error));
                   else p.resolve(resp);
+               }
+               // Capture unsolicited watcher events (no `id` field)
+               if (resp.watcher_event && resp.id === undefined) {
+                  watcherEvents.push(resp.watcher_event as Record<string, unknown>);
                }
             } catch {}
          }
@@ -177,7 +185,7 @@ struct JsonHandler;
 
 impl Handler for JsonHandler {
     fn handle(&self, req: &str) -> String {
-        format!("{{\"received\": \"{}\"}}", req)
+        format!("{{"received": "{}"}}", req)
     }
 }
 
@@ -233,13 +241,16 @@ afterAll(async () => {
    stopSidecar();
    // Clean up test fixtures — files in .test-tmp/ only, never outside.
    if (testRoot.startsWith(__dirname)) {
-      for (let i = 0; i < 5; i++) {
+      const rmRetry = async (attempt = 0): Promise<void> => {
          try {
             rmSync(testRoot, { recursive: true, force: true });
-            break;
-         } catch {}
-         await new Promise((r) => setTimeout(r, 200));
-      }
+         } catch {
+            if (attempt >= 5) return;
+            await new Promise((r) => setTimeout(r, 200));
+            await rmRetry(attempt + 1);
+         }
+      };
+      await rmRetry();
    }
 }, 10000);
 
@@ -308,26 +319,28 @@ async function indexTestFixtures(dbPath: string) {
    expect(idxResp.files.length).toBeGreaterThanOrEqual(4);
 
    // Store each file's chunks with dummy embeddings (384-dim all zeros)
-   for (const fr of idxResp.files) {
-      if (fr.error) throw new Error(`Index error for ${fr.path}: ${fr.error}`);
-      if (fr.chunks.length === 0) continue;
-      const storeChunks = fr.chunks.map((c) => ({
-         text: c.text,
-         start_line: c.start_line,
-         end_line: c.end_line,
-         embedding: new Array(384).fill(0.01) as number[]
-      }));
-      // Make the auth.ts file have meaningful embedding-like values for cosine tests
-      if (fr.path.includes("auth.ts") || fr.path.includes("login")) {
-         for (let i = 0; i < storeChunks.length; i++) {
-            storeChunks[i].embedding = [0.9, 0.1, ...new Array(382).fill(0.01)];
+   await Promise.all(
+      idxResp.files.map(async (fr) => {
+         if (fr.error) throw new Error(`Index error for ${fr.path}: ${fr.error}`);
+         if (fr.chunks.length === 0) return;
+         const storeChunks = fr.chunks.map((c) => ({
+            text: c.text,
+            start_line: c.start_line,
+            end_line: c.end_line,
+            embedding: Array.from({ length: 384 }, () => 0.01) as number[]
+         }));
+         // Make the auth.ts file have meaningful embedding-like values for cosine tests
+         if (fr.path.includes("auth.ts") || fr.path.includes("login")) {
+            for (let i = 0; i < storeChunks.length; i++) {
+               storeChunks[i].embedding = [0.9, 0.1, ...Array.from({ length: 382 }, () => 0.01)];
+            }
          }
-      }
-      const storeResp = await send({
-         store: { file_path: fr.path, mtime: fr.mtime, size: 100, chunks: storeChunks }
-      }) as { stored: number };
-      expect(storeResp.stored).toBe(storeChunks.length);
-   }
+         const storeResp = await send({
+            store: { file_path: fr.path, mtime: fr.mtime, size: 100, chunks: storeChunks }
+         }) as { stored: number };
+         expect(storeResp.stored).toBe(storeChunks.length);
+      })
+   );
    return idxResp.files.length;
 }
 
@@ -341,7 +354,7 @@ describe("index + store", () => {
    afterAll(() => { stopSidecar(); }, 5000);
 
    it("indexes files without embedding and returns chunks", async () => {
-      await indexTestFixtures(dbPath);
+      expect(await indexTestFixtures(dbPath)).toBeGreaterThanOrEqual(4);
    }, 30000);
 
    it("status reports indexed files and chunks", async () => {
@@ -595,7 +608,7 @@ describe("search (semantic + hybrid)", () => {
    afterAll(() => { stopSidecar(); }, 5000);
 
    it("semantic search returns results with scores", async () => {
-      const queryEmb = new Array(384).fill(0.01);
+      const queryEmb = Array.from({ length: 384 }, () => 0.01);
       queryEmb[0] = 0.8; // dot with the auth.ts embedding
       const resp = await send({
          search: { query: "login authentication", embedding: queryEmb, top_k: 5, mode: "semantic", path_filter: null, rerank: false }
@@ -606,7 +619,7 @@ describe("search (semantic + hybrid)", () => {
    }, 10000);
 
    it("hybrid search blends with FTS5 scores", async () => {
-      const queryEmb = new Array(384).fill(0.01);
+      const queryEmb = Array.from({ length: 384 }, () => 0.01);
       const resp = await send({
          search: { query: "Handler trait", embedding: queryEmb, top_k: 5, mode: "hybrid", path_filter: null, rerank: false }
       }) as { results: { path: string; score: number }[] };
@@ -616,7 +629,7 @@ describe("search (semantic + hybrid)", () => {
    }, 10000);
 
    it("respects path filter in semantic search", async () => {
-      const queryEmb = new Array(384).fill(0.01);
+      const queryEmb = Array.from({ length: 384 }, () => 0.01);
       const resp = await send({
          search: { query: "login", embedding: queryEmb, top_k: 5, mode: "semantic", path_filter: "main.rs", rerank: false }
       }) as { results: { path: string }[] };
@@ -626,7 +639,7 @@ describe("search (semantic + hybrid)", () => {
    }, 10000);
 
    it("returns empty for zero vector query", async () => {
-      const queryEmb = new Array(384).fill(0);
+      const queryEmb = Array.from({ length: 384 }, () => 0);
       const resp = await send({
          search: { query: "nothing", embedding: queryEmb, top_k: 5, mode: "semantic", path_filter: null, rerank: false }
       }) as { results: unknown[] };
@@ -648,12 +661,9 @@ describe("error handling", () => {
    afterAll(() => { stopSidecar(); }, 5000);
 
    it("rejects unknown request type", async () => {
-      try {
-         await send({ unknown_cmd: {} } as Record<string, unknown>, 5000);
-         expect.unreachable("should have thrown");
-      } catch (e: unknown) {
-         expect((e as Error).message).toContain("unknown request type");
-      }
+      await expect(
+         send({ unknown_cmd: {} } as Record<string, unknown>, 5000)
+      ).rejects.toThrow("unknown request type");
    }, 10000);
 
    it("rejects bad JSON gracefully", async () => {
@@ -663,11 +673,6 @@ describe("error handling", () => {
       const resp = await send({ status: {} }) as { files: number };
       expect(typeof resp.files).toBe("number");
    }, 10000);
-
-   it("rejects search without db", async () => {
-      // Start a second sidecar without db-path to test
-      // This is tested implicitly - our sidecar always has db.
-   }, 1000);
 });
 
 // ---------------------------------------------------------------------------
@@ -685,7 +690,7 @@ describe("reranker", () => {
    afterAll(() => { stopSidecar(); }, 5000);
 
    it("rerank option does not crash (model may not be downloaded)", async () => {
-      const queryEmb = new Array(384).fill(0.01);
+      const queryEmb = Array.from({ length: 384 }, () => 0.01);
       const resp = await send({
          search: { query: "login", embedding: queryEmb, top_k: 5, mode: "semantic", path_filter: null, rerank: true }
       }) as { results: { score: number }[] };
@@ -723,14 +728,14 @@ export function shouldNotMatch(): number { return 42; }`);
             text: c.text,
             start_line: c.start_line,
             end_line: c.end_line,
-            embedding: new Array(384).fill(0.01) as number[]
+            embedding: Array.from({ length: 384 }, () => 0.01) as number[]
          }));
          await send({
             store: { file_path: fr.path, mtime: 0, size: 100, chunks: storeChunks }
          });
       }
 
-      const queryEmb = new Array(384).fill(0.01);
+      const queryEmb = Array.from({ length: 384 }, () => 0.01);
       const resp = await send({
          search: { query: "test", embedding: queryEmb, top_k: 5, mode: "semantic", path_filter: null, rerank: false }
       }) as { results: { path: string; score: number }[] };
@@ -742,6 +747,331 @@ export function shouldNotMatch(): number { return 42; }`);
          expect(r.score).toBeLessThanOrEqual(1);
       }
    }, 15000);
+});
+
+// ---------------------------------------------------------------------------
+// AST replace
+// ---------------------------------------------------------------------------
+
+describe("ast_replace", () => {
+   const dbPath = join(testRoot, "index-ast-replace.db");
+   const fixturePaths = Object.keys(FIXTURES).map((f) => join(testRoot, f));
+
+   beforeAll(async () => {
+      await startSidecar(dbPath);
+      // Index with skip_embed=true, store=false → returns chunks
+      const idxResp = await send({
+         index: { paths: fixturePaths, chunk_size: 80, overlap: 20, prefix: "", skip_embed: true, store: false }
+      }) as { files: { path: string; chunks: { text: string; start_line: number; end_line: number }[] }[] };
+      // Store each file's chunks so they appear in the chunks table (path lookup for ast_replace)
+      await Promise.all(
+         idxResp.files.map(async (fr) => {
+            if (fr.chunks.length === 0) return;
+            await send({
+               store: {
+                  file_path: fr.path,
+                  mtime: 0,
+                  size: 100,
+                  chunks: fr.chunks.map((c) => ({
+                     text: c.text,
+                     start_line: c.start_line,
+                     end_line: c.end_line,
+                     embedding: Array.from({ length: 384 }, () => 0.01) as number[]
+                  }))
+               }
+            });
+         })
+      );
+   }, 60000);
+
+   afterAll(() => { stopSidecar(); }, 5000);
+
+   it("replaces a function name across multiple files (dry run)", async () => {
+      const resp = await send({
+         ast_replace: {
+            pattern: "login",
+            rewrite: "signIn",
+            lang: "",
+            path_filter: "",
+            dry_run: true
+         }
+      }) as { results: { file: string; matches: number; diff: string | null }[] };
+
+      expect(resp.results.length).toBeGreaterThan(0);
+      const authHit = resp.results.find((r) => r.file.includes("auth.ts"));
+      expect(authHit).toBeDefined();
+      expect(authHit!.matches).toBeGreaterThanOrEqual(1); // login function declaration
+      expect(authHit!.diff).toBeTruthy();
+      expect(authHit!.diff).toContain("-export function login");
+      expect(authHit!.diff).toContain("+export function signIn");
+
+      // Data fixture also has "getUser" but no "login" — verify only auth.ts matched
+      const dataHit = resp.results.find((r) => r.file.includes("data.ts"));
+      expect(dataHit).toBeUndefined();
+   }, 15000);
+
+   it("replaces with lang filter (Python only)", async () => {
+      const resp = await send({
+         ast_replace: {
+            pattern: "def ",
+            rewrite: "fn ",
+            lang: "py",
+            path_filter: "",
+            dry_run: true
+         }
+      }) as { results: { file: string; matches: number; diff: string | null }[] };
+
+      expect(resp.results.length).toBe(1);
+      expect(resp.results[0].file).toContain("utils.py");
+      expect(resp.results[0].matches).toBeGreaterThanOrEqual(3); // hash_password, verify_hash, __init__
+      // Rust files should NOT be matched
+      expect(resp.results.some((r) => r.file.endsWith(".rs"))).toBe(false);
+      expect(resp.results.some((r) => r.file.endsWith(".ts"))).toBe(false);
+   }, 10000);
+
+   it("applies replacement to disk when dryRun=false", async () => {
+      const authPath = join(testRoot, "src/auth.ts");
+      const original = readFileSync(authPath, "utf8");
+
+      // Rename validateCredentials → validateCreds
+      const resp = await send({
+         ast_replace: {
+            pattern: "validateCredentials",
+            rewrite: "validateCreds",
+            lang: "",
+            path_filter: "",
+            dry_run: false
+         }
+      }) as { results: { file: string; matches: number; diff: string | null }[] };
+
+      expect(resp.results.length).toBeGreaterThan(0);
+      const hit = resp.results.find((r) => r.file.includes("auth.ts"));
+      expect(hit).toBeDefined();
+      expect(hit!.matches).toBeGreaterThanOrEqual(2); // declaration + call in login
+
+      // Verify file was actually written
+      const updated = readFileSync(authPath, "utf8");
+      expect(updated).not.toBe(original);
+      expect(updated).not.toContain("validateCredentials");
+      expect(updated).toContain("validateCreds");
+
+      // Restore original for subsequent tests
+      writeFileSync(authPath, original);
+   }, 15000);
+
+   it("replaces across multiple files with same pattern", async () => {
+      // Replace "password" which appears in both auth.ts and utils.py
+      // but NOT in main.rs or data.ts
+      const resp = await send({
+         ast_replace: {
+            pattern: "password",
+            rewrite: "passphrase",
+            lang: "",
+            path_filter: "",
+            dry_run: true
+         }
+      }) as { results: { file: string; matches: number; diff: string | null }[] };
+
+      // Should match in auth.ts ("password" appears multiple times as parameter name)
+      // and utils.py ("password" appears in function signatures)
+      expect(resp.results.length).toBeGreaterThanOrEqual(2);
+      const files = resp.results.map((r) => r.file.replace(/\\/g, "/"));
+      expect(files.some((f) => f.includes("auth.ts"))).toBe(true);
+      expect(files.some((f) => f.includes("utils.py"))).toBe(true);
+      expect(files.some((f) => f.includes("main.rs"))).toBe(false);
+      expect(files.some((f) => f.includes("data.ts"))).toBe(false);
+
+      // Each file should have its own diff
+      for (const r of resp.results) {
+         expect(r.diff).toBeTruthy();
+         expect(r.diff).toContain("passphrase");
+         expect(r.matches).toBeGreaterThan(0);
+      }
+   }, 10000);
+
+   it("returns empty when no files match", async () => {
+      const resp = await send({
+         ast_replace: {
+            pattern: "NonExistentFunctionXyz123",
+            rewrite: "Nothing",
+            lang: "",
+            path_filter: "",
+            dry_run: true
+         }
+      }) as { results: unknown[] };
+
+      expect(resp.results).toEqual([]);
+   }, 10000);
+
+   it("respects path_filter to scope replacement to a single file", async () => {
+      // Replace "password" in auth.ts only, not utils.py (which also has "password")
+      const resp = await send({
+         ast_replace: {
+            pattern: "password",
+            rewrite: "passphrase",
+            lang: "",
+            path_filter: "auth.ts",
+            dry_run: true
+         }
+      }) as { results: { file: string; matches: number }[] };
+
+      expect(resp.results.length).toBeGreaterThan(0);
+      for (const r of resp.results) {
+         expect(r.file).toContain("auth.ts");
+      }
+      expect(resp.results.some((r) => r.file.includes("utils.py"))).toBe(false);
+   }, 10000);
+
+   it("counts matches correctly when pattern appears multiple times per file", async () => {
+      const resp = await send({
+         ast_replace: {
+            pattern: "server",
+            rewrite: "srv",
+            lang: "rs",
+            path_filter: "",
+            dry_run: true
+         }
+      }) as { results: { file: string; matches: number }[] };
+
+      expect(resp.results.length).toBe(1);
+      // "server" appears 3× in main(): let mut server, server.register, server.dispatch
+      expect(resp.results[0].matches).toBe(3);
+   }, 10000);
+
+   it("replaces across TypeScript and Rust files when lang is empty", async () => {
+      const resp = await send({
+         ast_replace: {
+            pattern: "Handler",
+            rewrite: "Processor",
+            lang: "",
+            path_filter: "",
+            dry_run: true
+         }
+      }) as { results: { file: string; matches: number; diff: string | null }[] };
+
+      // Should match in main.rs (Handler trait + JsonHandler struct + impl)
+      // and possibly in data.ts
+      expect(resp.results.length).toBeGreaterThanOrEqual(1);
+      const rsHit = resp.results.find((r) => r.file.endsWith(".rs"));
+      expect(rsHit).toBeDefined();
+      expect(rsHit!.matches).toBeGreaterThanOrEqual(2); // trait Handler + JsonHandler struct
+      expect(rsHit!.diff).toContain("Processor");
+   }, 15000);
+});
+
+// ---------------------------------------------------------------------------
+// Watcher bridge — end-to-end test of watcher_event → stdout → callback
+//
+// Requires the Rust binary built with `cargo build --release` after the
+// watcher_event JSON changes. Without a rebuild the old binary emits
+// watcher messages on stderr (unreachable from vitest) instead of stdout JSON.
+//
+// Tests verify `removed` (file delete) and `started` (watch init) events.
+// The `reindexed` (file modify) path needs the ONNX embedding model, which
+// isn't downloaded in CI; it's exercised manually with a live Pi session.
+// ---------------------------------------------------------------------------
+
+describe("watcher bridge", () => {
+   const dbPath = join(testRoot, "index-watcher.db");
+   const fixturePaths = Object.keys(FIXTURES).map((f) => join(testRoot, f));
+   // This file is created fresh and deleted during the test — not a fixture.
+   // Must use a code extension (.ts) — the watcher filters by CODE_EXTENSIONS.
+   const watchFile = join(testRoot, "src", "watch-test.ts");
+
+   beforeAll(async () => {
+      await startSidecar(dbPath);
+      // Index fixtures (skip_embed=true, store manually) so the watcher has
+      // file paths in the chunks table to work with.
+      const idxResp = await send({
+         index: { paths: fixturePaths, chunk_size: 80, overlap: 20, prefix: "", skip_embed: true, store: false }
+      }) as { files: { path: string; chunks: { text: string; start_line: number; end_line: number }[] }[] };
+      await Promise.all(
+         idxResp.files.map(async (fr) => {
+            if (fr.chunks.length === 0) return;
+            await send({
+               store: {
+                  file_path: fr.path,
+                  mtime: 0,
+                  size: 100,
+                  chunks: fr.chunks.map((c) => ({
+                     text: c.text,
+                     start_line: c.start_line,
+                     end_line: c.end_line,
+                     embedding: Array.from({ length: 384 }, () => 0.01) as number[]
+                  }))
+               }
+            });
+         })
+      );
+      // Create an extra file for deletion testing (must be a code extension)
+      writeFileSync(watchFile, "export function watcherTest(): string { return 'hello'; }\n");
+      // Index + store the extra file
+      const extraResp = await send({
+         index: { paths: [watchFile], chunk_size: 80, overlap: 20, prefix: "", skip_embed: true, store: false }
+      }) as { files: { path: string; chunks: { text: string; start_line: number; end_line: number }[] }[] };
+      await Promise.all(
+         extraResp.files.map(async (fr) => {
+            if (fr.chunks.length === 0) return;
+            await send({
+               store: {
+                  file_path: fr.path,
+                  mtime: 0,
+                  size: 100,
+                  chunks: fr.chunks.map((c) => ({
+                     text: c.text,
+                     start_line: c.start_line,
+                     end_line: c.end_line,
+                     embedding: Array.from({ length: 384 }, () => 0.01) as number[]
+                  }))
+               }
+            });
+         })
+      );
+      // Start the watcher on the test root
+      await send({
+         watch: { paths: [testRoot], debounce_ms: 1000 }
+      });
+      // Allow the watcher to complete its initial scan
+      await new Promise((r) => setTimeout(r, 1500));
+   }, 60000);
+
+   afterAll(async () => {
+      // Stop the watcher before killing the sidecar
+      try { await send({ watch_stop: {} }); } catch { /* sidecar may already be dead */ }
+      stopSidecar();
+      // Clean up the watch file if it still exists
+      try { rmSync(watchFile); } catch {}
+   }, 10000);
+
+   it("emits removed watcher_event when a file is deleted", async () => {
+      const beforeCount = watcherEvents.length;
+
+      // Delete the extra file
+      rmSync(watchFile);
+
+      // Wait for the watcher to detect the deletion (debounce=1000ms)
+      await new Promise((r) => setTimeout(r, 2000));
+
+      // Send a command to trigger the drain loop — the sidecar only processes
+      // pending watcher events between incoming requests.
+      await send({ status: {} });
+
+      // Should have received a removed event
+      const newEvents = watcherEvents.slice(beforeCount);
+      expect(newEvents.length).toBeGreaterThan(0);
+      const removed = newEvents.find((e) => e.action === "removed");
+      expect(removed).toBeDefined();
+      expect(typeof removed!.file === "string" ? removed!.file : "").toContain("watch-test.ts");
+      const chunks = Number(removed!.chunks ?? 0);
+      expect(chunks).toBeGreaterThan(0);
+   }, 15000);
+
+   it("emits started watcher_event on watch command", async () => {
+      // The watch command in beforeAll should have emitted a started event
+      const started = watcherEvents.find((e) => e.action === "started");
+      expect(started).toBeDefined();
+      expect(Number(started!.paths ?? 0)).toBeGreaterThanOrEqual(1);
+   }, 5000);
 });
 
 

@@ -7,14 +7,15 @@ export async function remember(
    content: string,
    source = "",
    importance = 0.5,
-   scope = "session"
+   scope = "session",
+   signal?: AbortSignal
 ): Promise<{ memory_id: number; elapsed: number }> {
    await startRustSidecar(loadConfig().model, getDbPath());
    const config = loadConfig();
    const start = performance.now();
 
-   const embedding = Array.from(await embedQuery(content, config));
-   const memoryId = await rustMemoryStore(content, embedding, source, importance, scope);
+   const embedding = Array.from(await embedQuery(content, config, signal));
+   const memoryId = await rustMemoryStore(content, embedding, source, importance, scope, signal);
    const elapsed = (performance.now() - start) / 1000;
 
    return { memory_id: memoryId, elapsed };
@@ -30,19 +31,19 @@ export interface MemoryRecallItem {
    elapsed: number;
 }
 
-export async function recall(query: string, topK = 5, scope = ""): Promise<MemoryRecallItem[]> {
+export async function recall(query: string, topK = 5, scope = "", signal?: AbortSignal): Promise<MemoryRecallItem[]> {
    await startRustSidecar(loadConfig().model, getDbPath());
    const config = loadConfig();
    const start = performance.now();
 
-   const embedding = Array.from(await embedQuery(query, config));
-   const results = await rustMemoryRecall(embedding, topK, scope);
+   const embedding = Array.from(await embedQuery(query, config, signal));
+   const results = await rustMemoryRecall(embedding, topK, scope, signal);
    const elapsed = (performance.now() - start) / 1000;
 
    return results.map((r) => ({ ...r, elapsed }));
 }
 
-export async function forget(memoryId: number): Promise<void> {
+export async function forget(memoryId: number, signal?: AbortSignal): Promise<void> {
    await startRustSidecar(loadConfig().model, getDbPath());
-   await rustMemoryForget(memoryId);
+   await rustMemoryForget(memoryId, signal);
 }

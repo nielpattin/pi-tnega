@@ -9,16 +9,24 @@ import {
    CodeRememberParams,
    CodeRecallParams,
    CodeForgetParams,
-   CodeAstGrepParams
+   CodeAstGrepParams,
+   CodeAstReplaceParams
 } from "./src/types.js";
 import { loadConfig, setActiveCwd, getDbPath, getModelsDir, getProjectDir, resolveProjectPaths } from "./src/config.js";
-import { startRustSidecar, rustStatus, rustIndex, rustScan, stopRustSidecar } from "./src/protocol.js";
+import {
+   startRustSidecar,
+   rustStatus,
+   rustIndex,
+   rustScan,
+   stopRustSidecar,
+   setWatcherCallback
+} from "./src/protocol.js";
 import { search } from "./src/search.js";
 import { symbolSearch } from "./src/symbols.js";
 import { callGraphQuery } from "./src/callgraph.js";
 import { tripleQuery } from "./src/triples.js";
 import { remember, recall, forget } from "./src/memory.js";
-import { astGrep } from "./src/ast.js";
+import { astGrep, astReplace } from "./src/ast.js";
 import {
    renderSearchResult,
    renderSymbolResult,
@@ -31,6 +39,48 @@ import {
 import { fmtTime } from "./src/utils.js";
 
 export default function register(pi: ExtensionAPI) {
+   // ── Watcher → Pi chat bridge ──
+   // When the sidecar re-indexes a changed file, forward the event
+   // as an extension output message in the Pi chat.
+   pi.on("session_start", (_event, ctx) => {
+      setWatcherCallback((event) => {
+         const action = (event.action as string) ?? "";
+         const file = (event.file as string) ?? "";
+         const chunks = (event.chunks as number) ?? 0;
+         const err = (event.error as string) ?? "";
+         const paths = (event.paths as number) ?? 0;
+         switch (action) {
+            case "reindexed":
+               ctx.ui.notify(`📄 ${file} (${chunks} chunks)`, "info");
+               break;
+            case "removed":
+               ctx.ui.notify(`🗑 ${file} (${chunks} chunks removed)`, "info");
+               break;
+            case "failed":
+               ctx.ui.notify(`❌ ${file}: ${err}`, "error");
+               break;
+            case "auto_started":
+               ctx.ui.notify(`👁 Watcher auto-started on ${paths} paths`, "info");
+               break;
+            case "auto_start_failed":
+               ctx.ui.notify(`⚠ Watcher auto-start failed: ${err}`, "warning");
+               break;
+            case "started":
+               ctx.ui.notify(`👁 Watcher started on ${paths} paths`, "info");
+               break;
+            case "stopped":
+               ctx.ui.notify(`👁 Watcher stopped`, "info");
+               break;
+            default:
+               break;
+         }
+      });
+   });
+
+   pi.on("session_shutdown", () => {
+      setWatcherCallback(null);
+   });
+
    /**
     * Walk + chunk + embed + store files in batches. Reports progress through
     * the optional `onProgress` callback (the `cc-index` command pipes this to
@@ -81,7 +131,7 @@ export default function register(pi: ExtensionAPI) {
       ],
       parameters: CodeSearchParams,
       renderResult: renderSearchResult,
-      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      async execute(_toolCallId, params, signal, _onUpdate, ctx) {
          const resolved = resolveProjectPaths(params.projectPath, ctx.cwd);
          if (params.projectPath && !existsSync(resolved.dbPath)) {
             return {
@@ -98,7 +148,7 @@ export default function register(pi: ExtensionAPI) {
          const config = loadConfig();
          const topK = params.topK ?? config.topK;
          const start = performance.now();
-         const result = await search(params.query, config, topK, params.path);
+         const result = await search(params.query, config, topK, params.path, undefined, signal);
          const elapsed = (performance.now() - start) / 1000;
          return {
             content: [
@@ -120,7 +170,7 @@ export default function register(pi: ExtensionAPI) {
       promptGuidelines: ["Use code_symbol_search to find function, class, interface, or type declarations."],
       parameters: CodeSymbolParams,
       renderResult: renderSymbolResult,
-      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      async execute(_toolCallId, params, signal, _onUpdate, ctx) {
          const resolved = resolveProjectPaths(params.projectPath, ctx.cwd);
          if (params.projectPath && !existsSync(resolved.dbPath)) {
             return {
@@ -130,7 +180,7 @@ export default function register(pi: ExtensionAPI) {
          }
          setActiveCwd(resolved.base);
          const start = performance.now();
-         const result = await symbolSearch(params.symbol);
+         const result = await symbolSearch(params.symbol, signal);
          const elapsed = (performance.now() - start) / 1000;
          return {
             content: [
@@ -155,7 +205,7 @@ export default function register(pi: ExtensionAPI) {
       ],
       parameters: CodeCallGraphParams,
       renderResult: renderCallGraphResult,
-      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      async execute(_toolCallId, params, signal, _onUpdate, ctx) {
          const resolved = resolveProjectPaths(params.projectPath, ctx.cwd);
          if (params.projectPath && !existsSync(resolved.dbPath)) {
             return {
@@ -166,7 +216,7 @@ export default function register(pi: ExtensionAPI) {
          setActiveCwd(resolved.base);
          const start = performance.now();
          const direction = params.direction ?? "callees";
-         const result = await callGraphQuery(params.symbol, direction, params.path);
+         const result = await callGraphQuery(params.symbol, direction, params.path, signal);
          const elapsed = (performance.now() - start) / 1000;
          return {
             content: [
@@ -192,7 +242,7 @@ export default function register(pi: ExtensionAPI) {
       ],
       parameters: CodeTripleQueryParams,
       renderResult: renderTripleResult,
-      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      async execute(_toolCallId, params, signal, _onUpdate, ctx) {
          const resolved = resolveProjectPaths(params.projectPath, ctx.cwd);
          if (params.projectPath && !existsSync(resolved.dbPath)) {
             return {
@@ -206,7 +256,8 @@ export default function register(pi: ExtensionAPI) {
             params.subject ?? "",
             params.predicate ?? "",
             params.object ?? "",
-            params.limit
+            params.limit,
+            signal
          );
          const elapsed = (performance.now() - start) / 1000;
          return {
@@ -253,13 +304,14 @@ export default function register(pi: ExtensionAPI) {
          "Set importance in [0,1] to rank; set scope to 'project' or 'global' for longer-lived memories (default 'session')."
       ],
       parameters: CodeRememberParams,
-      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
          const start = performance.now();
          const result = await remember(
             params.content,
             params.source ?? "",
             params.importance ?? 0.5,
-            params.scope ?? "session"
+            params.scope ?? "session",
+            signal
          );
          const elapsed = (performance.now() - start) / 1000;
          return {
@@ -285,7 +337,7 @@ export default function register(pi: ExtensionAPI) {
       ],
       parameters: CodeRecallParams,
       renderResult: renderMemoryResult,
-      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      async execute(_toolCallId, params, signal, _onUpdate, ctx) {
          const resolved = resolveProjectPaths(params.projectPath, ctx.cwd);
          if (params.projectPath && !existsSync(resolved.dbPath)) {
             return {
@@ -296,7 +348,7 @@ export default function register(pi: ExtensionAPI) {
          setActiveCwd(resolved.base);
          const topK = params.topK ?? 5;
          const start = performance.now();
-         const hits = await recall(params.query, topK, params.scope ?? "");
+         const hits = await recall(params.query, topK, params.scope ?? "", signal);
          const elapsed = (performance.now() - start) / 1000;
          return {
             content: [
@@ -334,8 +386,8 @@ export default function register(pi: ExtensionAPI) {
       promptSnippet: "Delete a memory by ID.",
       promptGuidelines: ["Use code_forget to remove a memory that is no longer relevant. memory_id is required."],
       parameters: CodeForgetParams,
-      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-         await forget(params.memoryId);
+      async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+         await forget(params.memoryId, signal);
          return {
             content: [{ type: "text" as const, text: `Forgot memory #${params.memoryId}.` }],
             details: undefined
@@ -355,7 +407,7 @@ export default function register(pi: ExtensionAPI) {
       ],
       parameters: CodeAstGrepParams,
       renderResult: renderAstGrepResult,
-      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      async execute(_toolCallId, params, signal, _onUpdate, ctx) {
          const resolved = resolveProjectPaths(params.projectPath, ctx.cwd);
          if (params.projectPath && !existsSync(resolved.dbPath)) {
             return {
@@ -366,7 +418,7 @@ export default function register(pi: ExtensionAPI) {
          setActiveCwd(resolved.base);
          const topK = params.topK ?? 20;
          const start = performance.now();
-         const hits = await astGrep(params.pattern, params.lang ?? "", params.path ?? "", topK);
+         const hits = await astGrep(params.pattern, params.lang ?? "", params.path ?? "", topK, signal);
          const elapsed = (performance.now() - start) / 1000;
          return {
             content: [
@@ -384,6 +436,66 @@ export default function register(pi: ExtensionAPI) {
                            start_line: h.start_line,
                            end_line: h.end_line,
                            snippet: h.snippet
+                        }))
+                     },
+                     null,
+                     2
+                  )
+               }
+            ],
+            details: undefined
+         };
+      }
+   });
+
+   pi.registerTool({
+      name: "code_ast_replace",
+      label: "code_ast_replace",
+      description:
+         "AST-aware structural code replacement. Uses ast-grep patterns with metavariables to find and rewrite code across files. Use dryRun to preview changes before applying.",
+      promptSnippet: "Structural find & replace across the codebase.",
+      promptGuidelines: [
+         "Use code_ast_replace to apply structural code changes — rename functions, refactor patterns, update APIs.",
+         "Pattern uses metavariables like $NAME for single nodes, $$$ARGS for multiple.",
+         "Rewrite template references the same metavariables from the pattern.",
+         "Set dryRun=true to preview changes as a unified diff before applying.",
+         "Optional lang filter (e.g. 'ts', 'py', 'rs') and path filter to scope the replacement."
+      ],
+      parameters: CodeAstReplaceParams,
+      async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+         setActiveCwd(resolveProjectPaths(params.projectPath, ctx.cwd).base);
+         const dryRun = params.dryRun ?? false;
+         const start = performance.now();
+         const results = await astReplace(
+            params.pattern,
+            params.rewrite,
+            params.lang ?? "",
+            params.path ?? "",
+            dryRun,
+            signal
+         );
+         const elapsed = (performance.now() - start) / 1000;
+         const totalMatches = results.reduce((sum, r) => sum + r.matches, 0);
+         const mode = dryRun ? "(dry run)" : "applied";
+         return {
+            content: [
+               {
+                  type: "text" as const,
+                  text: JSON.stringify(
+                     {
+                        pattern: params.pattern,
+                        rewrite: params.rewrite,
+                        lang: params.lang,
+                        path: params.path,
+                        dryRun,
+                        files: results.length,
+                        totalMatches,
+                        elapsed,
+                        mode,
+                        results: results.map((r) => ({
+                           file: r.file,
+                           matches: r.matches,
+                           diff: r.diff
                         }))
                      },
                      null,

@@ -455,6 +455,38 @@ struct AstGrepItem {
     snippet: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct AstReplaceRequest {
+    id: u64,
+    ast_replace: AstReplaceParams,
+}
+
+#[derive(Debug, Deserialize)]
+struct AstReplaceParams {
+    pattern: String,
+    rewrite: String,
+    #[serde(default)]
+    lang: String,
+    #[serde(default)]
+    path_filter: String,
+    #[serde(default)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct AstReplaceResponse {
+    id: u64,
+    results: Vec<AstReplaceItem>,
+}
+
+#[derive(Debug, Serialize)]
+struct AstReplaceItem {
+    file: String,
+    matches: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    diff: Option<String>,
+}
+
 // ── Constants ──
 
 const MAX_LEN: usize = 512;
@@ -1840,7 +1872,12 @@ fn main() -> anyhow::Result<()> {
     let mut line = String::new();
 
     loop {
-        // Drain pending watcher events before processing next command
+        line.clear();
+        let n = reader.read_line(&mut line)?;
+        if n == 0 { break; }
+
+        // Drain pending watcher events before processing this command so that
+        // watcher_event lines are emitted before the command's response.
         if let Some(ref mut s) = store {
             let changes: Vec<String> = {
                 if let Ok(mut p) = pending_changes.lock() {
@@ -1854,17 +1891,17 @@ fn main() -> anyhow::Result<()> {
                     if let Some(rest) = entry.strip_prefix("__DELETE__:") {
                         let n = s.delete_path(rest).unwrap_or(0);
                         if n > 0 {
-                            eprintln!("[embedder] watcher: removed {} ({} chunks)", rest, n);
+                            writeln!(out, "{}", serde_json::json!({"watcher_event": {"action":"removed","file":rest,"chunks":n}}))?;
                         }
                     } else if Path::new(entry).exists() {
                         match reindex_file(s, &mut embedder, entry, 80, 20) {
                             Ok(n) => {
                                 if n > 0 {
-                                    eprintln!("[embedder] watcher: re-indexed {} ({} chunks)", entry, n);
+                                    writeln!(out, "{}", serde_json::json!({"watcher_event": {"action":"reindexed","file":entry,"chunks":n}}))?;
                                 }
                             }
                             Err(e) => {
-                                eprintln!("[embedder] watcher: failed {}: {}", entry, e);
+                                writeln!(out, "{}", serde_json::json!({"watcher_event": {"action":"failed","file":entry,"error":e.to_string()}}))?;
                             }
                         }
                     }
@@ -1873,9 +1910,6 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
-        line.clear();
-        let n = reader.read_line(&mut line)?;
-        if n == 0 { break; }
         let trimmed = line.trim();
         if trimmed.is_empty() { continue; }
 
@@ -2068,10 +2102,10 @@ fn main() -> anyhow::Result<()> {
                     match start_watcher(&req.index.watch_dirs, pending_changes.clone(), 2000) {
                         Ok(state) => {
                             watcher_state = Some(state);
-                            eprintln!("[embedder] watcher auto-started on {} paths", req.index.watch_dirs.len());
+                            writeln!(out, "{}", serde_json::json!({"watcher_event": {"action":"auto_started","paths":req.index.watch_dirs.len()}}))?;
                         }
                         Err(e) => {
-                            eprintln!("[embedder] failed to auto-start watcher: {e}");
+                            writeln!(out, "{}", serde_json::json!({"watcher_event": {"action":"auto_start_failed","error":e.to_string()}}))?;
                         }
                     }
                 }
@@ -2169,7 +2203,7 @@ fn main() -> anyhow::Result<()> {
                 match start_watcher(&paths, pending_changes.clone(), debounce_ms) {
                     Ok(state) => {
                         watcher_state = Some(state);
-                        eprintln!("[embedder] watcher started on {} paths (debounce={}ms)", paths.len(), debounce_ms);
+                        writeln!(out, "{}", serde_json::json!({"watcher_event": {"action":"started","paths":paths.len(),"debounce_ms":debounce_ms}}))?;
                         serde_json::to_writer(&mut out, &serde_json::json!({"id": id, "ok": true, "watching": true}))?;
                     }
                     Err(e) => err(&mut out, id, &format!("watch: {e}"))?,
@@ -2180,7 +2214,7 @@ fn main() -> anyhow::Result<()> {
             out.write_all(b"\n")?;
         } else if val.get("watch_stop").is_some() {
             if watcher_state.take().is_some() {
-                eprintln!("[embedder] watcher stopped");
+                writeln!(out, "{}", serde_json::json!({"watcher_event": {"action":"stopped"}}))?;
                 serde_json::to_writer(&mut out, &serde_json::json!({"id": id, "ok": true}))?;
             } else {
                 serde_json::to_writer(&mut out, &serde_json::json!({"id": id, "ok": true, "note": "no active watcher"}))?;
@@ -2286,6 +2320,95 @@ fn main() -> anyhow::Result<()> {
                 })
                 .collect();
             serde_json::to_writer(&mut out, &AstGrepResponse { id: req.id, results: matched })?;
+            out.write_all(b"\n")?;
+        } else if val.get("ast_replace").is_some() {
+            let req: AstReplaceRequest = serde_json::from_value(val).map_err(|e| anyhow::anyhow!("bad ast_replace req: {e}"))?;
+
+            // Collect file paths from the store (or use walk_dir for live filesystem scan)
+            let s = store.as_ref().ok_or_else(|| anyhow::anyhow!("no db configured"))?;
+            let file_paths: Vec<String> = if req.ast_replace.path_filter.is_empty() {
+                let mut stmt = s.db.prepare("SELECT DISTINCT path FROM chunks LIMIT 10000")?;
+                let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            } else {
+                let mut stmt = s.db.prepare("SELECT DISTINCT path FROM chunks WHERE path LIKE ?1 LIMIT 10000")?;
+                let rows = stmt.query_map(params![format!("%{}%", req.ast_replace.path_filter)], |row| row.get::<_, String>(0))?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            };
+
+            let lang = req.ast_replace.lang.clone();
+            let dry_run = req.ast_replace.dry_run;
+            let mut results: Vec<AstReplaceItem> = Vec::new();
+
+            // Filter by extension when `lang` is specified (e.g. "ts", "py", ".rs").
+            let target_files: Vec<&String> = if lang.is_empty() {
+                file_paths.iter().collect()
+            } else {
+                let target_ext = if lang.starts_with('.') {
+                    lang.to_lowercase()
+                } else {
+                    format!(".{}", lang.to_lowercase())
+                };
+                file_paths
+                    .iter()
+                    .filter(|p| ext_of(Path::new(p)) == target_ext)
+                    .collect()
+            };
+
+            for file_path in target_files {
+                let path = Path::new(file_path);
+                let content = match std::fs::read_to_string(path) {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                };
+
+                // Direct string replace on full file content — no case-folding
+                // pre-filter, no line-by-line loop. Fast and handles multi-line
+                // patterns correctly.
+                let new_content = content.replace(&req.ast_replace.pattern, &req.ast_replace.rewrite);
+                if new_content == content {
+                    continue;
+                }
+
+                let match_count = content.matches(&req.ast_replace.pattern).count();
+
+                // Compute a simple unified diff
+                let diff = {
+                    let orig_lines: Vec<&str> = content.lines().collect();
+                    let new_lines_v: Vec<&str> = new_content.lines().collect();
+                    let mut diff_lines: Vec<String> = Vec::new();
+                    diff_lines.push(format!("--- a/{file_path}"));
+                    diff_lines.push(format!("+++ b/{file_path}"));
+                    let mut i = 0usize;
+                    while i < orig_lines.len() || i < new_lines_v.len() {
+                        let orig = orig_lines.get(i).copied().unwrap_or("");
+                        let new = new_lines_v.get(i).copied().unwrap_or("");
+                        if orig != new {
+                            if !orig.is_empty() {
+                                diff_lines.push(format!("-{orig}"));
+                            }
+                            if !new.is_empty() {
+                                diff_lines.push(format!("+{new}"));
+                            }
+                        } else if !orig.is_empty() {
+                            diff_lines.push(format!(" {orig}"));
+                        }
+                        i += 1;
+                    }
+                    Some(diff_lines.join("\n"))
+                };
+
+                if !dry_run {
+                    if let Err(e) = std::fs::write(path, &new_content) {
+                        eprintln!("[embedder] ast_replace: failed to write {file_path}: {e}");
+                        continue;
+                    }
+                }
+
+                results.push(AstReplaceItem { file: file_path.to_string(), matches: match_count, diff });
+            }
+
+            serde_json::to_writer(&mut out, &AstReplaceResponse { id: req.id, results })?;
             out.write_all(b"\n")?;
         } else {
             err(&mut out, id, "unknown request type")?;

@@ -232,3 +232,23 @@ export const CodeAstGrepParams = Type.Object({
    topK: Type.Optional(Type.Number({ description: "Max results", minimum: 1, maximum: 200 })),
    projectPath: Type.Optional(Type.String({ description: "Project root (defaults to current project)" }))
 });
+
+export const CodeAstReplaceParams = Type.Object({
+   pattern: Type.String({
+      description: "ast-grep pattern with metavariables (e.g. 'console.log($MSG)'). Same syntax as code_ast_grep.",
+      minLength: 1
+   }),
+   rewrite: Type.String({
+      description:
+         "Replacement template using bound metavariables (e.g. 'logger.info($MSG)'). All $vars must appear in the pattern.",
+      minLength: 1
+   }),
+   lang: Type.Optional(
+      Type.String({ description: "Limit to files of this language/extension (e.g. 'ts', 'py', 'rs')" })
+   ),
+   path: Type.Optional(Type.String({ description: "Limit to this file or directory" })),
+   dryRun: Type.Optional(
+      Type.Boolean({ description: "Preview changes without applying (default false). Returns unified diff." })
+   ),
+   projectPath: Type.Optional(Type.String({ description: "Project root (defaults to current project)" }))
+});

@@ -3,7 +3,8 @@
    "version": "0.1.0",
    "type": "module",
    "scripts": {
-      "build:rust": "cd rust-embedder && cargo build --release"
+      "build:rust": "cd rust-embedder && cargo build --release",
+      "typecheck": "tsc --noEmit -p tsconfig.json"
    },
    "dependencies": {
       "@earendil-works/pi-tui": "^0.83.0"

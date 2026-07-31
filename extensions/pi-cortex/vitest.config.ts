@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
    test: {
-      include: ["extensions/pi-cortex/index.test.ts"],
+      include: ["index.test.ts"],
       testTimeout: 60000,
       hookTimeout: 60000
    }

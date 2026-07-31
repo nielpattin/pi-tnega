@@ -24,15 +24,16 @@ export async function search(
    config: Config,
    topK: number,
    pathFilter?: string,
-   rerank?: boolean
+   rerank?: boolean,
+   signal?: AbortSignal
 ): Promise<SearchHit[]> {
    await startRustSidecar(config.model, getDbPath());
 
    const run = await getEmbedder(config);
-   const [queryEmb] = await run.embed([config.queryPrefix + query]);
+   const [queryEmb] = await run.embed([config.queryPrefix + query], signal);
 
    const keywordWeight = detectKeywordWeight(query);
-   const results = await rustSearch(query, Array.from(queryEmb), topK, keywordWeight, pathFilter, rerank);
+   const results = await rustSearch(query, Array.from(queryEmb), topK, keywordWeight, pathFilter, rerank, signal);
    return results.map((r: SearchResult) => ({
       path: relative(getActiveCwd(), r.path) || r.path,
       startLine: r.start_line,

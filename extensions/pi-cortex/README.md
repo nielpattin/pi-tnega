@@ -15,16 +15,17 @@ Code intelligence for Pi: search, AST analysis, call graph triples, and agent me
 
 **Agent-callable tools**:
 
-| Tool                 | Purpose                                                                     | UI                                    |
-| -------------------- | --------------------------------------------------------------------------- | ------------------------------------- |
-| `code_search`        | Semantic / keyword / hybrid search. Auto-blends based on query.             | Collapse/expand + elapsed time (ms/s) |
-| `code_symbol_search` | Look up functions, classes, or variables by name.                           | Collapse/expand + elapsed time (ms/s) |
-| `code_call_graph`    | Find callers, callees, or all calls in a file.                              | Collapse/expand + elapsed time (ms/s) |
-| `code_triple_query`  | Query knowledge-graph triples (subject-predicate-object) from indexed code. | Collapse/expand + elapsed time (ms/s) |
-| `code_ast_grep`      | Structural code search by identifier, node kind, or text.                   | Collapse/expand + elapsed time (ms/s) |
-| `code_remember`      | Store a memory (text + embedding) for later recall.                         | —                                     |
-| `code_recall`        | Recall memories by meaning, keyword, or both.                               | Collapse/expand + elapsed time (ms/s) |
-| `code_forget`        | Delete a memory by ID.                                                      | —                                     |
+| Tool                 | Purpose                                                                     |
+| -------------------- | --------------------------------------------------------------------------- |
+| `code_search`        | Semantic / keyword / hybrid search. Auto-blends based on query.             |
+| `code_symbol_search` | Look up functions, classes, or variables by name.                           |
+| `code_call_graph`    | Find callers, callees, or all calls in a file.                              |
+| `code_triple_query`  | Query knowledge-graph triples (subject-predicate-object) from indexed code. |
+| `code_ast_grep`      | Structural code search by identifier, node kind, or text.                   |
+| `code_ast_replace`   | Structural find & replace with metavariables. Dry-run preview supported.    |
+| `code_remember`      | Store a memory (text + embedding) for later recall.                         |
+| `code_recall`        | Recall memories by meaning, keyword, or both.                               |
+| `code_forget`        | Delete a memory by ID.                                                      |
 
 Indexing is manual — use `/cc-index` below.
 
@@ -77,7 +78,7 @@ flowchart LR
     subgraph Pi["🔌 Pi Ext"]
         Tools{{"code_search · code_symbol_search
         code_call_graph · code_triple_query
-        code_ast_grep"}}
+        code_ast_grep · code_ast_replace"}}
         Memory{{"code_remember · code_recall
         code_forget"}}
         Cmds[/"  /cc-ast  /cc-remember
@@ -98,7 +99,7 @@ flowchart LR
     Embed -.-> SQLite
 ```
 
-Indexing (`/cc-index`) walks dirs, tree-sitter chunks, embeds (local ONNX or remote), stores in SQLite. A polling watcher keeps the index fresh. All tools query the same database. `code_search` auto-blends cosine similarity + FTS5 BM25. `code_symbol_search` and `code_call_graph` query stored symbols and edges. `code_triple_query` queries subject-predicate-object triples. `code_ast_grep` does structural identifier/kind/text search. `code_remember` / `code_recall` / `code_forget` manage persistent memories.
+Indexing (`/cc-index`) walks dirs, tree-sitter chunks, embeds (local ONNX or remote), stores in SQLite. A polling watcher keeps the index fresh. All tools query the same database. `code_search` auto-blends cosine similarity + FTS5 BM25. `code_symbol_search` and `code_call_graph` query stored symbols and edges. `code_triple_query` queries subject-predicate-object triples. `code_ast_grep` / `code_ast_replace` do structural search and pattern → rewrite with metavariables (dry-run previews supported). `code_remember` / `code_recall` / `code_forget` manage persistent memories.
 
 ---
 
