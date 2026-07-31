@@ -74,7 +74,7 @@ function parallelToolMessages(): AgentSession["messages"] {
   ];
 }
 
-test("completed parallel tool calls pair lifecycle timings with calls and results", () => {
+void test("completed parallel tool calls pair lifecycle timings with calls and results", () => {
   const timings = new Map<string, ToolExecutionTiming>();
   recordToolExecutionTiming(
     timings,
@@ -152,7 +152,7 @@ test("completed parallel tool calls pair lifecycle timings with calls and result
   }
 });
 
-test("in-flight aborted tool calls retain start timing without completion", () => {
+void test("in-flight aborted tool calls retain start timing without completion", () => {
   const timings = new Map<string, ToolExecutionTiming>();
   recordToolExecutionTiming(
     timings,
@@ -180,7 +180,7 @@ test("in-flight aborted tool calls retain start timing without completion", () =
   );
 });
 
-test("first-response watchdog aborts a silent provider request", async () => {
+void test("first-response watchdog aborts a silent provider request", async () => {
   let aborted = false;
   const watchdog = createFirstResponseWatchdog(
     async () => {
@@ -196,7 +196,7 @@ test("first-response watchdog aborts a silent provider request", async () => {
   assert.equal(aborted, true);
 });
 
-test("first assistant response disarms the watchdog without limiting the run", async () => {
+void test("first assistant response disarms the watchdog without limiting the run", async () => {
   const watchdog = createFirstResponseWatchdog(
     async () => {
       throw new Error("watchdog should have been disarmed");
@@ -211,7 +211,7 @@ test("first assistant response disarms the watchdog without limiting the run", a
   assert.equal(result, "done");
 });
 
-test("workflow children guard structured, normal, and dynamically registered tools", async () => {
+void test("workflow children guard structured, normal, and dynamically registered tools", async () => {
   const structuredResult = {
     content: [{ type: "text" as const, text: "recorded" }],
     details: { value: "fixture" },
@@ -259,10 +259,10 @@ test("workflow children guard structured, normal, and dynamically registered too
       return new Promise<never>(() => {});
     },
   } satisfies ToolDefinition;
-  const originalDynamicExecute = dynamic.execute;
+  const originalDynamicExecute = dynamic["execute"];
   definitions.set(dynamic.name, dynamic);
   listener?.({ type: "agent_start" });
-  assert.notEqual(dynamic.execute, originalDynamicExecute);
+  assert.notEqual(dynamic["execute"], originalDynamicExecute);
 
   await assert.rejects(
     dynamic.execute("fixture", {}, undefined),

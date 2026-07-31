@@ -5,7 +5,7 @@ import { MAX_AGENT_CALLS, RunController } from "./controller.ts";
 const delay = (milliseconds: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
-test("RunController reserves calls synchronously and caps global fanout", async () => {
+void test("RunController reserves calls synchronously and caps global fanout", async () => {
   const controller = new RunController(undefined, 4);
   let active = 0;
   let peak = 0;
@@ -26,7 +26,7 @@ test("RunController reserves calls synchronously and caps global fanout", async 
   assert.equal(await controller.settle(), true);
 });
 
-test("RunController propagates invocation cancellation without aborting the run", async () => {
+void test("RunController propagates invocation cancellation without aborting the run", async () => {
   const controller = new RunController(undefined, 1);
   const invocation = new AbortController();
   const pending = controller.schedule(
@@ -46,7 +46,7 @@ test("RunController propagates invocation cancellation without aborting the run"
   assert.equal(await controller.settle(), true);
 });
 
-test("RunController enforces call budget and aborts queued tasks", async () => {
+void test("RunController enforces call budget and aborts queued tasks", async () => {
   const controller = new RunController(undefined, 1);
   const blocker = controller.schedule(
     (signal) =>

@@ -15,10 +15,10 @@ interface FakeTool {
 }
 
 interface FakePi {
-   handlers: Record<string, (event: Record<string, unknown>, ctx: Record<string, unknown>) => unknown | Promise<unknown>>;
+   handlers: Record<string, (event: Record<string, unknown>, ctx: Record<string, unknown>) => unknown>;
    activeTools: string[];
    setActiveToolsCalls: string[][];
-   on(name: string, handler: (event: Record<string, unknown>, ctx: Record<string, unknown>) => unknown | Promise<unknown>): void;
+   on(name: string, handler: (event: Record<string, unknown>, ctx: Record<string, unknown>) => unknown): void;
    registerCommand(name: string, options: Record<string, unknown>): void;
    getAllTools(): FakeTool[];
    getActiveTools(): string[];

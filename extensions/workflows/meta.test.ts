@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { extractMeta, prepareWorkflowScript } from "./meta.ts";
 
-test("metadata is decoded statically and removed from executable source", () => {
+void test("metadata is decoded statically and removed from executable source", () => {
   const source = `export const meta = {
     name: "audit",
     description: "safe",
@@ -19,7 +19,7 @@ test("metadata is decoded statically and removed from executable source", () => 
   assert.equal(prepared.source.split("\n").length, source.split("\n").length);
 });
 
-test("export-like text in strings, comments, regexes, and templates is untouched", () => {
+void test("export-like text in strings, comments, regexes, and templates is untouched", () => {
   const source = `
     const string = "export default notSyntax";
     const template = \`export const meta = \${string}\`;
@@ -32,7 +32,7 @@ test("export-like text in strings, comments, regexes, and templates is untouched
   assert.deepEqual(prepared.meta, { phases: [] });
 });
 
-test("executable and unsupported metadata fail closed", () => {
+void test("executable and unsupported metadata fail closed", () => {
   assert.throws(
     () =>
       prepareWorkflowScript(

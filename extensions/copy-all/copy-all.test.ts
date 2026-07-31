@@ -6,7 +6,7 @@ import { resolveClipboardCommand, copyToClipboard } from "./index.ts";
 const WIN32_POWERSHELL_CLIPBOARD =
   "$reader = New-Object System.IO.StreamReader([Console]::OpenStandardInput(), [System.Text.Encoding]::UTF8); $text = $reader.ReadToEnd(); $reader.Close(); Set-Clipboard -Value $text";
 
-test("resolveClipboardCommand - win32 preferred powershell Set-Clipboard", () => {
+void test("resolveClipboardCommand - win32 preferred powershell Set-Clipboard", () => {
   const cmd = resolveClipboardCommand("win32", {}, (command) => command === "powershell");
   assert.equal(cmd.command, "powershell");
   assert.deepEqual(cmd.args, [
@@ -16,19 +16,19 @@ test("resolveClipboardCommand - win32 preferred powershell Set-Clipboard", () =>
   ]);
 });
 
-test("resolveClipboardCommand - win32 fallback clip.exe", () => {
+void test("resolveClipboardCommand - win32 fallback clip.exe", () => {
   const cmd = resolveClipboardCommand("win32", {}, (command) => command === "clip");
   assert.equal(cmd.command, "clip");
   assert.deepEqual(cmd.args, []);
 });
 
-test("resolveClipboardCommand - darwin uses pbcopy", () => {
+void test("resolveClipboardCommand - darwin uses pbcopy", () => {
   const cmd = resolveClipboardCommand("darwin", {});
   assert.equal(cmd.command, "pbcopy");
   assert.deepEqual(cmd.args, []);
 });
 
-test("resolveClipboardCommand - linux prefers wl-copy, fallback xclip, xsel", () => {
+void test("resolveClipboardCommand - linux prefers wl-copy, fallback xclip, xsel", () => {
   const cmdWl = resolveClipboardCommand("linux", { WAYLAND_DISPLAY: "wayland-0" }, (c) => c === "wl-copy");
   assert.equal(cmdWl.command, "wl-copy");
 
@@ -41,7 +41,7 @@ test("resolveClipboardCommand - linux prefers wl-copy, fallback xclip, xsel", ()
   assert.deepEqual(cmdXsel.args, ["-b"]);
 });
 
-test("copyToClipboard - failure returns ClipboardError readable error", async () => {
+void test("copyToClipboard - failure returns ClipboardError readable error", async () => {
   const mockSpawn = () => {
     const listeners: Record<string, Function[]> = {};
     const child: any = {
@@ -73,7 +73,7 @@ test("copyToClipboard - failure returns ClipboardError readable error", async ()
   assert.equal(Exit.isFailure(exit), true);
 });
 
-test(
+void test(
   "copyToClipboard - Windows preserves Vietnamese and multi-language Unicode",
   { skip: process.platform !== "win32" },
   async () => {

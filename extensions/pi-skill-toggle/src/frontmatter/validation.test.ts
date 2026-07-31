@@ -5,8 +5,8 @@ import { deriveSkillMetadata, getDuplicateFrontmatterKeys, hasDuplicateDisableMo
 
 const codec = new SimpleFrontmatterCodec();
 
-describe("frontmatter validation", () => {
-  it("reports duplicate top-level frontmatter keys", () => {
+void describe("frontmatter validation", () => {
+  void it("reports duplicate top-level frontmatter keys", () => {
     const doc = codec.parse([
       "---",
       "name: handoff",

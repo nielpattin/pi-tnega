@@ -9,8 +9,8 @@ import type { SkillRecord } from "../types.ts";
 const codec = new SimpleFrontmatterCodec();
 const patcher = new MinimalFrontmatterPatcher();
 
-describe("DefaultSkillTogglePlanner", () => {
-  it("plans a normalization change for duplicated disable-model-invocation keys even if the mode is unchanged", async () => {
+void describe("DefaultSkillTogglePlanner", () => {
+  void it("plans a normalization change for duplicated disable-model-invocation keys even if the mode is unchanged", async () => {
     const filePath = "/skills/handoff/SKILL.md";
     const raw = [
       "---",

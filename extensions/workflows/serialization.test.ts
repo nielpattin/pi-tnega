@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { safeStringify, shouldFallbackRenameError, writeFileAtomic } from "./serialization.ts";
 
-test("safeStringify handles cycles, bigint, depth, and size", () => {
+void test("safeStringify handles cycles, bigint, depth, and size", () => {
   const value: Record<string, unknown> = {
     bigint: 42n,
     nested: { deeper: { deepest: true } },
@@ -27,7 +27,7 @@ test("safeStringify handles cycles, bigint, depth, and size", () => {
   assert.match(text, /truncated/);
 });
 
-test("shouldFallbackRenameError detects Windows EPERM/EEXIST/EACCES", () => {
+void test("shouldFallbackRenameError detects Windows EPERM/EEXIST/EACCES", () => {
   if (process.platform === "win32") {
     assert.equal(shouldFallbackRenameError({ code: "EPERM" }), true);
     assert.equal(shouldFallbackRenameError({ code: "EEXIST" }), true);
@@ -38,7 +38,7 @@ test("shouldFallbackRenameError detects Windows EPERM/EEXIST/EACCES", () => {
   }
 });
 
-test("atomic writes leave complete readable content", () => {
+void test("atomic writes leave complete readable content", () => {
   const directory = mkdtempSync(join(tmpdir(), "pi-workflow-test-"));
   try {
     const file = join(directory, "artifact.json");
@@ -50,7 +50,7 @@ test("atomic writes leave complete readable content", () => {
   }
 });
 
-test("atomic writes fallback on rename EPERM/EACCES/EEXIST on Windows", () => {
+void test("atomic writes fallback on rename EPERM/EACCES/EEXIST on Windows", () => {
   const directory = mkdtempSync(join(tmpdir(), "pi-workflow-test-"));
   try {
     const file = join(directory, "artifact.json");

@@ -5,9 +5,9 @@ import { tmpdir } from "os";
 
 interface FakePi {
    execCalls: Array<{ command: string; args: string[] }>;
-   handlers: Record<string, (event: Record<string, unknown>, ctx: Record<string, unknown>) => unknown | Promise<unknown>>;
+   handlers: Record<string, (event: Record<string, unknown>, ctx: Record<string, unknown>) => unknown>;
    exec(command: string, args: string[]): Promise<unknown>;
-   on(name: string, handler: (event: Record<string, unknown>, ctx: Record<string, unknown>) => unknown | Promise<unknown>): void;
+   on(name: string, handler: (event: Record<string, unknown>, ctx: Record<string, unknown>) => unknown): void;
 }
 
 function createFakePi(): FakePi {

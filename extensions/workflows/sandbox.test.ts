@@ -18,7 +18,7 @@ function run(
   });
 }
 
-test("sandbox exposes only workflow capabilities and validates results", async () => {
+void test("sandbox exposes only workflow capabilities and validates results", async () => {
   const phases: string[] = [];
   const result = await run(
     `
@@ -45,7 +45,7 @@ test("sandbox exposes only workflow capabilities and validates results", async (
   assert.deepEqual(phases, ["Gather"]);
 });
 
-test("sandbox result serialization handles cycles and bigint", async () => {
+void test("sandbox result serialization handles cycles and bigint", async () => {
   const result = await run(`
     const value = { count: 7n };
     value.self = value;
@@ -54,7 +54,7 @@ test("sandbox result serialization handles cycles and bigint", async () => {
   assert.deepEqual(result, { count: "7n", self: "[circular]" });
 });
 
-test("sandbox rejects unawaited agent calls", async () => {
+void test("sandbox rejects unawaited agent calls", async () => {
   let calls = 0;
   await assert.rejects(
     run(`agent("orphan"); return "done";`, {
@@ -68,11 +68,11 @@ test("sandbox rejects unawaited agent calls", async () => {
   assert.equal(calls, 0);
 });
 
-test("sandbox VM still rejects non-yielding synchronous code", async () => {
+void test("sandbox VM still rejects non-yielding synchronous code", async () => {
   await assert.rejects(run(`while (true) {}`), /timed out/);
 });
 
-test("workflow agent invocations have no per-request wall timer", async () => {
+void test("workflow agent invocations have no per-request wall timer", async () => {
   let signalAborted = false;
   const result = await run(`return (await agent("delayed")).output;`, {
     onAgent: async (_prompt, _options, signal) => {
@@ -86,7 +86,7 @@ test("workflow agent invocations have no per-request wall timer", async () => {
   assert.equal(signalAborted, false);
 });
 
-test("workflow cancellation aborts a pending agent request", async () => {
+void test("workflow cancellation aborts a pending agent request", async () => {
   const controller = new AbortController();
   let startedResolve: (() => void) | undefined;
   const started = new Promise<void>((resolve) => {
@@ -117,7 +117,7 @@ test("workflow cancellation aborts a pending agent request", async () => {
   assert.equal(requestAborted, true);
 });
 
-test("buildWindowsTaskKillArgs formats taskkill arguments correctly", () => {
+void test("buildWindowsTaskKillArgs formats taskkill arguments correctly", () => {
   assert.deepEqual(buildWindowsTaskKillArgs(1234), ["/pid", "1234", "/T", "/F"]);
 });
 

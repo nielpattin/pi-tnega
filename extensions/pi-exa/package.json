@@ -22,14 +22,15 @@
       "url": "git+https://github.com/junnjiee/pi-exa.git"
    },
    "files": [
+      "index.ts",
       "src"
    ],
    "type": "module",
    "scripts": {
       "clean": "rm -rf node_modules",
       "build": "echo 'nothing to build (pi uses jiti)'",
-      "check": "tsc --noEmit",
-      "watch": "tsc --noEmit --watch"
+      "check": "tsc --noEmit -p tsconfig.json",
+      "watch": "tsc --noEmit -p tsconfig.json --watch"
    },
    "dependencies": {
       "@modelcontextprotocol/sdk": "^1.30.0",
@@ -51,7 +52,7 @@
    },
    "pi": {
       "extensions": [
-         "./src/pi-exa.ts"
+         "./index.ts"
       ]
    }
 }

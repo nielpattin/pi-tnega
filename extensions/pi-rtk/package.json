@@ -9,6 +9,9 @@
       "README.md"
    ],
    "type": "module",
+   "scripts": {
+      "typecheck": "tsc --noEmit -p tsconfig.json"
+   },
    "pi": {
       "extensions": [
          "./index.ts"

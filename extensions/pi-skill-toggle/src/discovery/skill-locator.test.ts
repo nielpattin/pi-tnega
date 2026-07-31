@@ -8,7 +8,7 @@ const ORIGINAL_HOME = process.env.HOME;
 const ORIGINAL_USERPROFILE = process.env.USERPROFILE;
 const ORIGINAL_PI_CODING_AGENT_DIR = process.env.PI_CODING_AGENT_DIR;
 
-describe("DefaultSkillLocator", () => {
+void describe("DefaultSkillLocator", () => {
   beforeEach(() => {
     const testHome = resolve("/home/tester");
     process.env.HOME = testHome;
@@ -22,7 +22,7 @@ describe("DefaultSkillLocator", () => {
     restoreEnv("PI_CODING_AGENT_DIR", ORIGINAL_PI_CODING_AGENT_DIR);
   });
 
-  it("finds global, user, and project skills with Pi root markdown discovery rules", async () => {
+  void it("finds global, user, and project skills with Pi root markdown discovery rules", async () => {
     const fs = new MemoryTreeFileSystem([
       "/home/tester/.pi/agent/skills/user-root.md",
       "/home/tester/.agents/skills/ignored-global-root.md",
@@ -90,7 +90,7 @@ class MemoryTreeFileSystem implements FileSystem {
         names.add(basename(file));
       }
     }
-    return [...names].sort().map((name) => {
+    return [...names].toSorted().map((name) => {
       const fullPath = join(p, name);
       return {
         name,

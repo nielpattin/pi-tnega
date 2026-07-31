@@ -2,11 +2,11 @@ import { getAgentDir, type ExtensionAPI, type ExtensionUIContext } from "@earend
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Type } from "typebox";
-import { getExa, resetExa } from "./exa";
-import { closeExaMcp, getExaMcp, getExaMcpTools } from "./exa_mcp";
-import { deepSearch, DeepSearchParams } from "./exa_deep_search";
-import { abortPromise, renderCall, renderTruncatedResult } from "./utils";
-import { getPiExaConfig, setPiExaConfig } from "./config";
+import { getExa, resetExa } from "./src/exa";
+import { closeExaMcp, getExaMcp, getExaMcpTools } from "./src/exa_mcp";
+import { deepSearch, DeepSearchParams } from "./src/exa_deep_search";
+import { abortPromise, renderCall, renderTruncatedResult } from "./src/utils";
+import { getPiExaConfig, setPiExaConfig } from "./src/config";
 
 const EXA_PROVIDER = "exa";
 const EXA_AUTH_PATH = join(getAgentDir(), "auth.json");
