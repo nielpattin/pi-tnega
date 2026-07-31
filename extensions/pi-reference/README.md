@@ -10,7 +10,7 @@ Declare additional directories — local paths or Git repositories — as access
 
 ## Installation
 
-This package is auto-discovered when placed in `~/.pi/agent/packages/pi-reference/`.
+This package is auto-discovered when placed in `~/.pi/agent/extensions/pi-reference/`.
 
 ## Configuration
 

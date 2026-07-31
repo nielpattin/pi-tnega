@@ -19,7 +19,8 @@
    "type": "module",
    "main": "./index.ts",
    "scripts": {
-      "test": "vitest run"
+      "test": "vitest run",
+      "typecheck": "tsc --noEmit -p tsconfig.json"
    },
    "peerDependencies": {
       "@earendil-works/pi-coding-agent": "*",
