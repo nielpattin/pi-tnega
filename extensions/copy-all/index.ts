@@ -1,5 +1,5 @@
 import { spawn, execSync } from "node:child_process";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Cause, Data, Effect, Exit } from "effect";
 
 export class ClipboardError extends Data.TaggedError("ClipboardError")<{
@@ -91,6 +91,37 @@ export function textFromContent(content: unknown) {
       .join("\n");
 }
 
+/**
+ * Format compaction-aware context entries for clipboard copy.
+ *
+ * Callers should pass `sessionManager.buildContextEntries()` so pre-compaction
+ * history is already dropped. Includes the latest compaction summary (if any)
+ * plus user/assistant messages in the active window.
+ */
+export function formatCopySections(entries: readonly SessionEntry[]): string[] {
+   const sections: string[] = [];
+
+   for (const entry of entries) {
+      if (entry.type === "compaction") {
+         const summary = entry.summary.trim();
+         if (summary) sections.push(`COMPACTION:\n${summary}`);
+         continue;
+      }
+
+      if (entry.type !== "message") continue;
+
+      const message = entry.message;
+      if (message.role !== "user" && message.role !== "assistant") continue;
+
+      const content = textFromContent(message.content).trim();
+      if (!content) continue;
+
+      sections.push(`${message.role.toUpperCase()}:\n${content}`);
+   }
+
+   return sections;
+}
+
 export function copyToClipboard(
    text: string,
    platform: string = process.platform,
@@ -151,21 +182,13 @@ async function runClipboardCopy(text: string, signal: AbortSignal | undefined) {
 
 export default function (pi: ExtensionAPI) {
    pi.registerCommand("copy-all", {
-      description: "Copy all previous user and assistant messages in this thread to the clipboard",
+      description:
+         "Copy the compaction summary and user/assistant messages from the last compaction to the active leaf",
       handler: async (_args, ctx) => {
          await ctx.waitForIdle();
 
-         const sections = ctx.sessionManager
-            .getBranch()
-            .filter((entry) => entry.type === "message")
-            .map((entry) => entry.message)
-            .filter((message) => message.role === "user" || message.role === "assistant")
-            .map((message) => ({
-               role: message.role,
-               content: textFromContent(message.content).trim()
-            }))
-            .filter(({ content }) => content)
-            .map(({ role, content }) => `${role.toUpperCase()}:\n${content}`);
+         // buildContextEntries drops pre-compaction history; getBranch() does not.
+         const sections = formatCopySections(ctx.sessionManager.buildContextEntries());
 
          if (sections.length === 0) {
             ctx.ui.notify("No user or assistant messages to copy", "info");
@@ -173,7 +196,7 @@ export default function (pi: ExtensionAPI) {
          }
 
          await runClipboardCopy(sections.join("\n\n---\n\n"), ctx.signal);
-         ctx.ui.notify(`Copied ${sections.length} messages to clipboard`, "info");
+         ctx.ui.notify(`Copied ${sections.length} sections to clipboard`, "info");
       }
    });
 }

@@ -1,14 +1,14 @@
 # copy-all
 
-Copy the current session transcript to the system clipboard.
+Copy the active post-compaction window of the current session to the system clipboard.
 
 ## What it does
 
 Registers one user command:
 
-| Command     | Purpose                                                    |
-| ----------- | ---------------------------------------------------------- |
-| `/copy-all` | Copy all previous user + assistant messages in this thread |
+| Command     | Purpose                                                                                  |
+| ----------- | ---------------------------------------------------------------------------------------- |
+| `/copy-all` | Copy the last compaction summary + user/assistant messages up to the current active leaf |
 
 It does **not** register model tools. This is a human-facing convenience command.
 
@@ -20,9 +20,14 @@ In Pi:
 /copy-all
 ```
 
-It waits until the agent is idle, then copies:
+It waits until the agent is idle, then uses `sessionManager.buildContextEntries()` so pre-compaction history is dropped. When the branch was compacted, the clipboard starts with the latest compaction summary:
 
 ```text
+COMPACTION:
+...
+
+---
+
 USER:
 ...
 
@@ -30,24 +35,24 @@ USER:
 
 ASSISTANT:
 ...
-
----
-
-USER:
-...
 ```
 
-If there are no user/assistant messages, it notifies and does nothing.
+If the session was never compacted, it copies the full active branch (user + assistant only).
+
+If there are no sections to copy, it notifies and does nothing.
 
 ## What gets copied
 
 Included:
 
-- user messages
-- assistant messages
+- latest compaction summary (when present on the active branch)
+- user messages after the last compaction (or the full branch if never compacted)
+- assistant messages in that same window
 
 Excluded:
 
+- messages summarized away by compaction (pre-`firstKeptEntryId`)
+- abandoned / non-active branches
 - tool results
 - custom system/extension entries
 - empty messages
