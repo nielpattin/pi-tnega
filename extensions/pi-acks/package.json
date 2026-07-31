@@ -1,0 +1,48 @@
+{
+   "name": "pi-acks",
+   "version": "0.1.0",
+   "private": true,
+   "description": "Pi extension for switching named OpenAI Codex subscription OAuth accounts. Local fork of @narumitw/pi-accounts.",
+   "keywords": [
+      "accounts",
+      "codex",
+      "oauth",
+      "pi",
+      "pi-extension",
+      "pi-package"
+   ],
+   "license": "MIT",
+   "files": [
+      "src",
+      "README.md",
+      "LICENSE"
+   ],
+   "type": "module",
+   "scripts": {
+      "check": "pnpm run typecheck && pnpm run test",
+      "typecheck": "tsc --noEmit -p tsconfig.json",
+      "test": "vitest run"
+   },
+   "dependencies": {
+      "@narumitw/pi-tui-kit": "^0.40.0",
+      "proper-lockfile": "^4.1.2"
+   },
+   "devDependencies": {
+      "@earendil-works/pi-ai": "0.83.0",
+      "@earendil-works/pi-coding-agent": "0.83.0",
+      "@earendil-works/pi-tui": "0.83.0",
+      "@types/node": "^26.1.2",
+      "@types/proper-lockfile": "^4.1.4",
+      "typescript": "^7.0.2",
+      "vitest": "^4.1.10"
+   },
+   "peerDependencies": {
+      "@earendil-works/pi-ai": "*",
+      "@earendil-works/pi-coding-agent": "*"
+   },
+   "pi": {
+      "extensions": [
+         "./index.ts"
+      ]
+   }
+}
