@@ -12,7 +12,7 @@ test("render scheduler coalesces pending status renders", () => {
    globalThis.setTimeout = ((callback: () => void, delay?: number) => {
       callbacks.push(callback);
       delays.push(delay ?? 0);
-      return { id: callbacks.length } as ReturnType<typeof setTimeout>;
+      return { id: callbacks.length } as unknown as ReturnType<typeof setTimeout>;
    }) as typeof setTimeout;
 
    try {
@@ -47,7 +47,7 @@ test("render scheduler allows callbacks to schedule follow-up renders", () => {
    globalThis.setTimeout = ((callback: () => void, delay?: number) => {
       callbacks.push(callback);
       delays.push(delay ?? 0);
-      return { id: callbacks.length } as ReturnType<typeof setTimeout>;
+      return { id: callbacks.length } as unknown as ReturnType<typeof setTimeout>;
    }) as typeof setTimeout;
 
    try {
@@ -82,7 +82,7 @@ test("render scheduler cancels pending status renders", () => {
    globalThis.setTimeout = ((callback: () => void) => {
       const handle = { id: callbacks.length + 1 };
       callbacks.push(callback);
-      return handle as ReturnType<typeof setTimeout>;
+      return handle as unknown as ReturnType<typeof setTimeout>;
    }) as typeof setTimeout;
    globalThis.clearTimeout = ((handle?: ReturnType<typeof setTimeout>) => {
       if (handle && typeof handle === "object") {

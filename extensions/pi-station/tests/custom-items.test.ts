@@ -66,7 +66,7 @@ test("mergeSegmentsWithCustomItems appends custom segment ids by position", () =
          leftSegments: ["path"],
          rightSegments: ["git"],
          secondarySegments: ["extension_statuses"],
-         separator: "station",
+         separator: "thin",
       },
       [
          {

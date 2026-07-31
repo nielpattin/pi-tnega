@@ -10,7 +10,7 @@
       builtins marked external. `pi.extensions` points at `./dist/index.js`.
       dist/ is gitignored and rebuilt locally + in CI (publish.yml gained a
       "Build package" step). After editing pi-station source, run
-      `pnpm --dir packages/pi-station build` before /reload.
+      `/reload` after source edits.
     - The edit tool's renderCall now computes its diff preview synchronously
       (new `computeEditPreviewSync`) whenever a renderable edit input is
       present, so the diff appears in the chat the moment the permission

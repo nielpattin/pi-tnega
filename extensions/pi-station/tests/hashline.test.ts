@@ -19,12 +19,12 @@ describe("hashline read", () => {
    test("renders long read paths on one width-aware row", () => {
       const row = new ReadCallRow(
          {
-            path: "C:/Users/niel/.pi/agent/packages/pi-station/fixed-editor/terminal-split.ts",
+            path: "C:/Users/niel/.pi/agent/extensions/pi-station/fixed-editor/terminal-split.ts",
             offset: 670,
             limit: 190,
          },
          theme as any,
-         "C:/Users/niel/.pi/agent/packages/pi-station",
+         "C:/Users/niel/.pi/agent/extensions/pi-station",
       );
 
       const rendered = row.render(60);

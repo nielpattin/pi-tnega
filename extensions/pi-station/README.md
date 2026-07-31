@@ -18,13 +18,7 @@ Restart pi to activate.
 
 ## Development
 
-pi-station is a built package. Source in `index.ts` and `features/` is bundled to `dist/` with esbuild (`pnpm --dir packages/pi-station build`, ~50ms). `pi.extensions` points at `./dist/index.js`, so after editing source you MUST rebuild before `/reload` picks up changes:
-
-```bash
-pnpm --dir packages/pi-station build
-```
-
-`dist/` is gitignored and rebuilt locally and in CI. The `features/hashline/edit-tool` subpath is exported for consumers (e.g. `pi-permission-system` reuses the edit tool's diff rendering).
+pi-station is a raw TypeScript extension. Pi loads `index.ts` directly through jiti, so no build step is required; `/reload` picks up source edits immediately. The `features/hashline/edit-tool` subpath is exported for consumers (e.g. `pi-permission-system` reuses the edit tool's diff rendering).
 
 ## Commands
 

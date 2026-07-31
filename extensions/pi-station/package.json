@@ -10,7 +10,7 @@
       "station-bar",
       "status-bar"
    ],
-   "homepage": "https://github.com/nielpattin/pi-packages/tree/main/packages/pi-station#readme",
+   "homepage": "https://github.com/nielpattin/pi-packages/tree/main/extensions/pi-station#readme",
    "bugs": {
       "url": "https://github.com/nielpattin/pi-packages/issues"
    },
@@ -19,10 +19,11 @@
    "repository": {
       "type": "git",
       "url": "git+https://github.com/nielpattin/pi-packages.git",
-      "directory": "packages/pi-station"
+      "directory": "extensions/pi-station"
    },
    "files": [
-      "dist",
+      "*.ts",
+      "features",
       ".pi/agents",
       "theme.example.json",
       "README.md",
@@ -30,13 +31,13 @@
       "LICENSE"
    ],
    "type": "module",
-   "main": "./dist/index.js",
+   "main": "./index.ts",
    "exports": {
       ".": {
-         "default": "./dist/index.js"
+         "default": "./index.ts"
       },
       "./features/hashline/edit-tool": {
-         "default": "./dist/features/hashline/edit-tool.js"
+         "default": "./features/hashline/edit-tool.ts"
       },
       "./package.json": "./package.json"
    },
@@ -44,28 +45,26 @@
       "access": "public"
    },
    "scripts": {
-      "build": "node scripts/build.mjs",
-      "test": "vitest run"
+      "test": "vitest run",
+      "typecheck": "tsc --noEmit -p tsconfig.json"
    },
    "dependencies": {
       "diff": "^9.0.0",
       "file-type": "^22.0.1",
       "xxhashjs": "^0.2.2"
    },
-   "devDependencies": {
-      "esbuild": "^0.28.1"
-   },
+   "devDependencies": {},
    "peerDependencies": {
       "@earendil-works/pi-ai": "*",
       "@earendil-works/pi-coding-agent": "*",
-      "@earendil-works/pi-tui": "*"
+      "@earendil-works/pi-tui": "^0.83.0"
    },
    "engines": {
       "node": ">=24"
    },
    "pi": {
       "extensions": [
-         "./dist/index.js"
+         "./index.ts"
       ]
    }
 }
