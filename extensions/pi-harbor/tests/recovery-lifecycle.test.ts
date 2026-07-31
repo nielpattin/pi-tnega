@@ -65,7 +65,7 @@ function createMockPi(opts?: { settingsExtensions?: string[] }) {
             name: t.name,
             description: t.name,
             parameters: {},
-            sourceInfo: { path: "packages/pi-harbor/index.ts" }
+            sourceInfo: { path: "extensions/pi-harbor/index.ts" }
          })),
       getActiveTools: () => activeTools,
       setActiveTools: vi.fn((names: string[]) => {
@@ -101,9 +101,7 @@ function createMockPi(opts?: { settingsExtensions?: string[] }) {
       entries,
       eventHandlers,
       emit: async (event: string, payload: unknown, ctx: unknown) => {
-         for (const handler of eventHandlers.get(event) ?? []) {
-            await handler(payload, ctx);
-         }
+         await Promise.all((eventHandlers.get(event) ?? []).map((handler) => handler(payload, ctx)));
       }
    };
 }
@@ -147,7 +145,7 @@ describe("Harbor recovery lifecycle", () => {
       );
 
       const jobsAfterA = await runTool(runtime, JobRegistry.use((r) => r.list()));
-      expect(jobsAfterA.map((j) => j.name).sort()).toEqual(["after a", "in-a"].sort());
+      expect(jobsAfterA.map((j) => j.name).toSorted((x, y) => (x ?? "").localeCompare(y ?? ""))).toEqual(["after a", "in-a"].toSorted((x, y) => (x ?? "").localeCompare(y ?? "")));
 
       await runTool(runtime, flushPendingWrites());
 
@@ -183,7 +181,7 @@ describe("Harbor recovery lifecycle", () => {
       currentFile = a.parentFile;
       await mock.emit("session_start", {}, ctx);
       const jobsBackToA = await runTool(runtime, JobRegistry.use((r) => r.list()));
-      expect(jobsBackToA.map((j) => j.name).sort()).toEqual(["after a", "in-a"].sort());
+      expect(jobsBackToA.map((j) => j.name).toSorted((x, y) => (x ?? "").localeCompare(y ?? ""))).toEqual(["after a", "in-a"].toSorted((x, y) => (x ?? "").localeCompare(y ?? "")));
 
       await runtime.dispose();
 
@@ -229,39 +227,44 @@ describe("Harbor recovery lifecycle", () => {
          const aManifestPath = path.join(a.childDir, "harbor-jobs.json");
          const aManifestBeforeInvalid = fs.readFileSync(aManifestPath, "utf8");
 
-         for (const invalid of [
+         const invalidTargets = [
             path.join(a.base, "not-a-session.txt"),
             "C:\\\\Sessions\\\\not-a-session.txt"
-         ]) {
-            currentFile = invalid;
-            await mock.emit("session_start", {}, ctx);
+         ];
+         await invalidTargets.reduce(
+            async (chain, invalid) => {
+               await chain;
+               currentFile = invalid;
+               await mock.emit("session_start", {}, ctx);
 
-            expect(await runTool(runtime, persistence.currentTarget())).toBeUndefined();
-            expect(await runTool(runtime, JobRegistry.use((r) => r.list()))).toHaveLength(0);
+               expect(await runTool(runtime, persistence.currentTarget())).toBeUndefined();
+               expect(await runTool(runtime, JobRegistry.use((r) => r.list()))).toHaveLength(0);
 
-            const invalidResult = await taskTool.execute!(
-               "tc-invalid",
-               { task: "ephemeral work", name: "ephemeral", background: true },
-               undefined,
-               undefined,
-               ctx
-            );
-            expect(JSON.parse(invalidResult.content[0].text).ok).toBe(true);
-            const secondInvalidResult = await taskTool.execute!(
-               "tc-invalid-2",
-               { task: "another ephemeral work item", name: "ephemeral-2", background: true },
-               undefined,
-               undefined,
-               ctx
-            );
-            expect(JSON.parse(secondInvalidResult.content[0].text).ok).toBe(true);
-            await runTool(runtime, flushPendingWrites());
-            expect(fs.readFileSync(aManifestPath, "utf8")).toBe(aManifestBeforeInvalid);
+               const invalidResult = await taskTool.execute!(
+                  "tc-invalid",
+                  { task: "ephemeral work", name: "ephemeral", background: true },
+                  undefined,
+                  undefined,
+                  ctx
+               );
+               expect(JSON.parse(invalidResult.content[0].text).ok).toBe(true);
+               const secondInvalidResult = await taskTool.execute!(
+                  "tc-invalid-2",
+                  { task: "another ephemeral work item", name: "ephemeral-2", background: true },
+                  undefined,
+                  undefined,
+                  ctx
+               );
+               expect(JSON.parse(secondInvalidResult.content[0].text).ok).toBe(true);
+               await runTool(runtime, flushPendingWrites());
+               expect(fs.readFileSync(aManifestPath, "utf8")).toBe(aManifestBeforeInvalid);
 
-            // Session-start activation on the next malformed path must not inherit
-            // the ephemeral jobs from the prior invalid phase either.
-            expect(await runTool(runtime, JobRegistry.use((r) => r.list()))).toHaveLength(2);
-         }
+               // Session-start activation on the next malformed path must not inherit
+               // the ephemeral jobs from the prior invalid phase either.
+               expect(await runTool(runtime, JobRegistry.use((r) => r.list()))).toHaveLength(2);
+            },
+            Promise.resolve()
+         );
 
          currentFile = b.parentFile;
          await mock.emit("session_start", {}, ctx);
@@ -279,7 +282,7 @@ describe("Harbor recovery lifecycle", () => {
          await runTool(runtime, flushPendingWrites());
 
          const bIndex = JSON.parse(fs.readFileSync(path.join(b.childDir, "harbor-jobs.json"), "utf8"));
-         expect(bIndex.jobs.map((job: Job) => job.name).sort()).toEqual(["after b", "in-b"].sort());
+         expect(bIndex.jobs.map((job: Job) => job.name).toSorted()).toEqual(["after b", "in-b"].toSorted());
       } finally {
          await runtime.dispose();
          fs.rmSync(a.base, { recursive: true, force: true });
@@ -373,13 +376,13 @@ describe("Harbor recovery lifecycle", () => {
       await mock.emit("session_start", {}, ctx);
 
       const jobs = await runTool(runtime, JobRegistry.use((r) => r.list()));
-      expect(jobs.map((j) => j.id).sort()).toEqual(["task-1", "task-2", "task-3"]);
+      expect(jobs.map((j) => j.id).toSorted()).toEqual(["task-1", "task-2", "task-3"]);
       expect(jobs.find((j) => j.id === "task-3")!.status).toBe("failed");
 
       const indexPath = path.join(a.childDir, "harbor-jobs.json");
       const index = JSON.parse(fs.readFileSync(indexPath, "utf8"));
       expect(index.jobs).toHaveLength(3);
-      expect(index.jobs.map((j: Job) => j.name).sort()).toEqual(["one", "three", "two"].sort());
+      expect(index.jobs.map((j: Job) => j.name).toSorted()).toEqual(["one", "three", "two"].toSorted());
 
       const leftovers = fs.readdirSync(a.childDir).filter((f) => f.startsWith("harbor-jobs.json.tmp-"));
       expect(leftovers).toHaveLength(0);
@@ -428,7 +431,7 @@ describe("Harbor recovery lifecycle", () => {
       expect(payload.id).toBe("task-6");
 
       const jobs = await runTool(runtime, JobRegistry.use((r) => r.list()));
-      expect(jobs.map((j) => j.id).sort()).toEqual(["task-5", "task-6"]);
+      expect(jobs.map((j) => j.id).toSorted()).toEqual(["task-5", "task-6"]);
 
       await runtime.dispose();
       fs.rmSync(a.base, { recursive: true, force: true });
@@ -458,10 +461,9 @@ describe("Harbor recovery lifecycle", () => {
       );
 
       expect(Exit.isFailure(exit)).toBe(true);
-      if (Exit.isFailure(exit)) {
-         const message = Cause.pretty(exit.cause);
-         expect(message).toContain("DuplicateJobError");
-      }
+      const exitFailure = exit as Extract<typeof exit, { _tag: "Failure" }>;
+      const message = Cause.pretty(exitFailure.cause);
+      expect(message).toContain("DuplicateJobError");
       await runtime.dispose();
    });
 

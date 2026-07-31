@@ -238,17 +238,21 @@ describe("TaskManager Service", () => {
     const testRuntime = ManagedRuntime.make(LiveLayer);
     const jobs: string[] = [];
 
-    // Spawn 4 running tasks
-    for (let i = 1; i <= 4; i++) {
-      const j = await testRuntime.runPromise(
-        TaskManager.use((svc) =>
-          svc.spawnTask({
-            task: `Task ${i}`
-          })
-        )
-      );
-      jobs.push(j.id);
-    }
+    // Spawn 4 running tasks (sequential so the cap check sees a deterministic count)
+    await Array.from({ length: 4 }, (_, index) => index + 1).reduce(
+      async (prev, i) => {
+        await prev;
+        const j = await testRuntime.runPromise(
+          TaskManager.use((svc) =>
+            svc.spawnTask({
+              task: `Task ${i}`
+            })
+          )
+        );
+        jobs.push(j.id);
+      },
+      Promise.resolve()
+    );
 
     // 5th task spawn must fail with ConcurrencyLimitError
     const exit = await testRuntime.runPromiseExit(
@@ -260,9 +264,8 @@ describe("TaskManager Service", () => {
     );
 
     expect(exit._tag).toBe("Failure");
-    if (exit._tag === "Failure") {
-      expect(JSON.stringify(exit.cause)).toContain("ConcurrencyLimitError");
-    }
+    const _tagNarrowed = exit as Extract<typeof exit, { _tag: "Failure" }>;
+   expect(JSON.stringify(_tagNarrowed.cause)).toContain("ConcurrencyLimitError");
   });
 
   it("cancelJob aborts backend and updates job status to cancelled", async () => {

@@ -166,13 +166,15 @@ describe("submit tool", () => {
       { items: ["a", "b"] }
     ];
 
-    for (const payload of invalidPayloads) {
-      const res = await runtime.runPromise(
-        handleSubmit({ result: { data: payload } }, { jobId: job.id, expectedSchema: jsonSchema })
-      );
-      expect(res.ok).toBe(false);
-      expect(res.status).toBeUndefined();
-    }
+    await Promise.all(
+      invalidPayloads.map(async (payload) => {
+        const res = await runtime.runPromise(
+          handleSubmit({ result: { data: payload } }, { jobId: job.id, expectedSchema: jsonSchema })
+        );
+        expect(res.ok).toBe(false);
+        expect(res.status).toBeUndefined();
+      })
+    );
 
     const validPayload = { items: ["alpha", "beta", "gamma"], total: 3 };
     const validRes = await runtime.runPromise(

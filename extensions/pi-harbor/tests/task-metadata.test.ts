@@ -24,7 +24,7 @@ describe("task tool dynamic agent metadata", () => {
                promptSnippet: t.promptSnippet,
                promptGuidelines: t.promptGuidelines,
                parameters: t.parameters ?? {},
-               sourceInfo: { path: "packages/pi-harbor/index.ts" }
+               sourceInfo: { path: "extensions/pi-harbor/index.ts" }
             })),
          getActiveTools: () => registeredTools.map((t) => t.name),
          setActiveTools: vi.fn(),
@@ -50,9 +50,7 @@ describe("task tool dynamic agent metadata", () => {
          pi: pi as any,
          registeredTools,
          emit: async (event: string, payload: unknown, ctx: unknown) => {
-            for (const handler of eventHandlers.get(event) ?? []) {
-               await handler(payload, ctx);
-            }
+            await Promise.all((eventHandlers.get(event) ?? []).map((handler) => handler(payload, ctx)));
          }
       };
    }

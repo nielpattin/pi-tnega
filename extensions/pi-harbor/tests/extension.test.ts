@@ -50,7 +50,7 @@ function createMockPi(opts?: {
             promptSnippet: t.promptSnippet,
             promptGuidelines: t.promptGuidelines,
             parameters: t.parameters ?? {},
-            sourceInfo: { path: "packages/pi-harbor/index.ts" }
+            sourceInfo: { path: "extensions/pi-harbor/index.ts" }
          }))
       ],
       getActiveTools: () => activeTools,
@@ -100,7 +100,7 @@ function createMockPi(opts?: {
       entries,
       activeTools: () => activeTools,
       emit: async (event: string, payload: unknown, ctx: unknown) => {
-         for (const handler of eventHandlers.get(event) ?? []) await handler(payload, ctx);
+         await Promise.all((eventHandlers.get(event) ?? []).map((handler) => handler(payload, ctx)));
       }
    };
 }
@@ -115,10 +115,9 @@ describe("Harbor Extension Registration & Real Wiring", () => {
       const res = registerHarborExtension(mock.pi, { settingsExtensions: settings, runtime });
 
       expect(res.ok).toBe(true);
-      if (res.ok) {
-         expect(res.registered).toBe("full");
-         expect(res.cutoverOk).toBe(true);
-      }
+      const okNarrowed = res as Extract<typeof res, { ok: true }>;
+      expect(okNarrowed.registered).toBe("full");
+      expect(okNarrowed.cutoverOk).toBe(true);
 
       const toolNames = mock.registeredTools.map((t) => t.name);
       expect(toolNames).toEqual(expect.arrayContaining(["task", "hub", "submit", "vibe"]));
@@ -153,7 +152,7 @@ describe("Harbor Extension Registration & Real Wiring", () => {
          expect(typeof tool?.renderResult).toBe("function");
       }
 
-      expect(mock.registeredCommands.map((c) => c.name).sort()).toEqual(["agents", "btw", "tasks", "vibe"]);
+      expect(mock.registeredCommands.map((c) => c.name).toSorted()).toEqual(["agents", "btw", "tasks", "vibe"]);
       for (const cmd of mock.registeredCommands) {
          expect(typeof cmd.handler).toBe("function");
       }
@@ -832,7 +831,7 @@ describe("Harbor result message renderer", () => {
    it("registers a harbor-result custom message renderer", () => {
       const { mock, runtime } = setup();
       expect(mock.messageRenderers).toContain("harbor-result");
-      runtime.dispose();
+      void runtime.dispose();
    });
 
    it("renders a completed background result with tool result background fill behind the bg badge, separator, and body", () => {
@@ -852,9 +851,9 @@ describe("Harbor result message renderer", () => {
       expect(lines).toHaveLength(5);
       expect(lines[0]).toBe(`<bg:toolSuccessBg:${padToWidth(" ", width)}>`);
       expect(lines[1]).toBe(`<bg:toolSuccessBg:${padToWidth(" " + header, width)}>`);
-      expect(lines[2]).toBe(`<bg:toolSuccessBg:${padToWidth(" " + "<dim:--->", width)}>`);
+      expect(lines[2]).toBe(`<bg:toolSuccessBg:${padToWidth(" <dim:--->", width)}>`);
       expect(lines[3]).toBe(
-         `<bg:toolSuccessBg:${padToWidth(" " + "<toolOutput:The background task finished successfully.>", width)}>`
+         `<bg:toolSuccessBg:${padToWidth(" <toolOutput:The background task finished successfully.>", width)}>`
       );
       expect(lines[4]).toBe(`<bg:toolSuccessBg:${padToWidth(" ", width)}>`);
       expect(everyLineUsesBg(lines, "toolSuccessBg")).toBe(true);
@@ -871,7 +870,7 @@ describe("Harbor result message renderer", () => {
          Array(lines.length).fill("toolSuccessBg")
       );
 
-      runtime.dispose();
+      void runtime.dispose();
    });
 
    it("renders a failed background result with error tokens and a tool-error background fill", () => {
@@ -890,7 +889,7 @@ describe("Harbor result message renderer", () => {
 
       expect(lines).toHaveLength(5);
       expect(lines[1]).toBe(`<bg:toolErrorBg:${padToWidth(" " + header, width)}>`);
-      expect(lines[3]).toBe(`<bg:toolErrorBg:${padToWidth(" " + "<toolOutput:Something broke.>", width)}>`);
+      expect(lines[3]).toBe(`<bg:toolErrorBg:${padToWidth(" <toolOutput:Something broke.>", width)}>`);
       expect(everyLineUsesBg(lines, "toolErrorBg")).toBe(true);
       expect(colors).toEqual([
          { color: "customMessageLabel", text: "[bg]" },
@@ -903,7 +902,7 @@ describe("Harbor result message renderer", () => {
       ]);
       expect(withoutBgSample(backgrounds).map((entry) => entry.color)).toEqual(Array(lines.length).fill("toolErrorBg"));
 
-      runtime.dispose();
+      void runtime.dispose();
    });
 
    it("renders a cancelled background result with the error terminal mark after the status text", () => {
@@ -923,9 +922,9 @@ describe("Harbor result message renderer", () => {
       expect(lines).toHaveLength(5);
       expect(lines[0]).toBe(`<bg:toolErrorBg:${padToWidth(" ", width)}>`);
       expect(lines[1]).toBe(`<bg:toolErrorBg:${padToWidth(" " + header, width)}>`);
-      expect(lines[2]).toBe(`<bg:toolErrorBg:${padToWidth(" " + "<dim:--->", width)}>`);
+      expect(lines[2]).toBe(`<bg:toolErrorBg:${padToWidth(" <dim:--->", width)}>`);
       expect(lines[3]).toBe(
-         `<bg:toolErrorBg:${padToWidth(" " + "<toolOutput:The task was cancelled.>", width)}>`
+         `<bg:toolErrorBg:${padToWidth(" <toolOutput:The task was cancelled.>", width)}>`
       );
       expect(lines[4]).toBe(`<bg:toolErrorBg:${padToWidth(" ", width)}>`);
       expect(everyLineUsesBg(lines, "toolErrorBg")).toBe(true);
@@ -942,7 +941,7 @@ describe("Harbor result message renderer", () => {
          Array(lines.length).fill("toolErrorBg")
       );
 
-      runtime.dispose();
+      void runtime.dispose();
    });
 
    it("collapses and expands long background results while preserving the background fill", () => {
@@ -987,7 +986,7 @@ describe("Harbor result message renderer", () => {
          Array(expanded.length).fill("toolSuccessBg")
       );
 
-      runtime.dispose();
+      void runtime.dispose();
    });
 
    it("collapsed truncated result shows the native expand keybinding hint with the omitted-line count", () => {
@@ -1007,8 +1006,8 @@ describe("Harbor result message renderer", () => {
       expect(unwrapBg(lines[lines.length - 2], "toolSuccessBg")?.trim()).toBe(
          "<muted:... (4 more lines,> <dim:ctrl+o><muted: to expand><muted:)>"
       );
-      expect(lines.every((line) => !line.includes("… expand for full result")));
-      runtime.dispose();
+      expect(lines.every((line) => !line.includes("… expand for full result"))).toBe(true);
+      void runtime.dispose();
    });
 
    it("collapsed non-truncated result omits the expand hint", () => {
@@ -1027,7 +1026,7 @@ describe("Harbor result message renderer", () => {
       expect(lines).toHaveLength(7); // top + header + separator + 3 body lines + bottom
       expect(lines.some((line) => line.includes("to expand"))).toBe(false);
       expect(lines.some((line) => line.includes("more line"))).toBe(false);
-      runtime.dispose();
+      void runtime.dispose();
    });
 
    it("expanded result shows the full body and omits the expand/collapse hint", () => {
@@ -1047,7 +1046,7 @@ describe("Harbor result message renderer", () => {
       expect(unwrapBg(lines[lines.length - 2], "toolSuccessBg")?.trim()).toBe("<toolOutput:Line 12>");
       expect(lines.some((line) => line.includes("to expand"))).toBe(false);
       expect(lines.some((line) => line.includes("more line"))).toBe(false);
-      runtime.dispose();
+      void runtime.dispose();
    });
 
    it("uses the configured app.tools.expand keybinding for the expand hint", () => {
@@ -1070,7 +1069,7 @@ describe("Harbor result message renderer", () => {
       );
 
       setKeybindings(previousKeybindings);
-      runtime.dispose();
+      void runtime.dispose();
    });
 
    it("uses theme.bg for a true full-width background fill, not foreground theme tokens, including padding and failed results", () => {
@@ -1127,6 +1126,6 @@ describe("Harbor result message renderer", () => {
       expect(withoutBgSample(success.backgrounds)).toHaveLength(successLines.length);
       expect(withoutBgSample(failed.backgrounds)).toHaveLength(failedLines.length);
 
-      runtime.dispose();
+      void runtime.dispose();
    });
 });

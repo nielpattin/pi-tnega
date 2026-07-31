@@ -48,7 +48,7 @@ function createMockPi(opts?: { settingsExtensions?: string[] }) {
             name: t.name,
             description: t.name,
             parameters: {},
-            sourceInfo: { path: "packages/pi-harbor/index.ts" }
+            sourceInfo: { path: "extensions/pi-harbor/index.ts" }
          })),
       getActiveTools: () => activeTools,
       setActiveTools: vi.fn((names: string[]) => {
@@ -84,9 +84,7 @@ function createMockPi(opts?: { settingsExtensions?: string[] }) {
       registeredCommands,
       entries,
       emit: async (event: string, payload: unknown, ctx: unknown) => {
-         for (const handler of eventHandlers.get(event) ?? []) {
-            await handler(payload, ctx);
-         }
+         await Promise.all((eventHandlers.get(event) ?? []).map((handler) => handler(payload, ctx)));
       }
    };
 }

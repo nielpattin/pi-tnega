@@ -42,19 +42,23 @@ describe("ProcessSupervisor & ShellExecutor Service", () => {
     const testRuntime = ManagedRuntime.make(LiveLayer);
     const names: string[] = [];
 
-    // Start 8 processes
-    for (let i = 1; i <= 8; i++) {
-      const name = `proc-cap-${i}`;
-      names.push(name);
-      await testRuntime.runPromise(
-        ProcessSupervisor.use((svc) =>
-          svc.start({
-            name,
-            command: "node -e \"setTimeout(() => {}, 10000)\""
-          })
-        )
-      );
-    }
+    // Start 8 processes (sequential so the cap check sees a deterministic count)
+    await Array.from({ length: 8 }, (_, index) => index + 1).reduce(
+      async (prev, i) => {
+        await prev;
+        const name = `proc-cap-${i}`;
+        names.push(name);
+        await testRuntime.runPromise(
+          ProcessSupervisor.use((svc) =>
+            svc.start({
+              name,
+              command: "node -e \"setTimeout(() => {}, 10000)\""
+            })
+          )
+        );
+      },
+      Promise.resolve()
+    );
 
     // 9th start should fail with ConcurrencyLimitError
     const exit = await testRuntime.runPromiseExit(
@@ -67,15 +71,16 @@ describe("ProcessSupervisor & ShellExecutor Service", () => {
     );
 
     expect(exit._tag).toBe("Failure");
-    if (exit._tag === "Failure") {
-      expect(JSON.stringify(exit.cause)).toContain("ConcurrencyLimitError");
-    }
+    const _tagNarrowed = exit as Extract<typeof exit, { _tag: "Failure" }>;
+   expect(JSON.stringify(_tagNarrowed.cause)).toContain("ConcurrencyLimitError");
 
     // Cleanup spawned processes
-    for (const n of names) {
-      await testRuntime.runPromise(
-        ProcessSupervisor.use((svc) => svc.stop(n))
-      );
-    }
+    await Promise.all(
+      names.map((n) =>
+        testRuntime.runPromise(
+          ProcessSupervisor.use((svc) => svc.stop(n))
+        )
+      )
+    );
   });
 });

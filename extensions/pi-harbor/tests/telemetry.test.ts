@@ -81,10 +81,9 @@ describe("Process Telemetry Utilities & Formatters", () => {
       const result = await runtime.runPromise(defaultTelemetryReader(process.pid));
 
       expect(result.status).toBe("available");
-      if (result.status === "available") {
-         expect(result.pid).toBe(process.pid);
-         expect(result.memoryRssBytes).toBeGreaterThan(0);
-      }
+      const statusNarrowed = result as Extract<typeof result, { status: "available" }>;
+      expect(statusNarrowed.pid).toBe(process.pid);
+      expect(statusNarrowed.memoryRssBytes).toBeGreaterThan(0);
       await runtime.dispose();
    });
 
@@ -93,9 +92,8 @@ describe("Process Telemetry Utilities & Formatters", () => {
       const result = await runtime.runPromise(defaultTelemetryReader(-1));
 
       expect(result.status).toBe("unavailable");
-      if (result.status === "unavailable") {
-         expect(result.reason).toContain("Invalid");
-      }
+      const statusNarrowed = result as Extract<typeof result, { status: "unavailable" }>;
+      expect(statusNarrowed.reason).toContain("Invalid");
       await runtime.dispose();
    });
 });
@@ -129,10 +127,9 @@ describe("ProcessSupervisor.telemetry Integration", () => {
       );
 
       expect(telemetry.status).toBe("available");
-      if (telemetry.status === "available") {
-         expect(telemetry.cpuPercent).toBe(25.0);
-         expect(telemetry.memoryRssBytes).toBe(100 * 1024 * 1024);
-      }
+      const statusNarrowed = telemetry as Extract<typeof telemetry, { status: "available" }>;
+      expect(statusNarrowed.cpuPercent).toBe(25.0);
+      expect(statusNarrowed.memoryRssBytes).toBe(100 * 1024 * 1024);
 
       await runtime.runPromise(ProcessSupervisor.use((svc) => svc.stop("telemetry-proc")));
       await runtime.dispose();
@@ -157,9 +154,8 @@ describe("ProcessSupervisor.telemetry Integration", () => {
       );
 
       expect(telemetry.status).toBe("unavailable");
-      if (telemetry.status === "unavailable") {
-         expect(telemetry.reason).toContain("exited");
-      }
+      const statusNarrowed = telemetry as Extract<typeof telemetry, { status: "unavailable" }>;
+      expect(statusNarrowed.reason).toContain("exited");
 
       await runtime.dispose();
    });

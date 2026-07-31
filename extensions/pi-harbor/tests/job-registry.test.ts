@@ -51,24 +51,28 @@ describe("JobRegistry Service", () => {
   });
 
   it("prunes settled jobs with interest=0 when MAX_TRACKED_JOBS (64) is reached", async () => {
-    // Fill up to 64 completed jobs
-    for (let i = 1; i <= 64; i++) {
-      const id = `task-batch-${i}`;
-      await runtime.runPromise(
-        JobRegistry.use((svc) =>
-          svc.register({
-            id,
-            ownerSessionId: "session-1",
-            name: `Job ${i}`,
-            kind: "agent",
-            promptOrCommand: "prompt"
-          })
-        )
-      );
-      await runtime.runPromise(
-        JobRegistry.use((svc) => svc.updateStatus(id, "completed"))
-      );
-    }
+    // Fill up to 64 completed jobs (sequential so pruning sees a deterministic state)
+    await Array.from({ length: 64 }, (_, index) => index + 1).reduce(
+      async (prev, i) => {
+        await prev;
+        const id = `task-batch-${i}`;
+        await runtime.runPromise(
+          JobRegistry.use((svc) =>
+            svc.register({
+              id,
+              ownerSessionId: "session-1",
+              name: `Job ${i}`,
+              kind: "agent",
+              promptOrCommand: "prompt"
+            })
+          )
+        );
+        await runtime.runPromise(
+          JobRegistry.use((svc) => svc.updateStatus(id, "completed"))
+        );
+      },
+      Promise.resolve()
+    );
 
     // Registering 65th job should trigger prune of older settled jobs and succeed
     const job65 = await runtime.runPromise(
@@ -110,21 +114,24 @@ describe("JobRegistry Service", () => {
     );
 
     // Add a few completed non-background jobs but stay well under the cap.
-    for (let i = 1; i <= 8; i++) {
-      const id = `task-filler-${i}`;
-      await testRuntime.runPromise(
-        JobRegistry.use((svc) =>
-          svc.register({
-            id,
-            ownerSessionId: "session-1",
-            name: `Filler ${i}`,
-            kind: "agent",
-            promptOrCommand: "prompt"
-          })
-        )
-      );
-      await testRuntime.runPromise(JobRegistry.use((svc) => svc.updateStatus(id, "completed")));
-    }
+    await Promise.all(
+      Array.from({ length: 8 }, async (_, index) => {
+        const i = index + 1;
+        const id = `task-filler-${i}`;
+        await testRuntime.runPromise(
+          JobRegistry.use((svc) =>
+            svc.register({
+              id,
+              ownerSessionId: "session-1",
+              name: `Filler ${i}`,
+              kind: "agent",
+              promptOrCommand: "prompt"
+            })
+          )
+        );
+        await testRuntime.runPromise(JobRegistry.use((svc) => svc.updateStatus(id, "completed")));
+      })
+    );
 
     const jobs = await testRuntime.runPromise(JobRegistry.use((svc) => svc.list()));
     const retained = jobs.find((j) => j.id === "task-bg-visible");
@@ -158,21 +165,24 @@ describe("JobRegistry Service", () => {
     );
 
     // Fill the registry with completed non-background jobs.
-    for (let i = 1; i <= 64; i++) {
-      const id = `task-filler-terminal-${i}`;
-      await testRuntime.runPromise(
-        JobRegistry.use((svc) =>
-          svc.register({
-            id,
-            ownerSessionId: "session-1",
-            name: `Filler ${i}`,
-            kind: "agent",
-            promptOrCommand: "prompt"
-          })
-        )
-      );
-      await testRuntime.runPromise(JobRegistry.use((svc) => svc.updateStatus(id, "completed")));
-    }
+    await Promise.all(
+      Array.from({ length: 64 }, async (_, index) => {
+        const i = index + 1;
+        const id = `task-filler-terminal-${i}`;
+        await testRuntime.runPromise(
+          JobRegistry.use((svc) =>
+            svc.register({
+              id,
+              ownerSessionId: "session-1",
+              name: `Filler ${i}`,
+              kind: "agent",
+              promptOrCommand: "prompt"
+            })
+          )
+        );
+        await testRuntime.runPromise(JobRegistry.use((svc) => svc.updateStatus(id, "completed")));
+      })
+    );
 
     // Add a newer background terminal job after the cap has already pressured pruning.
     const newBackgroundJob = await testRuntime.runPromise(
@@ -205,23 +215,26 @@ describe("JobRegistry Service", () => {
     const testRuntime = ManagedRuntime.make(JobRegistry.layer);
 
     // Register 64 running jobs
-    for (let i = 1; i <= 64; i++) {
-      const id = `task-running-${i}`;
-      await testRuntime.runPromise(
-        JobRegistry.use((svc) =>
-          svc.register({
-            id,
-            ownerSessionId: "session-1",
-            name: `Running ${i}`,
-            kind: "agent",
-            promptOrCommand: "prompt"
-          })
-        )
-      );
-      await testRuntime.runPromise(
-        JobRegistry.use((svc) => svc.updateStatus(id, "running"))
-      );
-    }
+    await Promise.all(
+      Array.from({ length: 64 }, async (_, index) => {
+        const i = index + 1;
+        const id = `task-running-${i}`;
+        await testRuntime.runPromise(
+          JobRegistry.use((svc) =>
+            svc.register({
+              id,
+              ownerSessionId: "session-1",
+              name: `Running ${i}`,
+              kind: "agent",
+              promptOrCommand: "prompt"
+            })
+          )
+        );
+        await testRuntime.runPromise(
+          JobRegistry.use((svc) => svc.updateStatus(id, "running"))
+        );
+      })
+    );
 
     // 65th registration must fail with CapacityError
     const exit = await testRuntime.runPromiseExit(
@@ -237,9 +250,8 @@ describe("JobRegistry Service", () => {
     );
 
     expect(exit._tag).toBe("Failure");
-    if (exit._tag === "Failure") {
-      expect(JSON.stringify(exit.cause)).toContain("CapacityError");
-    }
+    const _tagNarrowed = exit as Extract<typeof exit, { _tag: "Failure" }>;
+   expect(JSON.stringify(_tagNarrowed.cause)).toContain("CapacityError");
   });
 
   it("awaitSettlement resolves immediately if already settled", async () => {

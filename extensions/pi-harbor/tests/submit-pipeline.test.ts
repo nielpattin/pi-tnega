@@ -61,10 +61,9 @@ describe("SchemaValidator Service", () => {
     );
 
     expect(exit._tag).toBe("Failure");
-    if (exit._tag === "Failure") {
-      const err = exit.cause;
-      expect(JSON.stringify(err)).toContain("SchemaValidationError");
-    }
+    const _tagNarrowed = exit as Extract<typeof exit, { _tag: "Failure" }>;
+   const err = _tagNarrowed.cause;
+   expect(JSON.stringify(err)).toContain("SchemaValidationError");
   });
 
   it("raises SchemaConversionError on non-object JSON Schema document", async () => {
@@ -73,8 +72,7 @@ describe("SchemaValidator Service", () => {
     );
 
     expect(exit._tag).toBe("Failure");
-    if (exit._tag === "Failure") {
-      expect(JSON.stringify(exit.cause)).toContain("SchemaConversionError");
-    }
+    const _tagNarrowed = exit as Extract<typeof exit, { _tag: "Failure" }>;
+   expect(JSON.stringify(_tagNarrowed.cause)).toContain("SchemaConversionError");
   });
 });

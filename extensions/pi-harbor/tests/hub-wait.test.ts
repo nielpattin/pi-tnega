@@ -53,7 +53,7 @@ describe("hub tool & validation guards", () => {
         "wait-from"
       ])
     );
-    expect(operations(workerBranches).sort()).toEqual(["exec", "inbox", "list", "send", "wait-from"]);
+    expect(operations(workerBranches).toSorted((x, y) => x.localeCompare(y))).toEqual(["exec", "inbox", "list", "send", "wait-from"].toSorted((x, y) => x.localeCompare(y)));
 
     const jobWait = parentBranches.find(
       (branch) => branch.properties.op.const === "wait" && branch.properties.target?.const === "jobs"

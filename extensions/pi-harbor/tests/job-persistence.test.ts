@@ -76,17 +76,22 @@ describe("Harbor job persistence behavior", () => {
          await runtime.runPromise(HarborJobPersistence.use((p) => p.flush()));
          const aManifestBefore = fs.readFileSync(path.join(childDir, HARBOR_JOBS_FILE), "utf8");
 
-         for (const invalid of [undefined, "", "not-a-session.txt", "C:\\\\Sessions\\\\not-a-session.txt"] as const) {
-            await runtime.runPromise(HarborJobPersistence.use((p) => p.configure(invalid)));
+         const invalidTargets = [undefined, "", "not-a-session.txt", "C:\\\\Sessions\\\\not-a-session.txt"] as const;
+         await invalidTargets.reduce(
+            async (chain, invalid) => {
+               await chain;
+               await runtime.runPromise(HarborJobPersistence.use((p) => p.configure(invalid)));
 
-            expect(await runtime.runPromise(HarborJobPersistence.use((p) => p.currentTarget()))).toBeUndefined();
-            expect(await runtime.runPromise(HarborJobPersistence.use((p) => p.currentDir()))).toBeUndefined();
-            expect((await runtime.runPromise(HarborJobPersistence.use((p) => p.load()))).jobs).toHaveLength(0);
+               expect(await runtime.runPromise(HarborJobPersistence.use((p) => p.currentTarget()))).toBeUndefined();
+               expect(await runtime.runPromise(HarborJobPersistence.use((p) => p.currentDir()))).toBeUndefined();
+               expect((await runtime.runPromise(HarborJobPersistence.use((p) => p.load()))).jobs).toHaveLength(0);
 
-            await runtime.runPromise(HarborJobPersistence.use((p) => p.persist([buildPersistedJob({ id: "invalid", status: "completed" })])));
-            await runtime.runPromise(HarborJobPersistence.use((p) => p.flush()));
-            expect(fs.readFileSync(path.join(childDir, HARBOR_JOBS_FILE), "utf8")).toBe(aManifestBefore);
-         }
+               await runtime.runPromise(HarborJobPersistence.use((p) => p.persist([buildPersistedJob({ id: "invalid", status: "completed" })])));
+               await runtime.runPromise(HarborJobPersistence.use((p) => p.flush()));
+               expect(fs.readFileSync(path.join(childDir, HARBOR_JOBS_FILE), "utf8")).toBe(aManifestBefore);
+            },
+            Promise.resolve()
+         );
 
          await runtime.runPromise(HarborJobPersistence.use((p) => p.configure(b.parentFile)));
          expect(await runtime.runPromise(HarborJobPersistence.use((p) => p.currentTarget()))).toBe(b.parentFile);
@@ -362,19 +367,24 @@ describe("Harbor job persistence behavior", () => {
          await runtime.runPromise(activateParentSession(parentFile));
 
          const backgroundJobs: Job[] = [];
-         for (let i = 1; i <= 10; i++) {
-            const job = await runtime.runPromise(
-               TaskManager.use((s) =>
-                  s.spawnTask({ task: `bg ${i}`, name: `bg-${i}`, background: true })
-               )
-            );
-            await runtime.runPromise(
-               JobRegistry.use((r) =>
-                  r.updateStatus(job.id, "completed", { resultData: { n: i } })
-               )
-            );
-            backgroundJobs.push(job);
-         }
+         const bgSpawnSteps = Array.from({ length: 10 }, (_, index) => index + 1);
+         await bgSpawnSteps.reduce(
+            async (chain, i) => {
+               await chain;
+               const job = await runtime.runPromise(
+                  TaskManager.use((s) =>
+                     s.spawnTask({ task: `bg ${i}`, name: `bg-${i}`, background: true })
+                  )
+               );
+               await runtime.runPromise(
+                  JobRegistry.use((r) =>
+                     r.updateStatus(job.id, "completed", { resultData: { n: i } })
+                  )
+               );
+               backgroundJobs.push(job);
+            },
+            Promise.resolve()
+         );
 
          await runtime.runPromise(flushPendingWrites());
 
@@ -504,11 +514,11 @@ function makeFakeFileSystem(initial: Record<string, string> = {}): FakeFileSyste
    };
 }
 
-async function makePersistenceWithFileSystem(fs: HarborFileSystem): Promise<{
+async function makePersistenceWithFileSystem(fileSystem: HarborFileSystem): Promise<{
    persistence: HarborJobPersistenceShape;
    dispose: () => Promise<void>;
 }> {
-   const runtime = ManagedRuntime.make(HarborJobPersistence.layerWith(fs));
+   const runtime = ManagedRuntime.make(HarborJobPersistence.layerWith(fileSystem));
    const persistence = await runtime.runPromise(HarborJobPersistence);
    return {
       persistence,
@@ -555,7 +565,7 @@ describe("atomic manifest replacement with injected filesystem", () => {
       const childDir = parentFile.slice(0, -".jsonl".length);
       const finalPath = path.join(childDir, HARBOR_JOBS_FILE);
       const seed = buildPersistedJob({ id: "seed", status: "completed" });
-      const { fs, files, calls, onRename } = makeFakeFileSystem({
+      const { fs: fakeFs, files, calls, onRename } = makeFakeFileSystem({
          [finalPath]: JSON.stringify({ version: 1, jobs: [seed] })
       });
 
@@ -570,7 +580,7 @@ describe("atomic manifest replacement with injected filesystem", () => {
          return undefined;
       });
 
-      const { persistence, dispose } = await makePersistenceWithFileSystem(fs);
+      const { persistence, dispose } = await makePersistenceWithFileSystem(fakeFs);
       try {
          await Effect.runPromise(persistence.configure(parentFile));
          await Effect.runPromise(
@@ -594,21 +604,20 @@ describe("atomic manifest replacement with injected filesystem", () => {
       const finalPath = path.join(childDir, HARBOR_JOBS_FILE);
       const oldJob = buildPersistedJob({ id: "old", status: "completed" });
       const newJob = buildPersistedJob({ id: "new", status: "completed" });
-      const { fs, files, onRename } = makeFakeFileSystem({
+      const { fs: fakeFs, files, onRename } = makeFakeFileSystem({
          [finalPath]: JSON.stringify({ version: 1, jobs: [oldJob] })
       });
 
       onRename(() => Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }));
 
-      const { persistence, dispose } = await makePersistenceWithFileSystem(fs);
+      const { persistence, dispose } = await makePersistenceWithFileSystem(fakeFs);
       try {
          await Effect.runPromise(persistence.configure(parentFile));
          const result = await Effect.runPromise(Effect.result(persistence.persist([newJob])));
 
          expect(result._tag).toBe("Failure");
-         if (result._tag === "Failure") {
-            expect(result.failure).toBeInstanceOf(ManifestPersistenceError);
-         }
+         const _tagNarrowed = result as Extract<typeof result, { _tag: "Failure" }>;
+         expect(_tagNarrowed.failure).toBeInstanceOf(ManifestPersistenceError);
 
          const preserved = files.get(finalPath);
          expect(preserved).toBeDefined();
@@ -629,13 +638,13 @@ describe("atomic manifest replacement with injected filesystem", () => {
       const leftoverTmp = path.join(childDir, `${HARBOR_JOBS_FILE}.tmp-12345-abc`);
       const leftoverBak = path.join(childDir, `${HARBOR_JOBS_FILE}.bak-67890-def`);
       const otherFile = path.join(childDir, "other.txt");
-      const { fs, files } = makeFakeFileSystem({
+      const { fs: fakeFs, files } = makeFakeFileSystem({
          [leftoverTmp]: "tmp-data",
          [leftoverBak]: "bak-data",
          [otherFile]: "keep"
       });
 
-      const { persistence, dispose } = await makePersistenceWithFileSystem(fs);
+      const { persistence, dispose } = await makePersistenceWithFileSystem(fakeFs);
       try {
          await Effect.runPromise(persistence.configure(parentFile));
          expect(files.has(leftoverTmp)).toBe(false);
@@ -652,8 +661,8 @@ describe("atomic manifest replacement with injected filesystem", () => {
 
    it("queues concurrent writes so the last call wins", async () => {
       const parentFile = path.join(os.tmpdir(), "harbor-queue", "2026-01-15T123456Z_parent.jsonl");
-      const { fs, files } = makeFakeFileSystem();
-      const { persistence, dispose } = await makePersistenceWithFileSystem(fs);
+      const { fs: fakeFs, files } = makeFakeFileSystem();
+      const { persistence, dispose } = await makePersistenceWithFileSystem(fakeFs);
 
       try {
          await Effect.runPromise(persistence.configure(parentFile));
@@ -679,8 +688,8 @@ describe("atomic manifest replacement with injected filesystem", () => {
 
    it("keeps temp and backup artifacts in the manifest directory on Windows-style paths", async () => {
       const parentFile = "C:\\Sessions\\2026-01-15T123456Z_parent.jsonl";
-      const { fs, calls } = makeFakeFileSystem();
-      const { persistence, dispose } = await makePersistenceWithFileSystem(fs);
+      const { fs: fakeFs, calls } = makeFakeFileSystem();
+      const { persistence, dispose } = await makePersistenceWithFileSystem(fakeFs);
 
       try {
          await Effect.runPromise(persistence.configure(parentFile));
@@ -710,7 +719,7 @@ describe("atomic manifest replacement with injected filesystem", () => {
       const childDir = parentFile.slice(0, -".jsonl".length);
       const finalPath = path.join(childDir, HARBOR_JOBS_FILE);
       const staleBackup = path.join(childDir, `${HARBOR_JOBS_FILE}.bak-1000-stale`);
-      const { fs, files } = makeFakeFileSystem({
+      const { fs: fakeFs, files } = makeFakeFileSystem({
          [finalPath]: JSON.stringify({
             version: 1,
             jobs: [buildPersistedJob({ id: "final", status: "completed" })]
@@ -721,7 +730,7 @@ describe("atomic manifest replacement with injected filesystem", () => {
          })
       });
 
-      const { persistence, dispose } = await makePersistenceWithFileSystem(fs);
+      const { persistence, dispose } = await makePersistenceWithFileSystem(fakeFs);
       try {
          await Effect.runPromise(persistence.configure(parentFile));
          const loaded = await Effect.runPromise(persistence.load());
@@ -739,7 +748,7 @@ describe("atomic manifest replacement with injected filesystem", () => {
       const finalPath = path.join(childDir, HARBOR_JOBS_FILE);
       const oldBackup = path.join(childDir, `${HARBOR_JOBS_FILE}.bak-1000-old`);
       const newerBackup = path.join(childDir, `${HARBOR_JOBS_FILE}.bak-2000-new`);
-      const { fs, files } = makeFakeFileSystem({
+      const { fs: fakeFs, files } = makeFakeFileSystem({
          [oldBackup]: JSON.stringify({
             version: 1,
             jobs: [buildPersistedJob({ id: "oldest", status: "completed" })]
@@ -750,7 +759,7 @@ describe("atomic manifest replacement with injected filesystem", () => {
          })
       });
 
-      const { persistence, dispose } = await makePersistenceWithFileSystem(fs);
+      const { persistence, dispose } = await makePersistenceWithFileSystem(fakeFs);
       try {
          await Effect.runPromise(persistence.configure(parentFile));
          const restored = await Effect.runPromise(persistence.load());
@@ -770,7 +779,7 @@ describe("atomic manifest replacement with injected filesystem", () => {
       const finalPath = path.join(childDir, HARBOR_JOBS_FILE);
       const validBackup = path.join(childDir, `${HARBOR_JOBS_FILE}.bak-3000-valid`);
       const invalidBackup = path.join(childDir, `${HARBOR_JOBS_FILE}.bak-4000-invalid`);
-      const { fs, files } = makeFakeFileSystem({
+      const { fs: fakeFs, files } = makeFakeFileSystem({
          [finalPath]: "this is not json",
          [validBackup]: JSON.stringify({
             version: 1,
@@ -779,7 +788,7 @@ describe("atomic manifest replacement with injected filesystem", () => {
          [invalidBackup]: "also not json"
       });
 
-      const { persistence, dispose } = await makePersistenceWithFileSystem(fs);
+      const { persistence, dispose } = await makePersistenceWithFileSystem(fakeFs);
       try {
          await Effect.runPromise(persistence.configure(parentFile));
          const restored = await Effect.runPromise(persistence.load());
@@ -801,11 +810,11 @@ describe("atomic manifest replacement with injected filesystem", () => {
       const parentFile = path.join(os.tmpdir(), "harbor-quarantine", "2026-01-15T123456Z_parent.jsonl");
       const childDir = parentFile.slice(0, -".jsonl".length);
       const finalPath = path.join(childDir, HARBOR_JOBS_FILE);
-      const { fs, files, calls } = makeFakeFileSystem({
+      const { fs: fakeFs, files, calls } = makeFakeFileSystem({
          [finalPath]: "corrupt"
       });
 
-      const { persistence, dispose } = await makePersistenceWithFileSystem(fs);
+      const { persistence, dispose } = await makePersistenceWithFileSystem(fakeFs);
       try {
          await Effect.runPromise(persistence.configure(parentFile));
          const loaded = await Effect.runPromise(persistence.load());
@@ -837,12 +846,12 @@ describe("atomic manifest replacement with injected filesystem", () => {
          ...buildPersistedJob({ id: "malformed", status: "completed" }),
          transcript: [{ type: "tool-result", toolCallId: "call-1", toolName: "read", content: [{ type: "unknown" }], isError: false }]
       };
-      const { fs, files } = makeFakeFileSystem();
-      const { persistence, dispose } = await makePersistenceWithFileSystem(fs);
+      const { fs: fakeFs, files } = makeFakeFileSystem();
+      const { persistence, dispose } = await makePersistenceWithFileSystem(fakeFs);
 
       try {
          await Effect.runPromise(persistence.configure(parentFile));
-         await fs.writeFile(finalPath, JSON.stringify({ version: 1, jobs: [valid, malformed] }));
+         await fakeFs.writeFile(finalPath, JSON.stringify({ version: 1, jobs: [valid, malformed] }));
 
          const loaded = await Effect.runPromise(persistence.load());
          expect(loaded.source).toBe("missing");
@@ -864,12 +873,12 @@ describe("atomic manifest replacement with injected filesystem", () => {
          jobs: [buildPersistedJob({ id: "task-1", status: "completed", resultData: { text: "é".repeat(200) } })]
       });
       expect(Buffer.byteLength(text, "utf8")).toBeGreaterThan(HARBOR_JOB_MANIFEST_LIMITS.maxPersistedManifestBytes);
-      const { fs, files } = makeFakeFileSystem();
-      const { persistence, dispose } = await makePersistenceWithFileSystem(fs);
+      const { fs: fakeFs, files } = makeFakeFileSystem();
+      const { persistence, dispose } = await makePersistenceWithFileSystem(fakeFs);
 
       try {
          await Effect.runPromise(persistence.configure(parentFile));
-         await fs.writeFile(finalPath, text);
+         await fakeFs.writeFile(finalPath, text);
          const loaded = await Effect.runPromise(persistence.load());
          expect(loaded.source).toBe("missing");
          expect(files.has(finalPath)).toBe(false);
@@ -894,12 +903,12 @@ describe("atomic manifest replacement with injected filesystem", () => {
          status: "completed",
          resultData: { text: "😀😀😀😀😀" }
       });
-      const { fs, files } = makeFakeFileSystem();
-      const { persistence, dispose } = await makePersistenceWithFileSystem(fs);
+      const { fs: fakeFs, files } = makeFakeFileSystem();
+      const { persistence, dispose } = await makePersistenceWithFileSystem(fakeFs);
 
       try {
          await Effect.runPromise(persistence.configure(parentFile));
-         await fs.writeFile(finalPath, JSON.stringify({ version: 1, jobs: [job] }));
+         await fakeFs.writeFile(finalPath, JSON.stringify({ version: 1, jobs: [job] }));
          const loaded = await Effect.runPromise(persistence.load());
          expect(loaded.source).toBe("missing");
          expect(files.has(finalPath)).toBe(false);
@@ -914,12 +923,12 @@ describe("atomic manifest replacement with injected filesystem", () => {
       const childDir = parentFile.slice(0, -".jsonl".length);
       const finalPath = path.join(childDir, HARBOR_JOBS_FILE);
       const job = buildPersistedJob({ id: "task-1", status: "completed", resultData: { values: [1, 2, 3] } });
-      const { fs, files } = makeFakeFileSystem();
-      const { persistence, dispose } = await makePersistenceWithFileSystem(fs);
+      const { fs: fakeFs, files } = makeFakeFileSystem();
+      const { persistence, dispose } = await makePersistenceWithFileSystem(fakeFs);
 
       try {
          await Effect.runPromise(persistence.configure(parentFile));
-         await fs.writeFile(finalPath, JSON.stringify({ version: 1, jobs: [job] }));
+         await fakeFs.writeFile(finalPath, JSON.stringify({ version: 1, jobs: [job] }));
          const loaded = await Effect.runPromise(persistence.load());
          expect(loaded.source).toBe("missing");
          expect(files.has(finalPath)).toBe(false);
@@ -942,12 +951,12 @@ describe("atomic manifest replacement with injected filesystem", () => {
             { type: "assistant", text: "three" }
          ]
       });
-      const { fs, files } = makeFakeFileSystem();
-      const { persistence, dispose } = await makePersistenceWithFileSystem(fs);
+      const { fs: fakeFs, files } = makeFakeFileSystem();
+      const { persistence, dispose } = await makePersistenceWithFileSystem(fakeFs);
 
       try {
          await Effect.runPromise(persistence.configure(parentFile));
-         await fs.writeFile(finalPath, JSON.stringify({ version: 1, jobs: [job] }));
+         await fakeFs.writeFile(finalPath, JSON.stringify({ version: 1, jobs: [job] }));
          const loaded = await Effect.runPromise(persistence.load());
          expect(loaded.source).toBe("missing");
          expect(files.has(finalPath)).toBe(false);
@@ -966,12 +975,12 @@ describe("atomic manifest replacement with injected filesystem", () => {
          status: "completed",
          resultData: { first: { second: { third: true } } }
       });
-      const { fs, files } = makeFakeFileSystem();
-      const { persistence, dispose } = await makePersistenceWithFileSystem(fs);
+      const { fs: fakeFs, files } = makeFakeFileSystem();
+      const { persistence, dispose } = await makePersistenceWithFileSystem(fakeFs);
 
       try {
          await Effect.runPromise(persistence.configure(parentFile));
-         await fs.writeFile(finalPath, JSON.stringify({ version: 1, jobs: [job] }));
+         await fakeFs.writeFile(finalPath, JSON.stringify({ version: 1, jobs: [job] }));
          const loaded = await Effect.runPromise(persistence.load());
          expect(loaded.source).toBe("missing");
          expect(files.has(finalPath)).toBe(false);
@@ -990,42 +999,46 @@ describe("atomic manifest replacement with injected filesystem", () => {
          { version: 1, jobs: [{ ...base, unexpected: true }] }
       ];
 
-      for (const fixture of fixtures) {
-         const { fs, files } = makeFakeFileSystem();
-         const { persistence, dispose } = await makePersistenceWithFileSystem(fs);
-         try {
-            await Effect.runPromise(persistence.configure(parentFile));
-            await fs.writeFile(finalPath, JSON.stringify(fixture));
-            const loaded = await Effect.runPromise(persistence.load());
-            expect(loaded.source).toBe("missing");
-            expect(files.has(finalPath)).toBe(false);
-         } finally {
-            await dispose();
-         }
-      }
+      await Promise.all(
+         fixtures.map(async (fixture) => {
+            const { fs: fakeFs, files } = makeFakeFileSystem();
+            const { persistence, dispose } = await makePersistenceWithFileSystem(fakeFs);
+            try {
+               await Effect.runPromise(persistence.configure(parentFile));
+               await fakeFs.writeFile(finalPath, JSON.stringify(fixture));
+               const loaded = await Effect.runPromise(persistence.load());
+               expect(loaded.source).toBe("missing");
+               expect(files.has(finalPath)).toBe(false);
+            } finally {
+               await dispose();
+            }
+         })
+      );
    });
 
    it("quarantines manifests with invalid reservedTaskSeq", async () => {
       const parentFile = path.join(os.tmpdir(), "harbor-invalid-reserved-seq", "2026-01-15T123456Z_parent.jsonl");
       const childDir = parentFile.slice(0, -".jsonl".length);
       const finalPath = path.join(childDir, HARBOR_JOBS_FILE);
-      for (const reservedTaskSeq of [-1, 1.5, "1", null]) {
-         const { fs, files } = makeFakeFileSystem();
-         const { persistence, dispose } = await makePersistenceWithFileSystem(fs);
+      await Promise.all(
+         [-1, 1.5, "1", null].map(async (reservedTaskSeq) => {
+            const { fs: fakeFs, files } = makeFakeFileSystem();
+            const { persistence, dispose } = await makePersistenceWithFileSystem(fakeFs);
 
-         try {
-            await Effect.runPromise(persistence.configure(parentFile));
-            await fs.writeFile(
-               finalPath,
-               JSON.stringify({ version: 1, jobs: [], reservedTaskSeq })
-            );
-            const loaded = await Effect.runPromise(persistence.load());
-            expect(loaded.source).toBe("missing");
-            expect(files.has(finalPath)).toBe(false);
-         } finally {
-            await dispose();
-         }
-      }
+            try {
+               await Effect.runPromise(persistence.configure(parentFile));
+               await fakeFs.writeFile(
+                  finalPath,
+                  JSON.stringify({ version: 1, jobs: [], reservedTaskSeq })
+               );
+               const loaded = await Effect.runPromise(persistence.load());
+               expect(loaded.source).toBe("missing");
+               expect(files.has(finalPath)).toBe(false);
+            } finally {
+               await dispose();
+            }
+         })
+      );
    });
 
    it("loads a valid fixture at the configured string, array, and nesting boundaries", async () => {
@@ -1058,12 +1071,12 @@ describe("atomic manifest replacement with injected filesystem", () => {
             }
          ]
       });
-      const { fs, files } = makeFakeFileSystem();
-      const { persistence, dispose } = await makePersistenceWithFileSystem(fs);
+      const { fs: fakeFs, files } = makeFakeFileSystem();
+      const { persistence, dispose } = await makePersistenceWithFileSystem(fakeFs);
 
       try {
          await Effect.runPromise(persistence.configure(parentFile));
-         await fs.writeFile(finalPath, JSON.stringify({ version: 1, jobs: [job], reservedTaskSeq: 0 }));
+         await fakeFs.writeFile(finalPath, JSON.stringify({ version: 1, jobs: [job], reservedTaskSeq: 0 }));
          const loaded = await Effect.runPromise(persistence.load());
          expect(loaded.source).toBe("valid");
          expect(loaded.jobs[0]!.resultData).toEqual(job.resultData);
@@ -1075,8 +1088,8 @@ describe("atomic manifest replacement with injected filesystem", () => {
 
    it("fsyncs the containing directory after temp->final rename", async () => {
       const parentFile = path.join(os.tmpdir(), "harbor-sync", "2026-01-15T123456Z_parent.jsonl");
-      const { fs, calls } = makeFakeFileSystem();
-      const { persistence, dispose } = await makePersistenceWithFileSystem(fs);
+      const { fs: fakeFs, calls } = makeFakeFileSystem();
+      const { persistence, dispose } = await makePersistenceWithFileSystem(fakeFs);
 
       try {
          await Effect.runPromise(persistence.configure(parentFile));

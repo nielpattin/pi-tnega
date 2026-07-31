@@ -72,12 +72,13 @@ export function makeInjectedPersistenceLayer(options: InjectedPersistenceOptions
                   const file = parentSessionFile || undefined;
                   indexDir = undefined;
                   configuredParentSessionFile = undefined;
-                  if (!file) return;
+                  if (!file) return yield* Effect.void;
                   if (shouldFail("configure", file)) return yield* Effect.fail(makeError("configure"));
                   const dir = deriveChildSessionDirectory(file);
-                  if (!dir) return;
+                  if (!dir) return yield* Effect.void;
                   indexDir = dir;
                   configuredParentSessionFile = file;
+                  return yield* Effect.void;
                })
          );
 
@@ -144,7 +145,7 @@ export function makeInjectedPersistenceLayer(options: InjectedPersistenceOptions
          const persist: HarborJobPersistenceShape["persist"] = Effect.fn("HarborJobPersistence.persist")((jobs) =>
             Effect.gen(function* () {
                const finalPath = resolveFinalPath();
-               if (!finalPath) return;
+               if (!finalPath) return yield* Effect.void;
                if (shouldFail("persist", configuredParentSessionFile))
                   return yield* Effect.fail(makeError("persist"));
                const index: HarborJobIndex = {
@@ -155,6 +156,7 @@ export function makeInjectedPersistenceLayer(options: InjectedPersistenceOptions
                   jobs: [...jobs]
                };
                storage.set(finalPath, index);
+               return yield* Effect.void;
             })
          );
 

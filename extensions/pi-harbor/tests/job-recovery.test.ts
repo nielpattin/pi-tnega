@@ -290,8 +290,8 @@ describe("Harbor job recovery", () => {
          await runtime.runPromise(configureAndRecoverJobs(parentFile));
 
          const jobs = await runtime.runPromise(JobRegistry.use((r) => r.list()));
-         expect(jobs.map((j) => j.name).sort()).toEqual(
-            ["interrupted", "visible-done", "visible-fail"].sort()
+         expect(jobs.map((j) => j.name).toSorted((x, y) => (x ?? "").localeCompare(y ?? ""))).toEqual(
+            ["interrupted", "visible-done", "visible-fail"].toSorted((x, y) => (x ?? "").localeCompare(y ?? ""))
          );
          expect(jobs.filter((j) => j.status === "failed")).toHaveLength(2);
          expect(jobs.filter((j) => j.status === "completed")).toHaveLength(1);

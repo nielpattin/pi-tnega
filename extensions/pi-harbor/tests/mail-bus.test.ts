@@ -135,9 +135,8 @@ describe("MailBus Service", () => {
     expect(res.sendRes.ok).toBe(true);
     expect(res.listRes.ok).toBe(true);
     expect(res.inboxRes.ok).toBe(true);
-    if ("messages" in res.inboxRes && res.inboxRes.messages) {
-      expect(res.inboxRes.messages.length).toBe(1);
-      expect(res.inboxRes.messages[0].payload).toBe("Hub message");
-    }
+    const inboxMessages = "messages" in res.inboxRes ? res.inboxRes.messages : undefined;
+    expect(inboxMessages?.length).toBe(1);
+    expect(inboxMessages?.[0]?.payload).toBe("Hub message");
   });
 });

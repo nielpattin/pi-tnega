@@ -124,10 +124,9 @@ describe("Pi Backend Adapter", () => {
 
       const result = await Effect.runPromiseExit(routeControl(fakeSession, "msg", "steer"));
       expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        const err = result.cause;
-        expect(String(err)).toContain("steer failed");
-      }
+      const _tagNarrowed = result as Extract<typeof result, { _tag: "Failure" }>;
+     const err = _tagNarrowed.cause;
+     expect(String(err)).toContain("steer failed");
     });
   });
 
