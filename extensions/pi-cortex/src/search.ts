@@ -3,7 +3,7 @@ import { relative } from "node:path";
 import type { Config, SearchResult, SearchHit } from "./types.js";
 import { startRustSidecar, rustSearch, rustTextSearch } from "./protocol.js";
 import { getActiveCwd, getDbPath, loadConfig } from "./config.js";
-import { detectKeywordWeight } from "./utils.js";
+import { detectKeywordWeight, isExactIdentifierQuery } from "./utils.js";
 
 /**
  * Embed a single query text using the configured embedder. Wraps `getEmbedder`
@@ -16,8 +16,8 @@ export async function embedQuery(text: string, config: Config, signal?: AbortSig
 }
 
 /**
- * Run a search query. Embeds the query, then sends to Rust sidecar with
- * auto-detected blend weight.
+ * Run a search query. Exact identifiers use the lexical lane; other queries
+ * are embedded and sent to the sidecar with an auto-detected blend weight.
  */
 export async function search(
    query: string,
@@ -29,11 +29,20 @@ export async function search(
 ): Promise<SearchHit[]> {
    await startRustSidecar(config.model, getDbPath());
 
+   if (isExactIdentifierQuery(query)) {
+      const results = await rustTextSearch(query, topK, pathFilter, signal);
+      return mapSearchResults(results);
+   }
+
    const run = await getEmbedder(config);
    const [queryEmb] = await run.embed([config.queryPrefix + query], signal);
 
    const keywordWeight = detectKeywordWeight(query);
    const results = await rustSearch(query, Array.from(queryEmb), topK, keywordWeight, pathFilter, rerank, signal);
+   return mapSearchResults(results);
+}
+
+function mapSearchResults(results: SearchResult[]): SearchHit[] {
    return results.map((r: SearchResult) => ({
       path: relative(getActiveCwd(), r.path) || r.path,
       startLine: r.start_line,

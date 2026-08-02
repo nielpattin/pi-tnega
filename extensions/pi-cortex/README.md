@@ -15,33 +15,37 @@ Code intelligence for Pi: search, AST analysis, call graph triples, and agent me
 
 **Agent-callable tools**:
 
-| Tool                 | Purpose                                                                     |
-| -------------------- | --------------------------------------------------------------------------- |
-| `code_search`        | Semantic / keyword / hybrid search. Auto-blends based on query.             |
-| `code_symbol_search` | Look up functions, classes, or variables by name.                           |
-| `code_call_graph`    | Find callers, callees, or all calls in a file.                              |
-| `code_triple_query`  | Query knowledge-graph triples (subject-predicate-object) from indexed code. |
-| `code_ast_grep`      | Structural code search by identifier, node kind, or text.                   |
-| `code_ast_replace`   | Structural find & replace with metavariables. Dry-run preview supported.    |
-| `code_remember`      | Store a memory (text + embedding) for later recall.                         |
-| `code_recall`        | Recall memories by meaning, keyword, or both.                               |
-| `code_forget`        | Delete a memory by ID.                                                      |
+| Tool                 | Purpose                                                                              |
+| -------------------- | ------------------------------------------------------------------------------------ |
+| `code_search`        | Semantic / keyword / hybrid search. Auto-blends based on query.                      |
+| `code_symbol_search` | Look up functions, classes, or variables by name (plain text or regex, kind filter). |
+| `code_outline`       | List every symbol in a file or directory: kind, name, line range.                    |
+| `code_call_graph`    | Find callers, callees, or all calls in a file.                                       |
+| `code_triple_query`  | Query knowledge-graph triples (subject-predicate-object) from indexed code.          |
+| `code_ast_grep`      | Structural code search by identifier, node kind, or text.                            |
+| `code_ast_replace`   | Structural find & replace with metavariables. Dry-run preview supported.             |
+| `code_remember`      | Store a memory (text + embedding) for later recall.                                  |
+| `code_recall`        | Recall memories by meaning, keyword, or both.                                        |
+| `code_forget`        | Delete a memory by ID.                                                               |
 
 Indexing is manual — use `/cc-index` below.
+
+Cortex honors project `.gitignore` patterns and the optional `.cortexignore` file. Both use gitignore syntax; `.cortexignore` has higher precedence when patterns overlap.
 
 ---
 
 ## Commands
 
-| Command          | Description                                                                                                                                                                                                                                                                   |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/cc-index`      | Index files in the current project. Optionally pass paths (e.g. `/cc-index src/`). After indexing, the Rust sidecar auto-starts a file watcher on the project. The watcher polls every 2 seconds for mtime/size changes and re-indexes incrementally until the sidecar exits. |
-| `/cc-status`     | Show model, provider, files/chunks indexed, DB size, watcher status, and storage paths.                                                                                                                                                                                       |
-| `/cleanup-embed` | Delete the cortex database (index.db + WAL). Run `/cc-index` to rebuild.                                                                                                                                                                                                      |
-| `/cc-ast`        | Structural code search. Equivalent to `code_ast_grep` but user-invoked.                                                                                                                                                                                                       |
-| `/cc-remember`   | Store a memory in cortex. Equivalent to `code_remember` but user-invoked.                                                                                                                                                                                                     |
-| `/cc-recall`     | Recall memories by query. Equivalent to `code_recall` but user-invoked.                                                                                                                                                                                                       |
-| `/cc-forget`     | Delete a memory by ID. Usage: `/cc-forget <memory_id>`.                                                                                                                                                                                                                       |
+| Command         | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/cc-index`     | Index files in the current project. Optionally pass paths (e.g. `/cc-index src/`). After indexing, the Rust sidecar auto-starts a file watcher on the project. Later sessions automatically resume the watcher when this project has an index. The watcher polls every 2 seconds for mtime/size changes and re-indexes incrementally — edits are picked up within ~2 seconds and reported in the chat, with no tool call needed — until the sidecar exits. |
+| `/cc-status`    | Show model, provider, files/chunks indexed, DB size, watcher status, and storage paths.                                                                                                                                                                                                                                                                                                                                                                    |
+| `/cc-clean`     | Delete the current project's cortex index (its `pi-cortex.db` in the pi sessions folder). Run `/cc-index` to rebuild.                                                                                                                                                                                                                                                                                                                                      |
+| `/cc-clean-all` | Recursively delete every cortex index under the pi sessions folder.                                                                                                                                                                                                                                                                                                                                                                                        |
+| `/cc-ast`       | Structural code search. Equivalent to `code_ast_grep` but user-invoked.                                                                                                                                                                                                                                                                                                                                                                                    |
+| `/cc-remember`  | Store a memory in cortex. Equivalent to `code_remember` but user-invoked.                                                                                                                                                                                                                                                                                                                                                                                  |
+| `/cc-recall`    | Recall memories by query. Equivalent to `code_recall` but user-invoked.                                                                                                                                                                                                                                                                                                                                                                                    |
+| `/cc-forget`    | Delete a memory by ID. Usage: `/cc-forget <memory_id>`.                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 ---
 
@@ -131,7 +135,7 @@ The binary is expected at `rust-embedder/target/release/pi-embedder.exe` (Window
 
 ## Configuration
 
-Config resolution: `<project>/.pi/cortex/config.json` (created from defaults if missing). Environment variables expanded in `model`, `baseUrl`, `apiKey` via `$VAR` or `${VAR}`.
+Config resolution: `<agentDir>/.pi/cortex/config.json` (created from defaults if missing), where `<agentDir>` is the pi agent dir (default `~/.pi/agent`). One config for all projects. Environment variables expanded in `model`, `baseUrl`, `apiKey` via `$VAR` or `${VAR}`.
 
 ### Default config
 
@@ -154,15 +158,18 @@ Config resolution: `<project>/.pi/cortex/config.json` (created from defaults if 
 
 ## Storage layout
 
+The index for a project lives in that cwd's pi session folder, named exactly the way pi names sessions (encoded cwd, e.g. `C:\Users\niel\.pi\agent` → `--C--Users-niel-.pi-agent--`). The DB is keyed by the cwd where the index was built — no `.pi` is ever created inside a project, and the same folder always resolves to the same DB regardless of where pi was launched. Models are cached once globally and shared by every project.
+
 ```text
-<repo>/.pi/cortex/
+<agentDir>/.pi/cortex/           # global, shared by all projects
   config.json
+  pi-cortex.log
   models/
     Xenova--all-MiniLM-L6-v2/
 
-<project>/.pi/cortex/
-  config.json
-  index.db
+<agentDir>/sessions/
+  --C--Users-niel-.pi-agent--/   # one folder per indexed cwd
+    pi-cortex.db
 ```
 
 ---
@@ -185,3 +192,29 @@ Tests create fixtures in `.test-tmp/` — they never touch files outside the ext
 python extensions/pi-cortex/benchmarks/bench_index.py --repo pi-cortex
 python extensions/pi-cortex/benchmarks/bench_index.py --compare results/old.json results/latest.json
 ```
+
+---
+
+## Comparison with similar projects
+
+Feature matrix vs other code-intelligence projects (researched 2026-08).
+
+| Feature                     | pi-cortex (ours)                                                           | AFT (cortexkit)                           | oh-my-pi                           | ast-grep CLI                 | Continue                    | CodeGraph                   | CodeSeek                             | code-graph-mcp                   | sensegrep                       | Claude Code / Codex / Gemini CLI          |
+| --------------------------- | -------------------------------------------------------------------------- | ----------------------------------------- | ---------------------------------- | ---------------------------- | --------------------------- | --------------------------- | ------------------------------------ | -------------------------------- | ------------------------------- | ----------------------------------------- |
+| Host                        | Pi extension                                                               | Pi + OpenCode plugins                     | Pi fork (own agent)                | Standalone CLI               | VS Code / JetBrains         | MCP server (+ VS Code)      | MCP for Claude Code / Codex          | MCP server                       | MCP + CLI + VS Code             | Built-in agent tools                      |
+| Semantic search             | ✅ local ONNX (MiniLM-L6-v2)                                               | ✅ fastembed / OpenAI-compatible / Ollama | ❌                                 | ❌                           | ✅ LanceDB (local or cloud) | ✅ BM25 + semantic          | ✅ LanceDB + Tantivy, RRF + reranker | ✅ BM25 + sqlite-vec, RRF        | ✅ (Gemini / OpenAI embeddings) | ⚠️ partial (Codex search, Gemini indexer) |
+| Hybrid keyword + semantic   | ✅ FTS5 + vectors                                                          | ✅ trigram index + vectors                | ❌                                 | ❌                           | ✅ FTS5 + vectors           | ✅                          | ✅                                   | ✅                               | ✅                              | ⚠️                                        |
+| Symbol search               | ✅ by name (substring or regex) + kind filter; `code_outline` per file/dir | ✅ aft_outline / aft_zoom                 | via LSP                            | ❌                           | ✅ tree-sitter code objects | ✅ 37-38 languages          | ⚠️ advertised, unimplemented stub    | ✅ 10+ languages                 | ✅ 30+ symbol filters           | ❌ built-in (via MCP)                     |
+| Call graph                  | ✅ callers/callees (tree-sitter extraction)                                | ✅ aft_callgraph (callers, impact, trace) | via LSP + DAP                      | ❌                           | ❌                          | ✅ callers/callees + impact | ✅ PetCodeGraph                      | ✅ recursive CTE callers/callees | ❌                              | ❌ built-in                               |
+| AST pattern search          | ⚠️ substring-based, no metavariables                                       | ✅ real tree-sitter, metavariables        | ✅ real tree-sitter, 50+ grammars  | ✅ 50+ languages, YAML rules | ❌                          | ⚠️ pattern search on graph  | ❌                                   | ✅ ast_search (structural)       | ✅ tree-sitter structural       | ❌ built-in                               |
+| AST pattern replace         | ⚠️ substring-based, dry-run + diff                                         | ✅ ast_grep_replace (dry-run + diff)      | ✅ ast_edit (preview before apply) | ✅ structural rewrite        | ❌                          | ❌                          | ❌                                   | ❌                               | ❌                              | ❌ built-in                               |
+| Cross-session memory        | ✅ remember/recall/forget (SQLite vectors)                                 | via Magic Context plugin                  | ✅ mnemopi (retain/recall/reflect) | ❌                           | ✅ codebase context         | ✅ memory layer             | ❌                                   | ❌                               | ❌                              | ✅ (Claude, Codex memory)                 |
+| Local embeddings (offline)  | ✅                                                                         | ✅                                        | ✅ (mnemopi)                       | n/a                          | ✅ (ollama etc.)            | ✅                          | ❌ (API)                             | ❌ (API)                         | ❌ (remote only)                | ⚠️ (Gemini local index)                   |
+| File watcher / auto-reindex | ✅ debounced watcher                                                       | ✅ persistent per-project daemon          | ✅                                 | ❌                           | ✅ branch-aware re-index    | ✅                          | ✅ MD5-incremental + git hooks       | ✅ PostToolUse auto-index        | ✅ watch mode                   | ✅                                        |
+
+Notes:
+
+- **Closest analogue: AFT** — same architecture (TS extension + long-running Rust sidecar, JSON-over-stdio protocol, SQLite, local ONNX embeddings) and feature surface. AFT adds hoisted read/write/edit/grep, LSP diagnostics, and per-file undo; pi-cortex adds `code_triple_query` and scoped memory (session/project/global).
+- **Biggest gap: AST tools are substring-based** — `code_ast_grep` / `code_ast_replace` match text, not AST nodes, so metavariables like `$MSG` never match. AFT, oh-my-pi, and the ast-grep CLI do real tree-sitter structural matching.
+- **MCP-based tools** (CodeGraph, CodeSeek, code-graph-mcp, sensegrep) attach to any agent via MCP but can't provide pi-cortex's custom TUI rendering (collapsed stat rows, colored diffs, expand hints) — that's native-extension territory.
+- Sources: [AFT](https://github.com/cortexkit/aft) · [oh-my-pi](https://github.com/can1357/oh-my-pi) · [ast-grep](https://github.com/ast-grep/ast-grep) · [Continue](https://github.com/continuedev/continue) · [CodeGraph](https://github.com/codegraph-ai/codegraph) · [CodeSeek](https://github.com/iohub/codeseek) · [code-graph-mcp](https://github.com/sdsrss/code-graph-mcp) · [sensegrep](https://github.com/Stahldavid/sensegrep)

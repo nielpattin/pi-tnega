@@ -23,7 +23,7 @@ export const DEFAULT_CONFIG: Config = {
    apiKey: "",
    chunkSize: 80,
    overlap: 20,
-   topK: 5,
+   topK: 50,
    indexBatchSize: 256,
    queryPrefix: "query: ",
    documentPrefix: "passage: ",
@@ -60,6 +60,7 @@ export interface SearchResult {
 
 export interface SymbolResult {
    symbol: string;
+   kind: string;
    path: string;
    start_line: number;
    end_line: number;
@@ -67,10 +68,10 @@ export interface SymbolResult {
 }
 
 export interface CallGraphResult {
-   caller_path: string;
-   caller_symbol: string;
-   callee_path: string;
-   callee_symbol: string;
+   file_path: string;
+   line: number;
+   callee: string;
+   caller: string;
 }
 
 export interface StatusResult {
@@ -79,6 +80,7 @@ export interface StatusResult {
    dim: number;
    db_size: number;
    watching: boolean;
+   index_roots?: string[];
 }
 
 // ── Tool result types ──
@@ -93,6 +95,7 @@ export interface SearchHit {
 
 export interface SymbolHit {
    symbol: string;
+   kind: string;
    path: string;
    startLine: number;
    endLine: number;
@@ -110,6 +113,9 @@ export interface SearchDetails {
    query?: string;
    path?: string;
    elapsed?: number;
+   page?: number;
+   pageSize?: number;
+   totalPages?: number;
    hits: SearchHit[];
 }
 
@@ -127,6 +133,9 @@ export interface TripleDetails {
    elapsed?: number;
    total?: number;
    limit?: number;
+   page?: number;
+   pageSize?: number;
+   totalPages?: number;
    hits: TripleHit[];
 }
 
@@ -143,6 +152,9 @@ export interface MemoryDetails {
    query?: string;
    scope?: string;
    elapsed?: number;
+   page?: number;
+   pageSize?: number;
+   totalPages?: number;
    hits: MemoryHit[];
 }
 
@@ -158,8 +170,36 @@ export interface AstGrepDetails {
    lang?: string;
    path?: string;
    elapsed?: number;
+   page?: number;
+   pageSize?: number;
+   totalPages?: number;
    hits: AstGrepHit[];
 }
+
+export interface OutlineHit {
+   symbol: string;
+   kind: string;
+   path: string;
+   startLine: number;
+   endLine: number;
+}
+
+export interface OutlineDetails {
+   path?: string;
+   files?: number;
+   truncated?: boolean;
+   elapsed?: number;
+   page?: number;
+   pageSize?: number;
+   totalPages?: number;
+   hits: OutlineHit[];
+}
+
+export const CodeOutlineParams = Type.Object({
+   path: Type.String({ description: "File or directory to outline (lists every symbol with kind and line range)" }),
+   page: Type.Optional(Type.Number({ description: "Page number (1-based); 10 results per page", minimum: 1 })),
+   projectPath: Type.Optional(Type.String({ description: "Project root (defaults to current project)" }))
+});
 
 // ── TypeBox schemas ──
 
@@ -169,12 +209,19 @@ export const CodeSearchParams = Type.Object({
          'Search query. Function names (validateInput) lean keyword; sentences ("how does auth work") lean semantic; blended automatically.'
    }),
    topK: Type.Optional(Type.Number({ description: "Number of results", minimum: 1, maximum: 50 })),
+   page: Type.Optional(Type.Number({ description: "Page number (1-based); 10 results per page", minimum: 1 })),
    path: Type.Optional(Type.String({ description: "Limit search to this path" })),
    projectPath: Type.Optional(Type.String({ description: "Project root to search (defaults to current project)" }))
 });
 
 export const CodeSymbolParams = Type.Object({
    symbol: Type.String({ description: "Symbol name to look up" }),
+   kind: Type.Optional(
+      Type.String({
+         description: "Only symbols of this kind: function, class, variable, interface, type, struct, enum, trait"
+      })
+   ),
+   page: Type.Optional(Type.Number({ description: "Page number (1-based); 10 results per page", minimum: 1 })),
    projectPath: Type.Optional(Type.String({ description: "Project root to search (defaults to current project)" }))
 });
 
@@ -184,6 +231,7 @@ export const CodeCallGraphParams = Type.Object({
       Type.String({ description: "Trace direction", enum: ["callers", "callees", "file"] as const })
    ),
    path: Type.Optional(Type.String({ description: "File path filter (required when direction='file')" })),
+   page: Type.Optional(Type.Number({ description: "Page number (1-based); 10 results per page", minimum: 1 })),
    projectPath: Type.Optional(Type.String({ description: "Project root to query (defaults to current project)" }))
 });
 
@@ -192,6 +240,7 @@ export const CodeTripleQueryParams = Type.Object({
    predicate: Type.Optional(Type.String({ description: "Filter on predicate (calls, defines, imports, etc.)" })),
    object: Type.Optional(Type.String({ description: "Filter on object (target name)" })),
    limit: Type.Optional(Type.Number({ description: "Max triples to return", minimum: 1, maximum: 500 })),
+   page: Type.Optional(Type.Number({ description: "Page number (1-based); 10 results per page", minimum: 1 })),
    projectPath: Type.Optional(Type.String({ description: "Project root to query (defaults to current project)" }))
 });
 
@@ -212,6 +261,7 @@ export const CodeRecallParams = Type.Object({
    scope: Type.Optional(
       Type.String({ description: "Limit to memories in this scope (session, project, global); empty = all" })
    ),
+   page: Type.Optional(Type.Number({ description: "Page number (1-based); 10 results per page", minimum: 1 })),
    projectPath: Type.Optional(Type.String({ description: "Project root (defaults to current project)" }))
 });
 
@@ -230,6 +280,7 @@ export const CodeAstGrepParams = Type.Object({
    ),
    path: Type.Optional(Type.String({ description: "Limit to this file or directory" })),
    topK: Type.Optional(Type.Number({ description: "Max results", minimum: 1, maximum: 200 })),
+   page: Type.Optional(Type.Number({ description: "Page number (1-based); 10 results per page", minimum: 1 })),
    projectPath: Type.Optional(Type.String({ description: "Project root (defaults to current project)" }))
 });
 
@@ -250,5 +301,6 @@ export const CodeAstReplaceParams = Type.Object({
    dryRun: Type.Optional(
       Type.Boolean({ description: "Preview changes without applying (default false). Returns unified diff." })
    ),
+   page: Type.Optional(Type.Number({ description: "Page number (1-based); 10 results per page", minimum: 1 })),
    projectPath: Type.Optional(Type.String({ description: "Project root (defaults to current project)" }))
 });

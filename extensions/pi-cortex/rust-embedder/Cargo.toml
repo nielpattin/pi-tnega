@@ -32,6 +32,7 @@ tree-sitter-c = "0.23"
 tree-sitter-cpp = "0.23"
 rusqlite = { version = "0.32", features = ["bundled"] }
 regex = "1.10"
+ignore = "0.4"
 
 [[bin]]
 name = "pi-embedder"

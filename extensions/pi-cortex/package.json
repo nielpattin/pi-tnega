@@ -4,6 +4,8 @@
    "type": "module",
    "scripts": {
       "build:rust": "cd rust-embedder && cargo build --release",
+      "test": "vitest run",
+      "check": "pnpm test && tsc --noEmit -p tsconfig.json",
       "typecheck": "tsc --noEmit -p tsconfig.json"
    },
    "dependencies": {

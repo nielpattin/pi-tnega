@@ -1,7 +1,7 @@
 //! Pi embedding sidecar with built-in SQLite storage.
 //!
 //! JSON-over-stdio protocol:
-//!   Embed:    {"id":1,"texts":[...],"prefix":"passage"}
+//!   Embed:    {"id":1,"texts":{"model":"Xenova/all-MiniLM-L6-v2","texts":[...]},"prefix":"passage"}
 //!             → {"id":1,"embeddings":[[...],...]}
 //!   Scan:     {"id":2,"scan":{"paths":["src/"],"extensions":[],"skip_dirs":[]}}
 //!             → {"id":2,"files":[{"path":"...","mtime":0.0,"size":0},...]}
@@ -17,27 +17,31 @@
 //!             → {"id":7,"results":[...]}
 //!   TextSearch:{"id":8,"text_search":{"query":"...","top_k":10,"path_filter":null}}
 //!             → {"id":8,"results":[...]}
-//!   SymbolSearch:{"id":9,"symbol_search":{"pattern":"class.*Handler"}}
+//!   SymbolSearch:{"id":9,"symbol_search":{"pattern":"class.*Handler","kind":"class","path_filter":null}}
 //!             → {"id":9,"results":[...]}
+//!   Outline:  {"id":15,"outline":{"path":"src/"}}
+//!             → {"id":15,"path":"src/","files":N,"truncated":false,"symbols":[...]}
 //!   Status:   {"id":10,"status":{}}
 //!             → {"id":10,"files":100,"chunks":500,"dim":384}
 //!   Clear:    {"id":11,"clear":{}}
 //!             → {"id":11,"ok":true}
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::io::{self, BufRead, Read, Write};
-use std::path::{Path, PathBuf};
+use std::io::{self, BufRead, BufReader, Read, Write};
+use std::path::{Component, Path, PathBuf};
 use std::thread;
 use std::thread::available_parallelism;
 
+use ignore::WalkBuilder;
 use ndarray::Axis;
 use ort::ep;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use ort::value::TensorRef;
 use regex::Regex;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use tokenizers::Tokenizer;
 use tree_sitter::{Language, Parser};
@@ -47,9 +51,16 @@ use tree_sitter::{Language, Parser};
 #[derive(Debug, Deserialize)]
 struct EmbedRequest {
     id: u64,
-    texts: Vec<String>,
+    texts: EmbedPayload,
     #[serde(default)]
     prefix: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct EmbedPayload {
+    #[allow(dead_code)]
+    model: String,
+    texts: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,6 +84,15 @@ struct IndexRequest {
     index: IndexParams,
 }
 
+fn default_rebuild_fts() -> bool { true }
+
+/// SQLite FTS5 BM25 ranks are negative, with more negative values being more relevant.
+/// Map them to a bounded positive score without assuming the rank is greater than -1.
+fn fts_rank_score(rank: f64) -> f32 {
+    let relevance = (-rank).max(0.0);
+    (relevance / (1.0 + relevance)) as f32
+}
+
 #[derive(Debug, Deserialize)]
 struct IndexParams {
     paths: Vec<String>,
@@ -87,6 +107,8 @@ struct IndexParams {
     store: bool,
     #[serde(default)]
     watch_dirs: Vec<String>,
+    #[serde(default = "default_rebuild_fts")]
+    rebuild_fts: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -158,6 +180,8 @@ struct SymbolSearchRequest {
 #[derive(Debug, Deserialize)]
 struct SymbolSearchParams {
     pattern: String,
+    #[serde(default)]
+    kind: Option<String>,
     #[serde(default)]
     path_filter: Option<String>,
 }
@@ -237,6 +261,7 @@ struct SearchResponse {
 #[derive(Debug, Serialize)]
 struct SymbolResultItem {
     symbol: String,
+    kind: String,
     path: String,
     start_line: usize,
     end_line: usize,
@@ -250,6 +275,78 @@ struct SymbolSearchResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct OutlineItem {
+    symbol: String,
+    kind: String,
+    path: String,
+    start_line: usize,
+    end_line: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct OutlineResponse {
+    id: u64,
+    path: String,
+    files: usize,
+    truncated: bool,
+    symbols: Vec<OutlineItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OutlineRequest {
+    id: u64,
+    outline: OutlineParams,
+}
+
+#[derive(Debug, Deserialize)]
+struct OutlineParams {
+    path: String,
+}
+
+// ── Symbol extraction ──
+// Declaration regexes shared by indexing (store_chunks), startup backfill,
+// and the symbols-table guard in symbol_search. Kept identical to the
+// historical runtime scan so results stay compatible.
+
+/// (kind, regex) pairs. The kind is stored on every symbols row so searches
+/// can filter by declaration type (function/class/variable/...).
+const SYM_PATTERNS: [(&str, &str); 12] = [
+    ("function", r"(?:export\s+)?(?:async\s+)?function\s+([a-zA-Z_$][\w$]*)"),
+    ("class", r"(?:export\s+)?(?:async\s+)?class\s+([a-zA-Z_$][\w$]*)"),
+    ("variable", r"(?:export\s+)?(?:const|let|var)\s+([a-zA-Z_$][\w$]*)\s*[:=]"),
+    ("interface", r"(?:export\s+)?interface\s+([a-zA-Z_$][\w$]*)"),
+    ("type", r"(?:export\s+)?type\s+([a-zA-Z_$][\w$]*)\s*="),
+    ("function", r"(?:pub\s+)?fn\s+([a-zA-Z_$][\w$]*)"),
+    ("struct", r"(?:pub\s+)?struct\s+([a-zA-Z_$][\w$]*)"),
+    ("enum", r"(?:pub\s+)?enum\s+([a-zA-Z_$][\w$]*)"),
+    ("trait", r"(?:pub\s+)?trait\s+([a-zA-Z_$][\w$]*)"),
+    ("function", r"def\s+([a-zA-Z_$][\w$]*)\s*\("),
+    ("class", r"class\s+([a-zA-Z_$][\w$]*)\s*(?::|\(|\{)?"),
+    ("function", r"func\s+([a-zA-Z_$][\w$]*)\s*\("),
+];
+
+fn sym_regexes() -> Vec<(String, Regex)> {
+    SYM_PATTERNS
+        .iter()
+        .filter_map(|(kind, p)| Regex::new(p).ok().map(|re| (kind.to_string(), re)))
+        .collect()
+}
+
+fn extract_symbols(text: &str, sym_res: &[(String, Regex)]) -> Vec<(String, String, usize)> {
+    let mut out = Vec::new();
+    for (kind, sym_re) in sym_res {
+        for cap in sym_re.captures_iter(text) {
+            if let Some(name) = cap.get(1) {
+                // 0-based line of the declaration within this chunk text.
+                let line = text[..name.start()].lines().count();
+                out.push((name.as_str().to_string(), kind.clone(), line));
+            }
+        }
+    }
+    out
+}
+
+#[derive(Debug, Serialize)]
 struct StatusResponse {
     id: u64,
     files: usize,
@@ -257,6 +354,7 @@ struct StatusResponse {
     dim: usize,
     db_size: u64,
     watching: bool,
+    index_roots: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -483,6 +581,8 @@ struct AstReplaceResponse {
 struct AstReplaceItem {
     file: String,
     matches: usize,
+    added: usize,
+    removed: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     diff: Option<String>,
 }
@@ -500,6 +600,16 @@ const DEFAULT_SKIP_DIRS: &[&str] = &[
     "vendor", ".next", ".cache", "__pycache__",
 ];
 const COSINE_NORM_EPS: f32 = 1e-12;
+const RRF_K: f32 = 60.0;
+const SEARCH_OVERFETCH_MULTIPLIER: usize = 5;
+const SEARCH_OVERFETCH_MIN: usize = 20;
+const SEARCH_OVERFETCH_MAX: usize = 200;
+
+fn search_candidate_limit(top_k: usize) -> usize {
+    top_k
+        .saturating_mul(SEARCH_OVERFETCH_MULTIPLIER)
+        .clamp(SEARCH_OVERFETCH_MIN, SEARCH_OVERFETCH_MAX)
+}
 
 // ── Utility ──
 
@@ -536,35 +646,61 @@ fn ext_of(path: &Path) -> String {
 
 // ── File walking ──
 
-fn walk_dir(dir: &Path, extensions: &HashSet<String>, skip_dirs: &HashSet<String>) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return out,
+/// Lexically remove `.` segments and resolve `..` without touching the filesystem.
+/// Rust's `Path::join` keeps a literal `"."` segment, so `cwd.join(".")` produces
+/// `C:\...\agent\.\extensions\...` roots that would bake `\.\` into every stored
+/// path. This is the same normalization cargo uses for its paths.
+fn normalize_path(p: &Path) -> PathBuf {
+    let mut components = p.components().peekable();
+    let mut ret = if let Some(c @ Component::Prefix(..)) = components.peek().cloned() {
+        components.next();
+        PathBuf::from(c.as_os_str())
+    } else {
+        PathBuf::new()
     };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let fname = path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
-        if let Ok(meta) = path.metadata() {
-            if meta.is_dir() {
-                if skip_dirs.contains(&fname) || fname.starts_with('.') {
-                    continue;
-                }
-                out.extend(walk_dir(&path, extensions, skip_dirs));
-            } else if meta.is_file() {
-                if extensions.is_empty() || extensions.contains(&ext_of(&path)) {
-                    out.push(path);
-                }
-            }
+    for component in components {
+        match component {
+            Component::Prefix(..) => unreachable!(),
+            Component::RootDir => { ret.push(component.as_os_str()); }
+            Component::CurDir => {}
+            Component::ParentDir => { ret.pop(); }
+            Component::Normal(..) => { ret.push(component.as_os_str()); }
         }
     }
-    out
+    ret
+}
+
+fn walk_dir(dir: &Path, extensions: &HashSet<String>, skip_dirs: &HashSet<String>) -> Vec<PathBuf> {
+    let skipped = skip_dirs.clone();
+    let mut builder = WalkBuilder::new(dir);
+    builder
+        .hidden(false)
+        .ignore(false)
+        .git_ignore(true)
+        .git_global(false)
+        .git_exclude(false)
+        .require_git(false)
+        .add_custom_ignore_filename(".cortexignore")
+        .filter_entry(move |entry| {
+            if entry.depth() == 0 || !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                return true;
+            }
+            let name = entry.file_name().to_string_lossy();
+            !skipped.contains(name.as_ref()) && !name.starts_with('.')
+        });
+
+    builder
+        .build()
+        .filter_map(Result::ok)
+        .map(|entry| entry.into_path())
+        .filter(|path| path.is_file() && (extensions.is_empty() || extensions.contains(&ext_of(path))))
+        .collect()
 }
 
 // ── Chunking (tree-sitter) ──
+
+const MAX_CHUNK_LINES: usize = 160;
+const MAX_CHUNK_BYTES: usize = 16 * 1024;
 
 fn lang_for_ext(ext: &str) -> Option<Language> {
     match ext.to_lowercase().as_str() {
@@ -638,27 +774,71 @@ fn chunk_text(text: &str, file_path: &str, chunk_size: usize, _overlap: usize) -
 
     let mut out = Vec::new();
     for i in 0..merged.len() - 1 {
-        let start_row = merged[i];
-        let end_row = merged[i + 1];
-        if start_row >= end_row {
-            continue;
+        let range_start = merged[i];
+        let range_end = merged[i + 1];
+        let max_lines = target.min(MAX_CHUNK_LINES);
+        let mut start_row = range_start;
+
+        while start_row < range_end {
+            let mut end_row = (start_row + max_lines).min(range_end);
+            while end_row > start_row + 1 && lines[start_row..end_row].join("\n").len() > MAX_CHUNK_BYTES {
+                end_row -= 1;
+            }
+
+            let slice = lines[start_row..end_row].join("\n");
+            if slice.len() <= MAX_CHUNK_BYTES {
+                out.push((start_row + 1, end_row, slice));
+            } else {
+                let mut byte_start = 0;
+                while byte_start < slice.len() {
+                    let mut byte_end = (byte_start + MAX_CHUNK_BYTES).min(slice.len());
+                    while byte_end > byte_start && !slice.is_char_boundary(byte_end) {
+                        byte_end -= 1;
+                    }
+                    if byte_end == byte_start {
+                        byte_end = (byte_start + 1).min(slice.len());
+                        while byte_end < slice.len() && !slice.is_char_boundary(byte_end) {
+                            byte_end += 1;
+                        }
+                    }
+                    out.push((
+                        start_row + 1,
+                        end_row,
+                        slice[byte_start..byte_end].to_string(),
+                    ));
+                    byte_start = byte_end;
+                }
+            }
+
+            start_row = end_row;
         }
-        let slice = lines[start_row..end_row].join("\n");
-        out.push((start_row + 1, end_row, slice));
     }
     out
 }
 
 // ── SQLite storage ──
 
+struct CachedChunk {
+    path: String,
+    start_line: usize,
+    end_line: usize,
+    text: String,
+    embedding: Vec<f32>,
+    norm: f32,
+}
+
 struct Store {
     db: Connection,
+    vector_cache: RefCell<Option<(i64, Vec<CachedChunk>)>>,
 }
 
 impl Store {
     fn new(db_path: &str) -> anyhow::Result<Self> {
         let db = Connection::open(db_path)?;
         db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+        // Concurrent sidecars share one DB file; wait up to 30s for a busy
+        // writer instead of failing the call with SQLITE_BUSY.
+        db.busy_timeout(Duration::from_secs(30))?;
         db.execute_batch(
             "CREATE TABLE IF NOT EXISTS files (
                 path  TEXT PRIMARY KEY,
@@ -681,49 +861,54 @@ impl Store {
                 content_rowid=id,
                 tokenize='porter unicode61',
                 detail=none
+            );
+            CREATE TABLE IF NOT EXISTS symbols (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol     TEXT NOT NULL,
+                kind       TEXT NOT NULL DEFAULT '',
+                path       TEXT NOT NULL,
+                start_line INTEGER NOT NULL,
+                end_line   INTEGER NOT NULL,
+                chunk_id   INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS symbols_symbol_idx ON symbols(symbol);
+            CREATE INDEX IF NOT EXISTS symbols_path_idx ON symbols(path);
+            CREATE TABLE IF NOT EXISTS meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS call_edges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_path TEXT NOT NULL,
+                line INTEGER NOT NULL,
+                callee TEXT NOT NULL,
+                caller TEXT DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS call_edges_callee_idx ON call_edges(callee);
+            CREATE INDEX IF NOT EXISTS call_edges_file_idx ON call_edges(file_path);
+            CREATE TABLE IF NOT EXISTS triples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                subject TEXT NOT NULL,
+                predicate TEXT NOT NULL,
+                object TEXT NOT NULL,
+                subject_type TEXT DEFAULT '',
+                object_type TEXT DEFAULT '',
+                file_path TEXT DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS triples_subject_idx ON triples(subject);
+            CREATE INDEX IF NOT EXISTS triples_predicate_idx ON triples(predicate);
+            CREATE INDEX IF NOT EXISTS triples_object_idx ON triples(object);
+            CREATE TABLE IF NOT EXISTS memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                embedding BLOB,
+                source TEXT DEFAULT '',
+                importance REAL DEFAULT 0.5,
+                scope TEXT DEFAULT 'session',
+                created_at TEXT DEFAULT (datetime('now'))
             );"
         )?;
 
-        // Migrate old FTS5 table (pre-content=chunks or pre-detail=none) to new schema
-        let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap_or(0);
-        if version < 2 {
-            db.execute_batch(
-                "DROP TABLE IF EXISTS chunks_fts;
-                 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
-                     text,
-                     content=chunks,
-                     content_rowid=id,
-                     tokenize='porter unicode61',
-                     detail=none
-                 );
-                 PRAGMA user_version = 2;"
-            )?;
-            let count: i64 = db.query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0)).unwrap_or(0);
-            if count > 0 {
-                db.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')", [])?;
-            }
-        }
-        if version < 3 {
-            db.execute_batch(
-                "DROP TABLE IF EXISTS chunks_fts;
-                 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
-                     text,
-                     content=chunks,
-                     content_rowid=id,
-                     tokenize='porter unicode61',
-                     detail=none
-                 );
-                 PRAGMA user_version = 3;"
-            )?;
-            let count: i64 = db.query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0)).unwrap_or(0);
-            if count > 0 {
-                db.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')", [])?;
-            }
-            // Reclaim space from dropped old FTS5 shadow tables + free pages.
-            // VACUUM and checkpoint must run outside any transaction.
-            let _ = db.execute_batch("VACUUM;");
-            let _ = db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
-        }
         db.execute_batch(
             "CREATE TABLE IF NOT EXISTS call_edges (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -757,20 +942,19 @@ impl Store {
             );",
         )?;
 
-        // Migration 4: add triples + memories
-        if version < 4 {
-            db.execute_batch(
-                "INSERT OR IGNORE INTO triples (subject, predicate, object, subject_type, object_type, file_path)
-                 SELECT DISTINCT caller, 'calls', callee, 'function', 'function', file_path FROM call_edges WHERE caller != '';"
-            )?;
-            db.execute_batch("PRAGMA user_version = 4;")?;
-        }
 
-        Ok(Self { db })
+        Ok(Self {
+            db,
+            vector_cache: RefCell::new(None),
+        })
     }
 
     fn file_is_unchanged(&self, file_path: &str, mtime: f64, size: u64) -> bool {
-        self.db.query_row(
+        Self::row_is_unchanged(&self.db, file_path, mtime, size)
+    }
+
+    fn row_is_unchanged(db: &Connection, file_path: &str, mtime: f64, size: u64) -> bool {
+        db.query_row(
             "SELECT mtime, size FROM files WHERE path = ?1",
             params![file_path],
             |row| Ok((row.get::<_, f64>(0)?, row.get::<_, u64>(1)?))
@@ -778,37 +962,60 @@ impl Store {
     }
 
     fn store_chunks(&mut self, file_path: &str, mtime: f64, size: u64, chunks: &[ChunkData]) -> anyhow::Result<usize> {
-        // Skip if file is unchanged
-        if self.file_is_unchanged(file_path, mtime, size) {
-            return Ok(0);
+        // Take the write lock FIRST, then check freshness inside the same
+        // transaction. Two sidecars storing the same file now serialize: the
+        // second waits (busy_timeout), re-checks, sees the committed row and
+        // skips instead of double-storing.
+        let tx = self.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if Self::row_is_unchanged(&tx, file_path, mtime, size) {
+            return Ok(0); // tx dropped → ROLLBACK → lock released
         }
 
-        let tx = self.db.transaction()?;
-
         tx.execute("DELETE FROM chunks WHERE path = ?1", params![file_path])?;
+        tx.execute("DELETE FROM symbols WHERE path = ?1", params![file_path])?;
+        let sym_res = sym_regexes();
+        let mut seen_syms: HashSet<(String, String)> = HashSet::new();
         for c in chunks {
             let emb_bytes: Vec<u8> = c.embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
             tx.execute(
                 "INSERT INTO chunks (path, start_line, end_line, text, embedding) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![file_path, c.start_line, c.end_line, c.text, emb_bytes],
             )?;
+            let chunk_id = tx.last_insert_rowid();
+            // Keep the symbols table in sync with this file's chunks. First
+            // chunk per (symbol, kind, path) wins, matching the legacy scan.
+            for (sym, kind, line_off) in extract_symbols(&c.text, &sym_res) {
+                if seen_syms.insert((sym.clone(), kind.clone())) {
+                    // The declaration line, not the chunk span.
+                    let decl = c.start_line + line_off;
+                    tx.execute(
+                        "INSERT INTO symbols (symbol, kind, path, start_line, end_line, chunk_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        params![sym, kind, file_path, decl, decl, chunk_id],
+                    )?;
+                }
+            }
         }
         tx.execute(
             "INSERT INTO files (path, mtime, size) VALUES (?1, ?2, ?3) ON CONFLICT(path) DO UPDATE SET mtime = excluded.mtime, size = excluded.size",
             params![file_path, mtime, size],
         )?;
         tx.commit()?;
+        self.vector_cache.borrow_mut().take();
         Ok(chunks.len())
     }
 
     fn delete_path(&mut self, file_path: &str) -> anyhow::Result<usize> {
         let deleted = self.db.execute("DELETE FROM chunks WHERE path = ?1", params![file_path])?;
+        self.db.execute("DELETE FROM symbols WHERE path = ?1", params![file_path])?;
         self.db.execute("DELETE FROM files WHERE path = ?1", params![file_path])?;
+        if deleted > 0 {
+            self.vector_cache.borrow_mut().take();
+        }
         Ok(deleted)
     }
 
     fn clear_all(&mut self) -> anyhow::Result<()> {
-        self.db.execute_batch("DELETE FROM chunks; DELETE FROM files; DROP TABLE IF EXISTS chunks_fts;")?;
+        self.db.execute_batch("DELETE FROM chunks; DELETE FROM files; DELETE FROM symbols; DELETE FROM meta; DROP TABLE IF EXISTS chunks_fts;")?;
         self.db.execute_batch(
             "CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
                  text,
@@ -818,6 +1025,7 @@ impl Store {
                  detail=none
              );"
         )?;
+        self.vector_cache.borrow_mut().take();
         Ok(())
     }
 
@@ -833,7 +1041,85 @@ impl Store {
         std::fs::metadata(db_path).map(|m| m.len()).unwrap_or(0)
     }
 
+    fn load_vector_cache(&self) -> anyhow::Result<Vec<CachedChunk>> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT path, start_line, end_line, text, embedding FROM chunks")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i32>(1)? as usize,
+                row.get::<_, i32>(2)? as usize,
+                row.get::<_, String>(3)?,
+                row.get::<_, Vec<u8>>(4)?,
+            ))
+        })?;
+
+        let mut cache = Vec::new();
+        for row in rows {
+            let (path, start_line, end_line, text, bytes) = row?;
+            if bytes.len() % 4 != 0 || bytes.is_empty() {
+                continue;
+            }
+            let embedding: Vec<f32> = bytes
+                .chunks_exact(4)
+                .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                .collect();
+            let norm = embedding.iter().map(|value| value * value).sum::<f32>().sqrt();
+            cache.push(CachedChunk {
+                path,
+                start_line,
+                end_line,
+                text,
+                embedding,
+                norm,
+            });
+        }
+        Ok(cache)
+    }
+
+    fn vector_cache(&self) -> anyhow::Result<std::cell::Ref<'_, Vec<CachedChunk>>> {
+        let version = self
+            .db
+            .query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))?;
+        let cache_is_current = self
+            .vector_cache
+            .borrow()
+            .as_ref()
+            .is_some_and(|(cached_version, _)| *cached_version == version);
+        if !cache_is_current {
+            let cache = self.load_vector_cache()?;
+            *self.vector_cache.borrow_mut() = Some((version, cache));
+        }
+        Ok(std::cell::Ref::map(self.vector_cache.borrow(), |cache| {
+            &cache.as_ref().expect("vector cache initialized").1
+        }))
+    }
+
     fn text_search(
+        &self,
+        query: &str,
+        top_k: usize,
+        path_filter: Option<&str>,
+    ) -> anyhow::Result<Vec<(String, usize, usize, f32)>> {
+        let strict = self.text_search_match(query, top_k, path_filter)?;
+        if !strict.is_empty() {
+            return Ok(strict);
+        }
+
+        let fallback = query
+            .split_whitespace()
+            .filter(|term| !term.is_empty())
+            .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        if fallback.is_empty() || fallback == query {
+            return Ok(strict);
+        }
+        self.text_search_match(&fallback, top_k, path_filter)
+    }
+
+    fn text_search_match(
         &self,
         query: &str,
         top_k: usize,
@@ -852,7 +1138,7 @@ impl Store {
                     row.get::<_, String>(0)?,
                     row.get::<_, i32>(1)? as usize,
                     row.get::<_, i32>(2)? as usize,
-                    1.0 / (row.get::<_, f64>(3)? as f32 + 1.0),
+                    fts_rank_score(row.get::<_, f64>(3)?),
                 ))
             })?;
             rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -868,7 +1154,7 @@ impl Store {
                     row.get::<_, String>(0)?,
                     row.get::<_, i32>(1)? as usize,
                     row.get::<_, i32>(2)? as usize,
-                    1.0 / (row.get::<_, f64>(3)? as f32 + 1.0),
+                    fts_rank_score(row.get::<_, f64>(3)?),
                 ))
             })?;
             rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -919,62 +1205,29 @@ impl Store {
         top_k: usize,
         path_filter: Option<&str>,
     ) -> anyhow::Result<Vec<SearchResultItem>> {
-        let sql = if path_filter.is_some() {
-            "SELECT rowid, path, start_line, end_line, text, embedding FROM chunks WHERE path LIKE ?1"
-        } else {
-            "SELECT rowid, path, start_line, end_line, text, embedding FROM chunks"
-        };
-        let mut stmt = self.db.prepare(sql)?;
-
-        let rows: Vec<(String, i32, i32, String, Vec<u8>)> = if let Some(pf) = path_filter {
-            let pattern = format!("%{}%", pf);
-            let r = stmt.query_map(params![pattern], |row| {
-                Ok((
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i32>(2)?,
-                    row.get::<_, i32>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, Vec<u8>>(5)?,
-                ))
-            })?;
-            r.collect::<Result<Vec<_>, _>>()?
-        } else {
-            let r = stmt.query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i32>(2)?,
-                    row.get::<_, i32>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, Vec<u8>>(5)?,
-                ))
-            })?;
-            r.collect::<Result<Vec<_>, _>>()?
-        };
-
-        let mut scored: Vec<SearchResultItem> = Vec::with_capacity(rows.len());
-        for (path, sl, el, text, emb_bytes) in &rows {
-            if emb_bytes.len() != query_emb.len() * 4 {
+        let cache = self.vector_cache()?;
+        let query_norm = query_emb.iter().map(|value| value * value).sum::<f32>().sqrt();
+        let mut scored: Vec<SearchResultItem> = Vec::with_capacity(cache.len());
+        for chunk in cache.iter() {
+            if path_filter.is_some_and(|filter| !chunk.path.contains(filter)) {
                 continue;
             }
-            let emb: Vec<f32> = emb_bytes
-                .chunks_exact(4)
-                .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-                .collect();
 
-            let mut dot = 0.0f32;
-            let mut norm_a = 0.0f32;
-            let mut norm_b = 0.0f32;
-            for i in 0..emb.len() {
-                dot += query_emb[i] * emb[i];
-                norm_a += query_emb[i] * query_emb[i];
-                norm_b += emb[i] * emb[i];
+            if chunk.embedding.len() != query_emb.len() {
+                continue;
             }
-            let score = dot / (norm_a.sqrt() * norm_b.sqrt() + COSINE_NORM_EPS);
+
+            let dot = query_emb
+                .iter()
+                .zip(chunk.embedding.iter())
+                .map(|(query, value)| query * value)
+                .sum::<f32>();
+            let score = dot / (query_norm * chunk.norm + COSINE_NORM_EPS);
             scored.push(SearchResultItem {
-                path: path.clone(),
-                start_line: *sl as usize,
-                end_line: *el as usize,
-                snippet: text.chars().take(500).collect(),
+                path: chunk.path.clone(),
+                start_line: chunk.start_line,
+                end_line: chunk.end_line,
+                snippet: chunk.text.clone(),
                 score,
             });
         }
@@ -994,99 +1247,246 @@ impl Store {
         path_filter: Option<&str>,
         keyword_weight: f32,
     ) -> anyhow::Result<Vec<SearchResultItem>> {
+        if top_k == 0 {
+            return Ok(Vec::new());
+        }
+
         let sem_weight = (1.0 - keyword_weight).clamp(0.0, 1.0);
         let kw_weight = keyword_weight.clamp(0.0, 1.0);
+        let candidate_limit = search_candidate_limit(top_k);
 
-        let mut sem = self.semantic_search(query_emb, top_k * 3, path_filter)?;
-        let fts = self.text_search(query_text, top_k * 3, path_filter).unwrap_or_default();
+        let sem = self.semantic_search(query_emb, candidate_limit, path_filter)?;
+        let fts = self.text_search(query_text, candidate_limit, path_filter).unwrap_or_default();
 
-        let mut fts_map: std::collections::HashMap<(String, usize), f32> = std::collections::HashMap::new();
-        for (path, sl, _el, score) in &fts {
-            fts_map.insert((path.clone(), *sl), *score);
+        type SearchKey = (String, usize, usize);
+        let mut candidates: HashMap<SearchKey, SearchResultItem> = HashMap::new();
+        let mut semantic_ranks: HashMap<SearchKey, usize> = HashMap::new();
+        let mut lexical_ranks: HashMap<SearchKey, usize> = HashMap::new();
+
+        for (rank, item) in sem.into_iter().enumerate() {
+            let key = (item.path.clone(), item.start_line, item.end_line);
+            semantic_ranks.insert(key.clone(), rank + 1);
+            candidates.insert(key, item);
         }
 
-        for item in &mut sem {
-            let kw = fts_map.get(&(item.path.clone(), item.start_line)).copied().unwrap_or(0.0);
-            item.score = item.score * sem_weight + kw * kw_weight;
+        for (rank, (path, start_line, end_line, _score)) in fts.iter().enumerate() {
+            let key = (path.clone(), *start_line, *end_line);
+            lexical_ranks.insert(key.clone(), rank + 1);
+            candidates.entry(key).or_insert_with(|| {
+                let snippet = self
+                    .db
+                    .query_row(
+                        "SELECT text FROM chunks WHERE path = ?1 AND start_line = ?2 AND end_line = ?3",
+                        params![path, *start_line, *end_line],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .unwrap_or_default();
+                SearchResultItem {
+                    path: path.clone(),
+                    start_line: *start_line,
+                    end_line: *end_line,
+                    snippet,
+                    score: 0.0,
+                }
+            });
         }
 
-        sem.sort_unstable_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-        sem.truncate(top_k);
-        self.rerank(&mut sem, query_text);
-        sem.sort_unstable_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-        Ok(sem)
+        let max_rrf = 1.0 / (RRF_K + 1.0);
+        let mut results: Vec<SearchResultItem> = candidates
+            .into_iter()
+            .map(|(key, mut item)| {
+                let semantic_rrf = semantic_ranks
+                    .get(&key)
+                    .map(|rank| 1.0 / (RRF_K + *rank as f32))
+                    .unwrap_or(0.0);
+                let lexical_rrf = lexical_ranks
+                    .get(&key)
+                    .map(|rank| 1.0 / (RRF_K + *rank as f32))
+                    .unwrap_or(0.0);
+                item.score = (sem_weight * semantic_rrf + kw_weight * lexical_rrf) / max_rrf;
+                item
+            })
+            .collect();
+
+        results.sort_unstable_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.path.cmp(&b.path))
+                .then_with(|| a.start_line.cmp(&b.start_line))
+                .then_with(|| a.end_line.cmp(&b.end_line))
+        });
+        results.truncate(top_k);
+        self.rerank(&mut results, query_text);
+        results.sort_unstable_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.path.cmp(&b.path))
+                .then_with(|| a.start_line.cmp(&b.start_line))
+                .then_with(|| a.end_line.cmp(&b.end_line))
+        });
+        Ok(results)
     }
 
-    fn symbol_search(&self, pattern: &str, path_filter: Option<&str>) -> anyhow::Result<Vec<SymbolResultItem>> {
-        let re = Regex::new(pattern).map_err(|e| anyhow::anyhow!("bad regex: {e}"))?;
+    fn symbol_search(&self, pattern: &str, kind: Option<&str>, path_filter: Option<&str>) -> anyhow::Result<Vec<SymbolResultItem>> {
+        // Plain substring matches first: the pattern is only treated as a
+        // regex when it actually compiles, so `Handler` and `SessionManager(`
+        // both work and a stray `(` no longer errors out.
+        let re = Regex::new(pattern).ok();
+        let kind_lower = kind.unwrap_or("").to_lowercase();
 
-        let stmt2 = if let Some(pf) = path_filter {
-            let pattern = format!("%{}%", pf);
-            let mut s = self.db.prepare("SELECT path, start_line, end_line, text FROM chunks WHERE path LIKE ?1")?;
-            let rows = s
-                .query_map(params![pattern], |row| {
+        let (sql, like): (&str, Option<String>) = match path_filter {
+            Some(pf) => (
+                "SELECT symbol, kind, path, start_line, end_line, chunk_id FROM symbols WHERE replace(path, '\\', '/') LIKE ?1 ORDER BY id",
+                Some(format!("%{}%", pf.replace('\\', "/"))),
+            ),
+            None => (
+                "SELECT symbol, kind, path, start_line, end_line, chunk_id FROM symbols ORDER BY id",
+                None,
+            ),
+        };
+        let mut stmt = self.db.prepare(sql)?;
+        let rows: Vec<(String, String, String, usize, usize, i64)> = match &like {
+            Some(like) => stmt
+                .query_map(params![like], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
-                        row.get::<_, i32>(1)? as usize,
-                        row.get::<_, i32>(2)? as usize,
-                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i32>(3)? as usize,
+                        row.get::<_, i32>(4)? as usize,
+                        row.get::<_, i64>(5)?,
                     ))
                 })?
-                .collect::<Result<Vec<_>, _>>()?;
-            rows
-        } else {
-            let mut s = self.db.prepare("SELECT path, start_line, end_line, text FROM chunks")?;
-            let rows = s
+                .collect::<Result<_, _>>()?,
+            None => stmt
                 .query_map([], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
-                        row.get::<_, i32>(1)? as usize,
-                        row.get::<_, i32>(2)? as usize,
-                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i32>(3)? as usize,
+                        row.get::<_, i32>(4)? as usize,
+                        row.get::<_, i64>(5)?,
                     ))
                 })?
-                .collect::<Result<Vec<_>, _>>()?;
-            rows
+                .collect::<Result<_, _>>()?,
         };
-
-        let sym_patterns = &[
-            r"(?:export\s+)?(?:async\s+)?function\s+([a-zA-Z_$][\w$]*)",
-            r"(?:export\s+)?(?:async\s+)?class\s+([a-zA-Z_$][\w$]*)",
-            r"(?:export\s+)?(?:const|let|var)\s+([a-zA-Z_$][\w$]*)\s*[:=]",
-            r"(?:export\s+)?interface\s+([a-zA-Z_$][\w$]*)",
-            r"(?:export\s+)?type\s+([a-zA-Z_$][\w$]*)\s*=",
-            r"(?:pub\s+)?fn\s+([a-zA-Z_$][\w$]*)",
-            r"(?:pub\s+)?struct\s+([a-zA-Z_$][\w$]*)",
-            r"(?:pub\s+)?enum\s+([a-zA-Z_$][\w$]*)",
-            r"(?:pub\s+)?trait\s+([a-zA-Z_$][\w$]*)",
-            r"def\s+([a-zA-Z_$][\w$]*)\s*\(",
-            r"class\s+([a-zA-Z_$][\w$]*)\s*(?::|\(|\{)?",
-            r"func\s+([a-zA-Z_$][\w$]*)\s*\(",
-        ];
-        let sym_res: Vec<Regex> = sym_patterns.iter().filter_map(|p| Regex::new(p).ok()).collect();
-
-        let mut results = Vec::new();
-        for (path, sl, el, text) in &stmt2 {
-            for sym_re in &sym_res {
-                for cap in sym_re.captures_iter(text) {
-                    if let Some(name) = cap.get(1) {
-                        let sym = name.as_str().to_string();
-                        if re.is_match(&sym) && results.iter().all(|r: &SymbolResultItem| r.symbol != sym || r.path != *path) {
-                            results.push(SymbolResultItem {
-                                symbol: sym,
-                                path: path.clone(),
-                                start_line: *sl,
-                                end_line: *el,
-                                snippet: text.chars().take(300).collect(),
-                            });
-                        }
-                    }
-                }
+        let mut results: Vec<(String, String, String, usize, usize, i64)> = Vec::new();
+        let mut seen: HashSet<(String, String)> = HashSet::new();
+        for (sym, sym_kind, path, sl, el, chunk_id) in rows {
+            if !kind_lower.is_empty() && sym_kind.to_lowercase() != kind_lower {
+                continue;
+            }
+            let matched = match &re {
+                Some(re) => re.is_match(&sym),
+                None => sym.to_lowercase().contains(&pattern.to_lowercase()),
+            };
+            if matched && seen.insert((sym.clone(), path.clone())) {
+                results.push((sym, sym_kind, path, sl, el, chunk_id));
             }
         }
+        results.truncate(100);
 
-        results.truncate(20);
-        Ok(results)
+        // Snippets are fetched only for the surviving rows, not every match.
+        // Each snippet starts at the symbol's declaration line, not the chunk start.
+        let mut out = Vec::with_capacity(results.len());
+        for (sym, sym_kind, path, sl, el, chunk_id) in results {
+            let (chunk_text, chunk_sl): (String, i64) = self
+                .db
+                .query_row(
+                    "SELECT text, start_line FROM chunks WHERE id = ?1",
+                    params![chunk_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap_or_default();
+            let skip = sl.saturating_sub(chunk_sl.max(0) as usize);
+            let snippet = chunk_text.lines().skip(skip).collect::<Vec<_>>().join("\n");
+            out.push(SymbolResultItem {
+                symbol: sym,
+                kind: sym_kind,
+                path,
+                start_line: sl,
+                end_line: el,
+                snippet,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Every symbol in one file (exact path) or under one directory (prefix).
+    /// Sorted by path then line so the response reads like an IDE outline.
+    fn outline(&self, path: &str) -> anyhow::Result<(String, usize, bool, Vec<OutlineItem>)> {
+        let mut norm = normalize_path(Path::new(path)).to_string_lossy().replace('\\', "/");
+        while norm.ends_with('/') {
+            norm.pop();
+        }
+        // Exact file match first.
+        let mut stmt = self.db.prepare(
+            "SELECT symbol, kind, start_line, end_line FROM symbols WHERE replace(path, '\\', '/') = ?1 ORDER BY start_line, id",
+        )?;
+        let rows = stmt
+            .query_map(params![norm], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i32>(2)? as usize,
+                    row.get::<_, i32>(3)? as usize,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
+        if !rows.is_empty() {
+            let symbols = rows
+                .into_iter()
+                .map(|(symbol, kind, start_line, end_line)| OutlineItem {
+                    symbol,
+                    kind,
+                    path: path.to_string(),
+                    start_line,
+                    end_line,
+                })
+                .collect();
+            return Ok((path.to_string(), 1, false, symbols));
+        }
+        // Directory mode: every symbol under the prefix, grouped by file.
+        let prefix = format!("{norm}/%");
+        let files: i64 = self
+            .db
+            .query_row(
+                "SELECT COUNT(DISTINCT path) FROM symbols WHERE replace(path, '\\', '/') LIKE ?1",
+                params![prefix],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        let mut stmt = self.db.prepare(
+            "SELECT symbol, kind, path, start_line, end_line FROM symbols WHERE replace(path, '\\', '/') LIKE ?1 ORDER BY path, start_line, id LIMIT 2000",
+        )?;
+        let rows: Vec<(String, String, String, usize, usize)> = stmt
+            .query_map(params![prefix], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i32>(3)? as usize,
+                    row.get::<_, i32>(4)? as usize,
+                ))
+            })?
+            .collect::<Result<_, _>>()?;
+        drop(stmt);
+        let truncated = rows.len() >= 2000;
+        let symbols = rows
+            .into_iter()
+            .map(|(symbol, kind, path, start_line, end_line)| OutlineItem {
+                symbol,
+                kind,
+                path,
+                start_line,
+                end_line,
+            })
+            .collect();
+        Ok((path.to_string(), files as usize, truncated, symbols))
     }
 
     // ── Call graph ──
@@ -1660,6 +2060,42 @@ impl Reranker {
     }
 }
 
+/// Cargo/git-style advisory lock: at most one index request may run at a
+/// time per DB, across all sidecar processes. A concurrent /cc-index from
+/// another session waits for the holder, then its unchanged-check skips
+/// everything — no wasted embedding, no double-storing. The lock file lives
+/// next to the DB and the OS releases it automatically if the process exits
+/// or crashes.
+///
+/// The wait deadline is generous (10 min) because the holder may be
+/// embedding a heavy batch (25 large files ≈ thousands of texts), which can
+/// take well over 30s under CPU contention. The deadline only fires if the
+/// holder is genuinely stuck — a hung embedding — which is a broken state
+/// where failing cleanly is the right outcome.
+fn acquire_index_lock(db_path: &str) -> anyhow::Result<std::fs::File> {
+    let path = format!("{db_path}.lock");
+    let f = std::fs::OpenOptions::new().create(true).write(true).open(&path)?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(600);
+    loop {
+        match f.try_lock() {
+            Ok(()) => {
+                eprintln!("[embedder] index lock acquired ({path})");
+                return Ok(f);
+            }
+            Err(std::fs::TryLockError::WouldBlock) => {
+                if std::time::Instant::now() >= deadline {
+                    anyhow::bail!(
+                        "another index run is already in progress (lock {path} held >600s); \
+                         the other run appears to be stuck — close that session and retry"
+                    );
+                }
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            Err(std::fs::TryLockError::Error(e)) => return Err(e.into()),
+        }
+    }
+}
+
 // ── Watcher ──
 
 use std::sync::{Arc, Mutex, mpsc};
@@ -1686,7 +2122,12 @@ fn start_watcher(
 ) -> Result<WatcherState, String> {
     let (stop_tx, stop_rx) = mpsc::channel::<()>();
 
-    let watch_paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+    let watch_paths: Vec<PathBuf> = paths.iter().map(|p| {
+        let raw = PathBuf::from(p);
+        let abs = if raw.is_absolute() { raw }
+        else { env::current_dir().ok().map(|c| c.join(&raw)).unwrap_or(raw) };
+        normalize_path(&abs)
+    }).collect();
     let ext_set: HashSet<String> = CODE_EXTENSIONS.iter().map(|s| s.to_string()).collect();
     let skip_set: HashSet<String> = DEFAULT_SKIP_DIRS.iter().map(|d| d.to_string()).collect();
 
@@ -1699,28 +2140,15 @@ fn start_watcher(
             let scan_all = || -> HashMap<String, FileSnapshot> {
                 let mut result = HashMap::new();
                 for root in &watch_paths {
-                    if let Ok(meta) = root.metadata() {
-                        if meta.is_dir() {
-                            for entry in walk_dir(root, &ext_set, &skip_set) {
-                                if let Ok(m) = entry.metadata() {
-                                    if let Some(path_str) = entry.to_str() {
-                                        let mtime = m.modified()
-                                            .ok()
-                                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                            .map(|d| d.as_secs_f64() * 1000.0)
-                                            .unwrap_or(0.0);
-                                        result.insert(path_str.to_string(), FileSnapshot { mtime, size: m.len() });
-                                    }
-                                }
-                            }
-                        } else if meta.is_file() {
-                            if let Some(path_str) = root.to_str() {
-                                let mtime = meta.modified()
+                    for entry in walk_dir(root, &ext_set, &skip_set) {
+                        if let Ok(m) = entry.metadata() {
+                            if let Some(path_str) = entry.to_str() {
+                                let mtime = m.modified()
                                     .ok()
                                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                                     .map(|d| d.as_secs_f64() * 1000.0)
                                     .unwrap_or(0.0);
-                                result.insert(path_str.to_string(), FileSnapshot { mtime, size: meta.len() });
+                                result.insert(path_str.to_string(), FileSnapshot { mtime, size: m.len() });
                             }
                         }
                     }
@@ -1868,15 +2296,66 @@ fn main() -> anyhow::Result<()> {
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut out = stdout.lock();
-    let mut reader = stdin.lock();
-    let mut line = String::new();
+
+    // Resume the watcher from the last index run: the index roots are
+    // persisted in the meta table, so a pi restart does not lose watching —
+    // the sidecar re-watches the same roots on startup, no /cc-index needed.
+    if watcher_state.is_none() {
+        if let Some(ref s) = store {
+            let roots: Vec<String> = s
+                .db
+                .query_row("SELECT value FROM meta WHERE key = 'index_roots'", [], |r| r.get::<_, String>(0))
+                .ok()
+                .and_then(|v| serde_json::from_str(&v).ok())
+                .unwrap_or_default();
+            if !roots.is_empty() {
+                match start_watcher(&roots, pending_changes.clone(), 2000) {
+                    Ok(ws) => {
+                        watcher_state = Some(ws);
+                        writeln!(out, "{}", serde_json::json!({"watcher_event": {"action":"auto_started","paths":roots.len(),"resumed":true}}))?;
+                    }
+                    Err(e) => {
+                        writeln!(out, "{}", serde_json::json!({"watcher_event": {"action":"auto_start_failed","error":e.to_string()}}))?;
+                    }
+                }
+            }
+        }
+    }
+
+    // Read stdin on a dedicated thread. The main loop must wake up
+    // periodically even with no commands in flight, otherwise watcher
+    // changes would only be drained (reindexed + notified) on the next tool
+    // call. With this channel, the loop wakes every 2s and the watcher reacts
+    // to file edits within ~2s, no command needed. EOF closes the channel.
+    let (stdin_tx, stdin_rx) = mpsc::channel::<Option<String>>();
+    thread::Builder::new()
+        .name("cortex-stdin".into())
+        .spawn(move || {
+            for line in BufReader::new(stdin).lines() {
+                match line {
+                    Ok(l) => {
+                        if stdin_tx.send(Some(l)).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            let _ = stdin_tx.send(None);
+        })?;
 
     loop {
-        line.clear();
-        let n = reader.read_line(&mut line)?;
-        if n == 0 { break; }
+        // Block up to 2s for a command; wake earlier if one arrives. A
+        // timeout means "idle" — still drain watcher changes so reindexing
+        // and notifications happen without any tool call.
+        let cmd: Option<String> = match stdin_rx.recv_timeout(Duration::from_millis(2000)) {
+            Ok(Some(line)) => Some(line),
+            Ok(None) => break, // stdin EOF → exit
+            Err(mpsc::RecvTimeoutError::Timeout) => None,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
 
-        // Drain pending watcher events before processing this command so that
+        // Drain pending watcher events before processing a command so that
         // watcher_event lines are emitted before the command's response.
         if let Some(ref mut s) = store {
             let changes: Vec<String> = {
@@ -1887,20 +2366,24 @@ fn main() -> anyhow::Result<()> {
                 }
             };
             if !changes.is_empty() {
+                eprintln!("[embedder] watcher: {} pending change(s)", changes.len());
                 for entry in &changes {
                     if let Some(rest) = entry.strip_prefix("__DELETE__:") {
                         let n = s.delete_path(rest).unwrap_or(0);
+                        eprintln!("[embedder] watcher: delete {rest} → {n} chunk(s) removed");
                         if n > 0 {
                             writeln!(out, "{}", serde_json::json!({"watcher_event": {"action":"removed","file":rest,"chunks":n}}))?;
                         }
                     } else if Path::new(entry).exists() {
                         match reindex_file(s, &mut embedder, entry, 80, 20) {
                             Ok(n) => {
+                                eprintln!("[embedder] watcher: reindex {entry} → {n} chunk(s)");
                                 if n > 0 {
                                     writeln!(out, "{}", serde_json::json!({"watcher_event": {"action":"reindexed","file":entry,"chunks":n}}))?;
                                 }
                             }
                             Err(e) => {
+                                eprintln!("[embedder] watcher: FAIL {entry}: {e}");
                                 writeln!(out, "{}", serde_json::json!({"watcher_event": {"action":"failed","file":entry,"error":e.to_string()}}))?;
                             }
                         }
@@ -1910,6 +2393,11 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
+        // No command on an idle wake: loop and drain again on the next tick.
+        let line = match cmd {
+            Some(l) => l,
+            None => continue,
+        };
         let trimmed = line.trim();
         if trimmed.is_empty() { continue; }
 
@@ -1918,10 +2406,13 @@ fn main() -> anyhow::Result<()> {
             Err(e) => { err(&mut out, 0, &format!("bad json: {e}"))?; continue; }
         };
         let id = val.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+        let kind = req_kind(&val);
+        let t0 = std::time::Instant::now();
+        eprintln!("[embedder] req id={id} kind={kind} payload={}", truncate_json(&val, 400));
 
         if val.get("texts").is_some() {
             let req: EmbedRequest = serde_json::from_value(val).map_err(|e| anyhow::anyhow!("bad embed req: {e}"))?;
-            match embedder.embed(&req.texts, &req.prefix) {
+            match embedder.embed(&req.texts.texts, &req.prefix) {
                 Ok(embeddings) => {
                     serde_json::to_writer(&mut out, &EmbedResponse { id: req.id, embeddings })?;
                     out.write_all(b"\n")?;
@@ -1945,27 +2436,15 @@ fn main() -> anyhow::Result<()> {
                 let root = PathBuf::from(p);
                 let abs = if root.is_absolute() { root }
                 else { env::current_dir().ok().map(|c| c.join(&root)).unwrap_or(root) };
-                if let Ok(meta) = abs.metadata() {
-                    if meta.is_dir() {
-                        for f in walk_dir(&abs, &ext_set, &skip_set) {
-                            if let Ok(m) = f.metadata() {
-                                if let Ok(mtime) = m.modified() {
-                                    let d = mtime.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-                                    files.push(FileMeta {
-                                        path: f.to_string_lossy().to_string(),
-                                        mtime: d.as_secs_f64() * 1000.0,
-                                        size: m.len(),
-                                    });
-                                }
-                            }
-                        }
-                    } else if meta.is_file() {
-                        if let Ok(mtime) = meta.modified() {
+                let abs = normalize_path(&abs);
+                for f in walk_dir(&abs, &ext_set, &skip_set) {
+                    if let Ok(m) = f.metadata() {
+                        if let Ok(mtime) = m.modified() {
                             let d = mtime.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
                             files.push(FileMeta {
-                                path: abs.to_string_lossy().to_string(),
+                                path: f.to_string_lossy().to_string(),
                                 mtime: d.as_secs_f64() * 1000.0,
-                                size: meta.len(),
+                                size: m.len(),
                             });
                         }
                     }
@@ -1975,6 +2454,26 @@ fn main() -> anyhow::Result<()> {
             out.write_all(b"\n")?;
         } else if val.get("index").is_some() {
             let req: IndexRequest = serde_json::from_value(val).map_err(|e| anyhow::anyhow!("bad index req: {e}"))?;
+            // One index run at a time per DB: concurrent sessions would
+            // otherwise embed the same files twice (the second run's rows
+            // overwrite the first's). Held for the whole request, i.e. one
+            // 25-file batch in the TS pipeline — that's enough to serialize
+            // two full runs, because both walk the files in the same order
+            // and the loser's per-file unchanged checks then skip everything.
+            let _index_lock: Option<std::fs::File> = if req.index.store && !req.index.skip_embed {
+                match &db_path {
+                    Some(p) => match acquire_index_lock(p) {
+                        Ok(guard) => Some(guard),
+                        Err(e) => {
+                            err(&mut out, req.id, &format!("{e}"))?;
+                            continue;
+                        }
+                    },
+                    None => None,
+                }
+            } else {
+                None
+            };
             let mut files = Vec::new();
             let mut total_chunks = 0usize;
 
@@ -1989,10 +2488,14 @@ fn main() -> anyhow::Result<()> {
             let mut pending: Vec<PendingFile> = Vec::new();
 
             for p in &req.index.paths {
-                let path = PathBuf::from(p);
+                let raw = PathBuf::from(p);
+                let raw = if raw.is_absolute() { raw }
+                else { env::current_dir().ok().map(|c| c.join(&raw)).unwrap_or(raw) };
+                let norm = normalize_path(&raw).to_string_lossy().to_string();
+                let path = PathBuf::from(&norm);
                 let meta = match path.metadata() {
                     Ok(m) => m,
-                    Err(e) => { files.push(IndexedFile { path: p.clone(), mtime: 0.0, size: 0, error: Some(format!("stat: {e}")), chunks: Vec::new() }); continue; }
+                    Err(e) => { files.push(IndexedFile { path: norm.clone(), mtime: 0.0, size: 0, error: Some(format!("stat: {e}")), chunks: Vec::new() }); continue; }
                 };
                 let mtime = meta.modified().ok()
                     .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
@@ -2002,8 +2505,8 @@ fn main() -> anyhow::Result<()> {
                 // Skip unchanged files (mtime + size match)
                 if req.index.store && !req.index.skip_embed {
                     if let Some(ref s) = store {
-                        if s.file_is_unchanged(p, mtime, size) {
-                            files.push(IndexedFile { path: p.clone(), mtime, size, error: None, chunks: Vec::new() });
+                        if s.file_is_unchanged(&norm, mtime, size) {
+                            files.push(IndexedFile { path: norm.clone(), mtime, size, error: None, chunks: Vec::new() });
                             continue;
                         }
                     }
@@ -2011,16 +2514,16 @@ fn main() -> anyhow::Result<()> {
 
                 let text = match std::fs::read_to_string(&path) {
                     Ok(t) => t,
-                    Err(e) => { files.push(IndexedFile { path: p.clone(), mtime, size, error: Some(format!("read: {e}")), chunks: Vec::new() }); continue; }
+                    Err(e) => { files.push(IndexedFile { path: norm.clone(), mtime, size, error: Some(format!("read: {e}")), chunks: Vec::new() }); continue; }
                 };
 
-                let line_chunks = chunk_text(&text, p, req.index.chunk_size, req.index.overlap);
+                let line_chunks = chunk_text(&text, &norm, req.index.chunk_size, req.index.overlap);
                 if line_chunks.is_empty() {
-                    files.push(IndexedFile { path: p.clone(), mtime, size, error: None, chunks: Vec::new() });
+                    files.push(IndexedFile { path: norm.clone(), mtime, size, error: None, chunks: Vec::new() });
                     continue;
                 }
 
-                pending.push(PendingFile { path: p.clone(), mtime, size, text, chunks: line_chunks });
+                pending.push(PendingFile { path: norm, mtime, size, text, chunks: line_chunks });
             }
 
             // Pass 2: embed all chunks across all files in one batch
@@ -2084,6 +2587,7 @@ fn main() -> anyhow::Result<()> {
                             let _ = s.store_calls(&pf.path, &calls);
                         }
                         total_chunks += n;
+                        eprintln!("[embedder] index: stored {} → {n} chunk(s), {} call edge(s)", pf.path, calls.len());
                     }
                 }
 
@@ -2091,28 +2595,59 @@ fn main() -> anyhow::Result<()> {
             }
 
             if req.index.store && !req.index.skip_embed {
+                // Record which roots this DB is indexed under, so /cc-status
+                // can show which project the index belongs to.
+                if !req.index.watch_dirs.is_empty() {
+                    if let Some(ref mut s) = store {
+                        let roots: Vec<String> = req.index.watch_dirs.iter().map(|p| {
+                            let raw = PathBuf::from(p);
+                            let abs = if raw.is_absolute() { raw }
+                            else { env::current_dir().ok().map(|c| c.join(&raw)).unwrap_or(raw) };
+                            normalize_path(&abs).to_string_lossy().to_string()
+                        }).collect();
+                        if let Ok(json) = serde_json::to_string(&roots) {
+                            let _ = s.db.execute(
+                                "INSERT INTO meta(key, value) VALUES('index_roots', ?1)
+                                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                                [json]
+                            );
+                        }
+                    }
+                }
+
+                if req.index.rebuild_fts {
+                    if let Some(ref s) = store {
+                        s.db.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')", [])?;
+                    }
+                }
+
+                // Set up the watcher before acknowledging the index request so
+                // callers cannot stop the sidecar before its roots are saved.
+                let watcher_event = if watcher_state.is_none() && !req.index.watch_dirs.is_empty() {
+                    match start_watcher(&req.index.watch_dirs, pending_changes.clone(), 2000) {
+                        Ok(state) => {
+                            watcher_state = Some(state);
+                            Some(serde_json::json!({"action":"auto_started","paths":req.index.watch_dirs.len()}))
+                        }
+                        Err(e) => Some(serde_json::json!({"action":"auto_start_failed","error":e.to_string()})),
+                    }
+                } else {
+                    None
+                };
+
                 serde_json::to_writer(&mut out, &IndexResponse {
                     id: req.id,
                     indexed: Some(IndexSummary { files: files.iter().filter(|f| f.error.is_none()).count(), chunks: total_chunks }),
                     files: None,
                 })?;
-
-                // Auto-start watcher if watch_dirs provided and not already watching
-                if watcher_state.is_none() && !req.index.watch_dirs.is_empty() {
-                    match start_watcher(&req.index.watch_dirs, pending_changes.clone(), 2000) {
-                        Ok(state) => {
-                            watcher_state = Some(state);
-                            writeln!(out, "{}", serde_json::json!({"watcher_event": {"action":"auto_started","paths":req.index.watch_dirs.len()}}))?;
-                        }
-                        Err(e) => {
-                            writeln!(out, "{}", serde_json::json!({"watcher_event": {"action":"auto_start_failed","error":e.to_string()}}))?;
-                        }
-                    }
+                out.write_all(b"\n")?;
+                if let Some(event) = watcher_event {
+                    writeln!(out, "{}", serde_json::json!({"watcher_event": event}))?;
                 }
             } else {
                 serde_json::to_writer(&mut out, &IndexResponse { id: req.id, indexed: None, files: Some(files) })?;
+                out.write_all(b"\n")?;
             }
-            out.write_all(b"\n")?;
         } else if val.get("store").is_some() {
             let req: StoreRequest = serde_json::from_value(val).map_err(|e| anyhow::anyhow!("bad store req: {e}"))?;
             let s = store.as_mut().ok_or_else(|| anyhow::anyhow!("no db configured"))?;
@@ -2130,10 +2665,11 @@ fn main() -> anyhow::Result<()> {
         } else if val.get("search").is_some() {
             let req: SearchRequest = serde_json::from_value(val).map_err(|e| anyhow::anyhow!("bad search req: {e}"))?;
             let s = store.as_ref().ok_or_else(|| anyhow::anyhow!("no db configured"))?;
+            let result_top_k = if req.search.rerank { req.search.top_k.max(50) } else { req.search.top_k };
             let mut results = s.hybrid_search(
                 &req.search.embedding,
                 &req.search.query,
-                req.search.top_k.max(50),
+                result_top_k,
                 req.search.path_filter.as_deref(),
                 req.search.keyword_weight,
             )?;
@@ -2162,6 +2698,7 @@ fn main() -> anyhow::Result<()> {
             } else {
                 results.truncate(req.search.top_k);
             }
+            eprintln!("[embedder] search: query={:?} → {} result(s) in {}ms", req.search.query, results.len(), t0.elapsed().as_millis());
             serde_json::to_writer(&mut out, &SearchResponse { id: req.id, results })?;
             out.write_all(b"\n")?;
         } else if val.get("text_search").is_some() {
@@ -2177,20 +2714,43 @@ fn main() -> anyhow::Result<()> {
                     ).unwrap_or_default();
                     results.push(SearchResultItem {
                         path: path.clone(), start_line: *sl, end_line: *el,
-                        snippet: snippet.chars().take(500).collect(), score: *score,
+                        snippet: snippet, score: *score,
                     });
                 }
                 results.sort_unstable_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
                 s.rerank(&mut results, &req.text_search.query);
                 results.sort_unstable_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
             }
+            eprintln!("[embedder] text_search: query={:?} → {} result(s) in {}ms", req.text_search.query, results.len(), t0.elapsed().as_millis());
             serde_json::to_writer(&mut out, &SearchResponse { id: req.id, results })?;
             out.write_all(b"\n")?;
         } else if val.get("symbol_search").is_some() {
             let req: SymbolSearchRequest = serde_json::from_value(val).map_err(|e| anyhow::anyhow!("bad symbol_search req: {e}"))?;
             let s = store.as_ref().ok_or_else(|| anyhow::anyhow!("no db configured"))?;
-            let results = s.symbol_search(&req.symbol_search.pattern, req.symbol_search.path_filter.as_deref())?;
+            let results = s.symbol_search(&req.symbol_search.pattern, req.symbol_search.kind.as_deref(), req.symbol_search.path_filter.as_deref())?;
+            eprintln!(
+                "[embedder] symbol_search: pattern={:?} kind={:?} path={:?} → {} result(s) in {}ms",
+                req.symbol_search.pattern,
+                req.symbol_search.kind,
+                req.symbol_search.path_filter,
+                results.len(),
+                t0.elapsed().as_millis()
+            );
             serde_json::to_writer(&mut out, &SymbolSearchResponse { id: req.id, results })?;
+            out.write_all(b"\n")?;
+        } else if val.get("outline").is_some() {
+            let req: OutlineRequest = serde_json::from_value(val).map_err(|e| anyhow::anyhow!("bad outline req: {e}"))?;
+            let s = store.as_ref().ok_or_else(|| anyhow::anyhow!("no db configured"))?;
+            let (path, files, truncated, symbols) = s.outline(&req.outline.path)?;
+            eprintln!(
+                "[embedder] outline: path={:?} → {} symbol(s) in {} file(s){} in {}ms",
+                req.outline.path,
+                symbols.len(),
+                files,
+                if truncated { " (truncated)" } else { "" },
+                t0.elapsed().as_millis()
+            );
+            serde_json::to_writer(&mut out, &OutlineResponse { id: req.id, path, files, truncated, symbols })?;
             out.write_all(b"\n")?;
         } else if val.get("watch").is_some() {
             if watcher_state.is_some() {
@@ -2227,9 +2787,15 @@ fn main() -> anyhow::Result<()> {
                 let chunks = s.chunk_count().unwrap_or(0);
                 let dbp = db_path.as_deref().unwrap_or("");
                 let db_size = s.db_file_size(dbp);
-                serde_json::to_writer(&mut out, &StatusResponse { id, files, chunks, dim, db_size, watching })?;
+                let index_roots: Vec<String> = s
+                    .db
+                    .query_row("SELECT value FROM meta WHERE key = 'index_roots'", [], |r| r.get::<_, String>(0))
+                    .ok()
+                    .and_then(|v| serde_json::from_str(&v).ok())
+                    .unwrap_or_default();
+                serde_json::to_writer(&mut out, &StatusResponse { id, files, chunks, dim, db_size, watching, index_roots })?;
             } else {
-                serde_json::to_writer(&mut out, &StatusResponse { id, files: 0, chunks: 0, dim, db_size: 0, watching })?;
+                serde_json::to_writer(&mut out, &StatusResponse { id, files: 0, chunks: 0, dim, db_size: 0, watching, index_roots: Vec::new() })?;
             }
             out.write_all(b"\n")?;
         } else if val.get("clear").is_some() {
@@ -2265,6 +2831,14 @@ fn main() -> anyhow::Result<()> {
                     caller,
                 })
                 .collect();
+            eprintln!(
+                "[embedder] call_graph: symbol={:?} direction={:?} path={:?} → {} edge(s) in {}ms",
+                req.call_graph.symbol,
+                req.call_graph.direction,
+                req.call_graph.path,
+                items.len(),
+                t0.elapsed().as_millis()
+            );
             serde_json::to_writer(&mut out, &CallGraphResponse { id: req.id, results: items })?;
             out.write_all(b"\n")?;
         } else if val.get("triple_query").is_some() {
@@ -2302,12 +2876,15 @@ fn main() -> anyhow::Result<()> {
             let s = store.as_ref().ok_or_else(|| anyhow::anyhow!("no db configured"))?;
             let pattern_lower = req.ast_grep.pattern.to_lowercase();
             let rows: Vec<(String, i32, i32, String)> = if req.ast_grep.path_filter.is_empty() {
-                let mut stmt = s.db.prepare("SELECT path, start_line, end_line, text FROM chunks LIMIT 5000")?;
+                let mut stmt = s.db.prepare("SELECT path, start_line, end_line, text FROM chunks LIMIT 50000")?;
                 let r = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?, row.get::<_, i32>(2)?, row.get::<_, String>(3)?)))?;
                 r.collect::<Result<Vec<_>, _>>()?
             } else {
-                let mut stmt = s.db.prepare("SELECT path, start_line, end_line, text FROM chunks WHERE path LIKE ?1 LIMIT 5000")?;
-                let r = stmt.query_map(params![format!("%{}%", req.ast_grep.path_filter)], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?, row.get::<_, i32>(2)?, row.get::<_, String>(3)?)))?;
+                // Normalize separators on both sides so `extensions/pi-harbor`
+                // matches stored Windows paths like `extensions\pi-harbor\...`.
+                let filter = req.ast_grep.path_filter.replace('\\', "/");
+                let mut stmt = s.db.prepare("SELECT path, start_line, end_line, text FROM chunks WHERE replace(path, '\\', '/') LIKE ?1 LIMIT 50000")?;
+                let r = stmt.query_map(params![format!("%{filter}%")], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?, row.get::<_, i32>(2)?, row.get::<_, String>(3)?)))?;
                 r.collect::<Result<Vec<_>, _>>()?
             };
             let matched: Vec<AstGrepItem> = rows
@@ -2315,10 +2892,24 @@ fn main() -> anyhow::Result<()> {
                 .filter(|(_, _, _, text)| text.to_lowercase().contains(&pattern_lower))
                 .take(req.ast_grep.top_k)
                 .map(|(path, sl, el, text)| {
-                    let first_match = text.lines().next().unwrap_or("").trim().chars().take(200).collect::<String>();
-                    AstGrepItem { path, start_line: sl as usize, end_line: el as usize, snippet: first_match }
+                    // Anchor the snippet at the first line containing the match.
+                    let lines: Vec<&str> = text.lines().collect();
+                    let idx = lines
+                        .iter()
+                        .position(|l| l.to_lowercase().contains(&pattern_lower))
+                        .unwrap_or(0);
+                    let snippet = lines[idx..].join("\n");
+                    AstGrepItem { path, start_line: sl as usize, end_line: el as usize, snippet }
                 })
                 .collect();
+            eprintln!(
+                "[embedder] ast_grep: pattern={:?} lang={:?} path={:?} → {} hit(s) in {}ms",
+                req.ast_grep.pattern,
+                req.ast_grep._lang,
+                req.ast_grep.path_filter,
+                matched.len(),
+                t0.elapsed().as_millis()
+            );
             serde_json::to_writer(&mut out, &AstGrepResponse { id: req.id, results: matched })?;
             out.write_all(b"\n")?;
         } else if val.get("ast_replace").is_some() {
@@ -2327,12 +2918,14 @@ fn main() -> anyhow::Result<()> {
             // Collect file paths from the store (or use walk_dir for live filesystem scan)
             let s = store.as_ref().ok_or_else(|| anyhow::anyhow!("no db configured"))?;
             let file_paths: Vec<String> = if req.ast_replace.path_filter.is_empty() {
-                let mut stmt = s.db.prepare("SELECT DISTINCT path FROM chunks LIMIT 10000")?;
+                let mut stmt = s.db.prepare("SELECT DISTINCT path FROM chunks LIMIT 100000")?;
                 let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
                 rows.collect::<Result<Vec<_>, _>>()?
             } else {
-                let mut stmt = s.db.prepare("SELECT DISTINCT path FROM chunks WHERE path LIKE ?1 LIMIT 10000")?;
-                let rows = stmt.query_map(params![format!("%{}%", req.ast_replace.path_filter)], |row| row.get::<_, String>(0))?;
+                // Same separator normalization as ast_grep.
+                let filter = req.ast_replace.path_filter.replace('\\', "/");
+                let mut stmt = s.db.prepare("SELECT DISTINCT path FROM chunks WHERE replace(path, '\\', '/') LIKE ?1 LIMIT 100000")?;
+                let rows = stmt.query_map(params![format!("%{filter}%")], |row| row.get::<_, String>(0))?;
                 rows.collect::<Result<Vec<_>, _>>()?
             };
 
@@ -2372,6 +2965,9 @@ fn main() -> anyhow::Result<()> {
 
                 let match_count = content.matches(&req.ast_replace.pattern).count();
 
+                let mut added = 0usize;
+                let mut removed = 0usize;
+
                 // Compute a simple unified diff
                 let diff = {
                     let orig_lines: Vec<&str> = content.lines().collect();
@@ -2386,9 +2982,11 @@ fn main() -> anyhow::Result<()> {
                         if orig != new {
                             if !orig.is_empty() {
                                 diff_lines.push(format!("-{orig}"));
+                                removed += 1;
                             }
                             if !new.is_empty() {
                                 diff_lines.push(format!("+{new}"));
+                                added += 1;
                             }
                         } else if !orig.is_empty() {
                             diff_lines.push(format!(" {orig}"));
@@ -2405,20 +3003,46 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
 
-                results.push(AstReplaceItem { file: file_path.to_string(), matches: match_count, diff });
+                results.push(AstReplaceItem { file: file_path.to_string(), matches: match_count, added, removed, diff });
             }
 
+            eprintln!(
+                "[embedder] ast_replace: pattern={:?} rewrite={:?} dry_run={dry_run} → {} file(s) in {}ms",
+                req.ast_replace.pattern,
+                req.ast_replace.rewrite,
+                results.len(),
+                t0.elapsed().as_millis()
+            );
             serde_json::to_writer(&mut out, &AstReplaceResponse { id: req.id, results })?;
             out.write_all(b"\n")?;
         } else {
             err(&mut out, id, "unknown request type")?;
         }
+        eprintln!("[embedder] done id={id} kind={kind} in {}ms", t0.elapsed().as_millis());
         out.flush()?;
     }
     Ok(())
 }
 
+/// Identify the request kind from its payload (the single non-id key).
+fn req_kind(val: &serde_json::Value) -> String {
+    val.as_object()
+        .and_then(|m| m.keys().find(|k| k.as_str() != "id").cloned())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// JSON for logs, capped so giant embed/index payloads don't bloat the log.
+fn truncate_json(val: &serde_json::Value, max: usize) -> String {
+    let s = val.to_string();
+    if s.len() <= max {
+        s
+    } else {
+        format!("{}…(+{} chars)", s.chars().take(max).collect::<String>(), s.len() - max)
+    }
+}
+
 fn err(out: &mut impl Write, id: u64, msg: &str) -> anyhow::Result<()> {
+    eprintln!("[embedder] ERR id={id}: {msg}");
     serde_json::to_writer(&mut *out, &ErrorResponse { id, error: msg.to_string() })?;
     out.write_all(b"\n")?;
     Ok(())

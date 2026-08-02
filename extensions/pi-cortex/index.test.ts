@@ -13,7 +13,7 @@ const __dirname = dirname(__filename);
 
 // Rust sidecar binary
 const binaryName = process.platform === "win32" ? "pi-embedder.exe" : "pi-embedder";
-const binaryPath = join(__dirname, "rust-embedder", "target", "release", binaryName);
+const binaryPath = process.env.PI_CORTEX_TEST_BINARY ?? join(__dirname, "rust-embedder", "target", "release", binaryName);
 
 test("rust sidecar binary exists", () => {
    expect(existsSync(binaryPath), `Binary not found at ${binaryPath}. Run "cd rust-embedder && cargo build --release" first.`).toBe(true);
@@ -42,10 +42,10 @@ function send(msg: Record<string, unknown>, timeout = 10000): Promise<unknown> {
    });
 }
 
-function startSidecar(dbPath: string) {
+function startSidecar(dbPath: string, preserveDb = false) {
    return new Promise<void>((resolve, reject) => {
       watcherEvents.length = 0;
-      rmSync(dbPath, { force: true });
+      if (!preserveDb) rmSync(dbPath, { force: true });
       const modelDir = join(testRoot, "models");
       mkdirSync(modelDir, { recursive: true });
 
@@ -96,13 +96,35 @@ function startSidecar(dbPath: string) {
    });
 }
 
-function stopSidecar() {
-   if (child) {
-      child.kill();
-      child = null;
-   }
+function stopSidecar(): Promise<void> {
    for (const p of pending.values()) p.reject(new Error("sidecar stopped"));
    pending.clear();
+   const c = child;
+   child = null;
+   if (!c) return Promise.resolve();
+   if (c.exitCode !== null) return Promise.resolve();
+   // Kill and WAIT for exit: on Windows the SQLite handles stay locked until
+   // the process is gone, so .test-tmp cleanup would fail without this.
+   return new Promise((resolve) => {
+      c.once("exit", () => resolve());
+      c.kill("SIGKILL");
+      setTimeout(resolve, 2000);
+   });
+}
+
+function stopChild(c: ChildProcess): Promise<void> {
+   if (c.exitCode !== null) return Promise.resolve();
+   return new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+         if (settled) return;
+         settled = true;
+         resolve();
+      };
+      c.once("exit", finish);
+      c.kill("SIGKILL");
+      setTimeout(finish, 2000);
+   });
 }
 
 // ---------------------------------------------------------------------------
@@ -238,7 +260,7 @@ beforeAll(() => {
 }, 15000);
 
 afterAll(async () => {
-   stopSidecar();
+   await stopSidecar();
    // Clean up test fixtures — files in .test-tmp/ only, never outside.
    if (testRoot.startsWith(__dirname)) {
       const rmRetry = async (attempt = 0): Promise<void> => {
@@ -263,7 +285,7 @@ describe("scan", () => {
       await startSidecar(join(testRoot, "index.db"));
    }, 30000);
 
-   afterAll(() => { stopSidecar(); }, 5000);
+   afterAll(async () => { await stopSidecar(); }, 5000);
 
    it("walks files and returns metadata", async () => {
       const resp = await send({
@@ -289,6 +311,26 @@ describe("scan", () => {
       expect(resp.files[0].path.endsWith(".py")).toBe(true);
    }, 10000);
 
+   it("honors project .gitignore and .cortexignore files", async () => {
+      const ignoreRoot = join(testRoot, "ignore-rules");
+      mkdirSync(ignoreRoot, { recursive: true });
+      writeFileSync(join(ignoreRoot, ".gitignore"), "git-ignored.ts\n");
+      writeFileSync(join(ignoreRoot, ".cortexignore"), "cortex-ignored.ts\n");
+      writeFileSync(join(ignoreRoot, "git-ignored.ts"), "export const gitIgnored = true;\n");
+      writeFileSync(join(ignoreRoot, "cortex-ignored.ts"), "export const cortexIgnored = true;\n");
+      writeFileSync(join(ignoreRoot, "kept.ts"), "export const kept = true;\n");
+
+      try {
+         const resp = await send({
+            scan: { paths: [ignoreRoot], extensions: [".ts"], skip_dirs: [] }
+         }) as { files: { path: string }[] };
+         const paths = resp.files.map((file) => file.path.replace(/\\/g, "/"));
+         expect(paths).toEqual([`${ignoreRoot.replace(/\\/g, "/")}/kept.ts`]);
+      } finally {
+         rmSync(ignoreRoot, { recursive: true, force: true });
+      }
+   }, 10000);
+
    it("returns empty for non-existent path", async () => {
       const resp = await send({
          scan: { paths: ["/nonexistent/path"], extensions: [], skip_dirs: [] }
@@ -300,6 +342,37 @@ describe("scan", () => {
 // ---------------------------------------------------------------------------
 // Index + store text
 // ---------------------------------------------------------------------------
+
+describe("chunk bounds", () => {
+   const dbPath = join(testRoot, "chunk-bounds.db");
+   const filePath = join(testRoot, "src", "large-chunk.ts");
+
+   beforeAll(async () => {
+      await startSidecar(dbPath);
+   }, 30000);
+
+   afterAll(async () => {
+      await stopSidecar();
+      rmSync(filePath, { force: true });
+   }, 5000);
+
+   it("splits oversized syntax nodes into bounded chunks", async () => {
+      const body = Array.from(
+         { length: 400 },
+         (_, line) => `   const value${line} = "${"x".repeat(100)}";`
+      ).join("\\n");
+      writeFileSync(filePath, `function largeFunction() {\\n${body}\\n}\\n`);
+
+      const response = await send({
+         index: { paths: [filePath], chunk_size: 80, overlap: 20, prefix: "", skip_embed: true, store: false }
+      }) as { files: { chunks: { start_line: number; end_line: number; text: string }[] }[] };
+      const chunks = response.files[0]?.chunks ?? [];
+
+      expect(chunks.length).toBeGreaterThan(1);
+      expect(chunks.every((chunk) => chunk.end_line - chunk.start_line + 1 <= 160)).toBe(true);
+      expect(chunks.every((chunk) => chunk.text.length <= 16 * 1024)).toBe(true);
+   }, 15000);
+});
 
 async function indexTestFixtures(dbPath: string) {
    // Store chunks manually to avoid needing the embedding model for every test.
@@ -351,7 +424,7 @@ describe("index + store", () => {
       await startSidecar(dbPath);
    }, 30000);
 
-   afterAll(() => { stopSidecar(); }, 5000);
+   afterAll(async () => { await stopSidecar(); }, 5000);
 
    it("indexes files without embedding and returns chunks", async () => {
       expect(await indexTestFixtures(dbPath)).toBeGreaterThanOrEqual(4);
@@ -386,6 +459,51 @@ describe("index + store", () => {
       const status = await send({ status: {} }) as { chunks: number };
       expect(status.chunks).toBeGreaterThan(0);
    }, 30000);
+
+   it("status reports which root the index covers", async () => {
+      // Fixture indexes pass no watch_dirs, so nothing is recorded yet.
+      const before = await send({ status: {} }) as { index_roots?: string[] };
+      expect(before.index_roots ?? []).toHaveLength(0);
+
+      // A real index request with watch_dirs records the resolved root.
+      const target = join(testRoot, "src/data.ts");
+      const resp = await send({
+         index: { paths: [target], chunk_size: 80, overlap: 20, prefix: "", skip_embed: false, store: true, watch_dirs: [testRoot] }
+      }) as { indexed?: { files: number; chunks: number } };
+      expect(resp.indexed?.files).toBe(1);
+
+      const status = await send({ status: {} }) as { index_roots?: string[] };
+      expect(status.index_roots).toEqual([testRoot]);
+   }, 30000);
+});
+
+describe("index FTS sync", () => {
+   const dbPath = join(testRoot, "index-fts-sync.db");
+   const markerPath = join(testRoot, "src", "index-fts-marker.ts");
+
+   beforeAll(async () => {
+      await startSidecar(dbPath);
+   }, 30000);
+
+   afterAll(async () => { await stopSidecar(); }, 5000);
+
+   it("rebuilds FTS when a stored index request completes", async () => {
+      writeFileSync(markerPath, "export const cortexFtsMarker = true;\n");
+      try {
+         const indexed = await send({
+            index: { paths: [markerPath], chunk_size: 80, overlap: 20, prefix: "", skip_embed: false, store: true, watch_dirs: [] }
+         }) as { indexed?: { files: number } };
+         expect(indexed.indexed?.files).toBe(1);
+
+         const searched = await send({ text_search: { query: "cortexFtsMarker", top_k: 5 } }) as {
+            results: { path: string }[];
+         };
+         expect(searched.results.some((result) => result.path.endsWith("index-fts-marker.ts"))).toBe(true);
+      } finally {
+         await send({ delete: { path: markerPath } });
+         rmSync(markerPath, { force: true });
+      }
+   }, 30000);
 });
 
 // ---------------------------------------------------------------------------
@@ -400,7 +518,7 @@ describe("text_search (FTS5)", () => {
       await indexTestFixtures(dbPath);
    }, 60000);
 
-   afterAll(() => { stopSidecar(); }, 5000);
+   afterAll(async () => { await stopSidecar(); }, 5000);
 
    it("finds chunks by keyword", async () => {
       const resp = await send({
@@ -445,19 +563,174 @@ describe("text_search (FTS5)", () => {
       expect(resp.results).toEqual([]);
    }, 10000);
 
-   it("snippet is truncated to 500 chars", async () => {
+   it("snippet is the full chunk text, not a capped excerpt", async () => {
       const resp = await send({
          text_search: { query: "login", top_k: 3 }
       }) as { results: { snippet: string }[] };
+      expect(resp.results.length).toBeGreaterThan(0);
       for (const r of resp.results) {
-         expect(r.snippet.length).toBeLessThanOrEqual(500);
+         expect(r.snippet.length).toBeGreaterThan(0);
+         expect(r.snippet).not.toContain("…");
       }
+      // The 500-char cap is gone: at least one snippet shows the whole chunk.
+      expect(resp.results.some((r) => r.snippet.length > 500)).toBe(true);
    }, 10000);
+});
+
+describe("hybrid search candidates", () => {
+   const dbPath = join(testRoot, "hybrid-search.db");
+   const markerPath = join(testRoot, "src", "keyword-only-marker.ts");
+
+   beforeAll(async () => {
+      await startSidecar(dbPath);
+      await indexTestFixtures(dbPath);
+   }, 60000);
+
+   afterAll(async () => { await stopSidecar(); }, 5000);
+
+   it("keeps an exact keyword match outside the semantic candidate pool", async () => {
+      writeFileSync(markerPath, "export const cortexKeywordMarker = true;\n");
+      try {
+         const indexed = await send({
+            index: { paths: [markerPath], chunk_size: 80, overlap: 20, prefix: "", skip_embed: true, store: false }
+         }) as { files: { path: string; chunks: { text: string; start_line: number; end_line: number }[] }[] };
+         const file = indexed.files.find((entry) => entry.path === markerPath);
+         expect(file?.chunks.length).toBeGreaterThan(0);
+
+         await send({
+            store: {
+               file_path: markerPath,
+               mtime: 0,
+               size: 100,
+               chunks: file!.chunks.map((chunk) => ({
+                  ...chunk,
+                  embedding: Array.from({ length: 384 }, (_, index) => (index === 0 ? 0 : 0.01))
+               }))
+            }
+         });
+
+         const searched = await send({
+            search: {
+               query: "cortexKeywordMarker missingTerm",
+               embedding: [1, ...Array.from({ length: 383 }, () => 0)],
+               top_k: 1,
+               keyword_weight: 1,
+               path_filter: null,
+               rerank: false
+            }
+         }) as { results: { path: string }[] };
+         expect(searched.results.some((result) => result.path.endsWith("keyword-only-marker.ts"))).toBe(true);
+      } finally {
+         await send({ delete: { path: markerPath } });
+         rmSync(markerPath, { force: true });
+      }
+   }, 30000);
 });
 
 // ---------------------------------------------------------------------------
 // Symbol search
 // ---------------------------------------------------------------------------
+
+describe("hybrid ranking", () => {
+   const dbPath = join(testRoot, "hybrid-ranking.db");
+   const semanticPath = join(testRoot, "src", "semantic-only.ts");
+   const keywordPath = join(testRoot, "src", "exact-keyword.ts");
+
+   beforeAll(async () => {
+      await startSidecar(dbPath);
+      writeFileSync(semanticPath, "export const semanticOnly = true;\\n");
+      writeFileSync(keywordPath, "export const exactKeyword = true;\\n");
+
+      const zero = Array.from({ length: 384 }, () => 0);
+      await send({
+         store: {
+            file_path: semanticPath,
+            mtime: 1,
+            size: 1,
+            chunks: [{
+               text: "generic semantic context",
+               start_line: 1,
+               end_line: 1,
+               embedding: [1, ...zero.slice(1)]
+            }]
+         }
+      });
+      await send({
+         store: {
+            file_path: keywordPath,
+            mtime: 1,
+            size: 1,
+            chunks: [{
+               text: "exactKeyword",
+               start_line: 1,
+               end_line: 1,
+               embedding: [0, 1, ...zero.slice(2)]
+            }]
+         }
+      });
+   }, 30000);
+
+   afterAll(async () => {
+      await stopSidecar();
+      rmSync(semanticPath, { force: true });
+      rmSync(keywordPath, { force: true });
+   }, 5000);
+
+   it("lets the exact keyword rank ahead of a semantic-only outlier", async () => {
+      const response = await send({
+         search: {
+            query: "exactKeyword",
+            embedding: [1, ...Array.from({ length: 383 }, () => 0)],
+            top_k: 2,
+            keyword_weight: 0.6,
+            path_filter: null,
+            rerank: false
+         }
+      }) as { results: { path: string }[] };
+
+      expect(response.results[0]?.path).toBe(keywordPath);
+   }, 10000);
+
+   it("invalidates cached vectors after a file is replaced", async () => {
+      await send({
+         search: {
+            query: "exactKeyword",
+            embedding: [0, 1, ...Array.from({ length: 382 }, () => 0)],
+            top_k: 1,
+            keyword_weight: 0,
+            path_filter: keywordPath,
+            rerank: false
+         }
+      });
+
+      await send({
+         store: {
+            file_path: keywordPath,
+            mtime: 2,
+            size: 2,
+            chunks: [{
+               text: "replacementKeyword",
+               start_line: 1,
+               end_line: 1,
+               embedding: [0, 1, ...Array.from({ length: 382 }, () => 0)]
+            }]
+         }
+      });
+
+      const response = await send({
+         search: {
+            query: "replacementKeyword",
+            embedding: [0, 1, ...Array.from({ length: 382 }, () => 0)],
+            top_k: 1,
+            keyword_weight: 0,
+            path_filter: keywordPath,
+            rerank: false
+         }
+      }) as { results: { snippet: string }[] };
+
+      expect(response.results[0]?.snippet).toBe("replacementKeyword");
+   }, 10000);
+});
 
 describe("symbol_search", () => {
    const dbPath = join(testRoot, "index-sym.db");
@@ -467,7 +740,7 @@ describe("symbol_search", () => {
       await indexTestFixtures(dbPath);
    }, 60000);
 
-   afterAll(() => { stopSidecar(); }, 5000);
+   afterAll(async () => { await stopSidecar(); }, 5000);
 
    it("finds function declarations", async () => {
       const resp = await send({
@@ -537,11 +810,115 @@ describe("symbol_search", () => {
       }
    }, 10000);
 
+   it("filters by symbol kind", async () => {
+      const iface = await send({
+         symbol_search: { pattern: ".*", kind: "interface", path_filter: null }
+      }) as { results: { symbol: string; kind: string }[] };
+      const ifaceNames = iface.results.map((r) => r.symbol);
+      expect(ifaceNames).toContain("User");
+      expect(ifaceNames).toContain("Config");
+      for (const r of iface.results) {
+         expect(r.kind).toBe("interface");
+      }
+
+      const classes = await send({
+         symbol_search: { pattern: ".*", kind: "class", path_filter: null }
+      }) as { results: { symbol: string; kind: string }[] };
+      const classNames = classes.results.map((r) => r.symbol);
+      expect(classNames).toContain("SessionManager");
+      expect(classNames).toContain("RateLimiter");
+      for (const r of classes.results) {
+         expect(r.kind).toBe("class");
+      }
+
+      const fns = await send({
+         symbol_search: { pattern: ".*", kind: "function", path_filter: null }
+      }) as { results: { symbol: string }[] };
+      const fnNames = fns.results.map((r) => r.symbol);
+      expect(fnNames).toContain("login");
+      expect(fnNames).toContain("getUser");
+      expect(fnNames).toContain("hash_password");
+      expect(fnNames).toContain("dispatch"); // Rust `fn` normalizes to function
+      expect(fnNames).not.toContain("User");
+      expect(fnNames).not.toContain("DEFAULT_CONFIG");
+   }, 10000);
+
+   it("treats a non-regex pattern as plain text instead of erroring", async () => {
+      // `[` is not a valid regex — falls back to substring matching.
+      const resp = await send({
+         symbol_search: { pattern: "[", path_filter: null }
+      }) as { results: unknown[]; error?: string };
+      expect(resp.error).toBeUndefined();
+      expect(resp.results).toEqual([]);
+   }, 10000);
+
    it("returns empty for non-matching pattern", async () => {
       const resp = await send({
          symbol_search: { pattern: "NoSuchSymbolXyz", path_filter: null }
       }) as { results: unknown[] };
       expect(resp.results).toEqual([]);
+   }, 10000);
+});
+
+describe("outline", () => {
+   const dbPath = join(testRoot, "index-outline.db");
+
+   beforeAll(async () => {
+      await startSidecar(dbPath);
+      await indexTestFixtures(dbPath);
+   }, 60000);
+
+   afterAll(async () => { await stopSidecar(); }, 5000);
+
+   it("lists every symbol in a file with kind and line range", async () => {
+      const resp = await send({
+         outline: { path: join(testRoot, "src", "data.ts") }
+      }) as { path: string; files: number; truncated: boolean; symbols: { symbol: string; kind: string; start_line: number; end_line: number }[] };
+      expect(resp.files).toBe(1);
+      expect(resp.truncated).toBe(false);
+      const names = resp.symbols.map((r) => r.symbol);
+      expect(names).toContain("User");
+      expect(names).toContain("Config");
+      expect(names).toContain("Role");
+      expect(names).toContain("DEFAULT_CONFIG");
+      expect(names).toContain("getUser");
+      expect(names).toContain("fetchUser");
+      const user = resp.symbols.find((r) => r.symbol === "User");
+      expect(user?.kind).toBe("interface");
+      const configVar = resp.symbols.find((r) => r.symbol === "DEFAULT_CONFIG");
+      expect(configVar?.kind).toBe("variable");
+      const getUser = resp.symbols.find((r) => r.symbol === "getUser");
+      expect(getUser?.kind).toBe("function");
+      // Sorted by line: Role (type) comes before DEFAULT_CONFIG (variable).
+      const roleIdx = resp.symbols.findIndex((r) => r.symbol === "Role");
+      const cfgIdx = resp.symbols.findIndex((r) => r.symbol === "DEFAULT_CONFIG");
+      expect(roleIdx).toBeLessThan(cfgIdx);
+   }, 10000);
+
+   it("lists symbols across every file under a directory", async () => {
+      const resp = await send({
+         outline: { path: join(testRoot, "src") }
+      }) as { files: number; symbols: { symbol: string; path: string }[] };
+      expect(resp.files).toBe(4); // auth.ts, data.ts, main.rs, utils.py
+      const paths = resp.symbols.map((r) => r.path);
+      expect(paths.some((p) => p.includes("auth.ts"))).toBe(true);
+      expect(paths.some((p) => p.includes("main.rs"))).toBe(true);
+      expect(paths.some((p) => p.includes("utils.py"))).toBe(true);
+   }, 10000);
+
+   it("accepts a trailing slash on directory paths", async () => {
+      const resp = await send({
+         outline: { path: `${join(testRoot, "src")}/` }
+      }) as { files: number };
+      expect(resp.files).toBe(4);
+   }, 10000);
+
+   it("returns no symbols for an unknown path", async () => {
+      const resp = await send({
+         outline: { path: join(testRoot, "nope.ts") }
+      }) as { files: number; symbols: unknown[] };
+      expect(resp.files).toBe(0);
+      expect(resp.symbols).toEqual([]);
    }, 10000);
 });
 
@@ -563,7 +940,7 @@ describe("call_graph", () => {
       // the index command with store=true does extraction.
    }, 60000);
 
-   afterAll(() => { stopSidecar(); }, 5000);
+   afterAll(async () => { await stopSidecar(); }, 5000);
 
    // We test the call graph query functions directly by inserting test data
    // The actual extraction during indexing requires the embedding model,
@@ -605,7 +982,7 @@ describe("search (semantic + hybrid)", () => {
       await indexTestFixtures(dbPath);
    }, 60000);
 
-   afterAll(() => { stopSidecar(); }, 5000);
+   afterAll(async () => { await stopSidecar(); }, 5000);
 
    it("semantic search returns results with scores", async () => {
       const queryEmb = Array.from({ length: 384 }, () => 0.01);
@@ -658,7 +1035,7 @@ describe("error handling", () => {
       await startSidecar(dbPath);
    }, 30000);
 
-   afterAll(() => { stopSidecar(); }, 5000);
+   afterAll(async () => { await stopSidecar(); }, 5000);
 
    it("rejects unknown request type", async () => {
       await expect(
@@ -687,7 +1064,7 @@ describe("reranker", () => {
       await indexTestFixtures(dbPath);
    }, 60000);
 
-   afterAll(() => { stopSidecar(); }, 5000);
+   afterAll(async () => { await stopSidecar(); }, 5000);
 
    it("rerank option does not crash (model may not be downloaded)", async () => {
       const queryEmb = Array.from({ length: 384 }, () => 0.01);
@@ -715,7 +1092,7 @@ describe("deterministic reranking", () => {
 export function shouldNotMatch(): number { return 42; }`);
    }, 30000);
 
-   afterAll(() => { stopSidecar(); }, 5000);
+   afterAll(async () => { await stopSidecar(); }, 5000);
 
    it("source boost penalizes test files", async () => {
       // Index the test file with a known embedding
@@ -784,7 +1161,7 @@ describe("ast_replace", () => {
       );
    }, 60000);
 
-   afterAll(() => { stopSidecar(); }, 5000);
+   afterAll(async () => { await stopSidecar(); }, 5000);
 
    it("replaces a function name across multiple files (dry run)", async () => {
       const resp = await send({
@@ -1038,7 +1415,7 @@ describe("watcher bridge", () => {
    afterAll(async () => {
       // Stop the watcher before killing the sidecar
       try { await send({ watch_stop: {} }); } catch { /* sidecar may already be dead */ }
-      stopSidecar();
+      await stopSidecar();
       // Clean up the watch file if it still exists
       try { rmSync(watchFile); } catch {}
    }, 10000);
@@ -1046,14 +1423,12 @@ describe("watcher bridge", () => {
    it("emits removed watcher_event when a file is deleted", async () => {
       const beforeCount = watcherEvents.length;
 
-      // Delete the extra file
+      // Delete the extra file, then wait for the watcher to detect the
+      // deletion (debounce=1000ms + idle drain ≤2s); the idle loop drains
+      // watcher changes on its own.
       rmSync(watchFile);
-
-      // Wait for the watcher to detect the deletion (debounce=1000ms)
-      await new Promise((r) => setTimeout(r, 2000));
-
-      // Send a command to trigger the drain loop — the sidecar only processes
-      // pending watcher events between incoming requests.
+      await new Promise((r) => setTimeout(r, 2500));
+      // A command also flushes any event line buffered with the response.
       await send({ status: {} });
 
       // Should have received a removed event
@@ -1072,6 +1447,256 @@ describe("watcher bridge", () => {
       expect(started).toBeDefined();
       expect(Number(started!.paths ?? 0)).toBeGreaterThanOrEqual(1);
    }, 5000);
+
+   it("reindexes a changed file and emits an event without any command", async () => {
+      // Recreate the file deleted by the first test — a fresh change.
+      const eventsBefore = watcherEvents.length;
+      writeFileSync(watchFile, "export function watcherTest2(): string { return 'hello2'; }\n");
+
+      // NO command is sent: the sidecar's idle loop must wake on its own,
+      // drain the watcher, reindex the file, and emit the event.
+      const deadline = Date.now() + 12000;
+      let found = false;
+      while (Date.now() < deadline) {
+         found = watcherEvents.slice(eventsBefore).some(
+            (e) => e.action === "reindexed" && typeof e.file === "string" && e.file.endsWith("watch-test.ts")
+         );
+         if (found) break;
+         await new Promise((r) => setTimeout(r, 250));
+      }
+      expect(found).toBe(true);
+   }, 20000);
+
+   it("does not reindex files added to .cortexignore", async () => {
+      const ignoreFile = join(testRoot, ".cortexignore");
+      const ignoredFile = join(testRoot, "src", "ignored-watch.ts");
+      writeFileSync(ignoreFile, "src/ignored-watch.ts\n");
+      try {
+         await new Promise((r) => setTimeout(r, 2500));
+         const before = watcherEvents.length;
+         writeFileSync(ignoredFile, "export function ignoredWatch(): string { return 'ignored'; }\n");
+         await new Promise((r) => setTimeout(r, 3500));
+         const reindexed = watcherEvents.slice(before).some(
+            (event) => event.action === "reindexed" && typeof event.file === "string" && event.file.endsWith("ignored-watch.ts")
+         );
+         expect(reindexed).toBe(false);
+      } finally {
+         rmSync(ignoreFile, { force: true });
+         rmSync(ignoredFile, { force: true });
+      }
+   }, 10000);
+
+   it("resumes the watcher after a sidecar restart using persisted roots", async () => {
+      // The manual `watch` command doesn't record meta — persist the roots
+      // with a real index request first.
+      const target = join(testRoot, "src/data.ts");
+      const resp = await send({
+         index: { paths: [target], chunk_size: 80, overlap: 20, prefix: "", skip_embed: false, store: true, watch_dirs: [testRoot] }
+      }) as { indexed?: { files: number; chunks: number } };
+      expect(resp.indexed?.files).toBe(1);
+
+      // Restart the sidecar on the same DB. The watcher must come back on
+      // its own from the persisted index_roots meta — no index request.
+      await stopSidecar();
+      await startSidecar(dbPath, true);
+
+      // Send a command: parsing it also flushes any buffered event lines
+      // that arrived with the ready marker.
+      const status = await send({ status: {} }) as { watching: boolean };
+      expect(status.watching).toBe(true);
+      expect(watcherEvents.some((e) => e.action === "auto_started" && e.resumed === true)).toBe(true);
+   }, 30000);
 });
 
+// ── Multi-session: two sidecars sharing one database ──
+// Each pi session spawns its own sidecar process, and all of them open the
+// same SQLite DB. The migrations run under BEGIN IMMEDIATE so two sidecars
+// starting at the same time serialize instead of both ALTER-ing the same
+// table (the loser would crash or silently half-migrate).
+describe("two sidecars sharing one database", () => {
+   it("both become ready and answer queries on a fresh DB opened simultaneously", async () => {
+      const dbPath = join(testRoot, "concurrent.db");
+      rmSync(dbPath, { force: true });
+      const modelDir = join(testRoot, "models");
+      mkdirSync(modelDir, { recursive: true });
+      const children: ChildProcess[] = [];
 
+      const spawnSidecar = () =>
+         new Promise<ChildProcess>((resolve, reject) => {
+            const c = spawn(
+               binaryPath,
+               ["--model-repo", "Xenova/all-MiniLM-L6-v2", "--models-dir", modelDir, "--db-path", dbPath],
+               { stdio: ["pipe", "pipe", "pipe"], windowsHide: true }
+            );
+            children.push(c);
+            let buf = "";
+            let ready = false;
+            const fail = (error: Error) => {
+               if (ready) return;
+               c.stdout?.off("data", onData);
+               reject(error);
+            };
+            const onData = (d: Buffer) => {
+               buf += d.toString();
+               const lines = buf.split("\n");
+               buf = lines.pop() ?? "";
+               for (const line of lines) {
+                  if (!line.trim()) continue;
+                  const parsed = JSON.parse(line);
+                  if (parsed.id === 0 && parsed.dim !== undefined) {
+                     ready = true;
+                     c.stdout?.off("data", onData);
+                     resolve(c);
+                  }
+               }
+            };
+            c.stdout?.on("data", onData);
+            c.on("error", fail);
+            c.on("exit", (code, signal) => {
+               if (!ready) fail(new Error(`sidecar exited before ready (code=${code}, signal=${signal ?? ""})`));
+            });
+         });
+
+      const ask = (c: ChildProcess, msg: Record<string, unknown>) =>
+         new Promise<unknown>((resolve, reject) => {
+            const id = 5000 + Math.floor(Math.random() * 4000);
+            const timer = setTimeout(() => reject(new Error(`timeout on ${JSON.stringify(msg)}`)), 15000);
+            const onData = (d: Buffer) => {
+               for (const line of d.toString().split("\n")) {
+                  if (!line.trim()) continue;
+                  try {
+                     const parsed = JSON.parse(line);
+                     if (parsed.id === id) {
+                        clearTimeout(timer);
+                        c.stdout?.off("data", onData);
+                        if (parsed.error) reject(new Error(parsed.error));
+                        else resolve(parsed);
+                     }
+                  } catch {
+                     /* partial line */
+                  }
+               }
+            };
+            c.stdout?.on("data", onData);
+            c.stdin?.write(JSON.stringify({ id, ...msg }) + "\n");
+         });
+
+      try {
+         // Open the same brand-new DB from two processes at once. Migrations
+         // run in both and serialize through the IMMEDIATE write lock.
+         const [a, b] = await Promise.all([spawnSidecar(), spawnSidecar()]);
+         const [sa, sb] = await Promise.all([ask(a, { status: {} }), ask(b, { status: {} })]);
+         expect((sa as any).error).toBeUndefined();
+         expect((sb as any).error).toBeUndefined();
+         expect((sa as any).files).toBe(0);
+         expect((sb as any).files).toBe(0);
+
+         // Both can query the shared symbols table concurrently.
+         const [ra, rb] = await Promise.all([
+            ask(a, { symbol_search: { pattern: "nope", kind: null, path_filter: null } }),
+            ask(b, { symbol_search: { pattern: "nope", kind: null, path_filter: null } })
+         ]);
+         expect((ra as any).error).toBeUndefined();
+         expect((rb as any).error).toBeUndefined();
+         expect((ra as any).results ?? []).toHaveLength(0);
+         expect((rb as any).results ?? []).toHaveLength(0);
+      } finally {
+         await Promise.all(children.map(stopChild));
+      }
+   }, 90000);
+
+   it("storing the same file from both sidecars leaves exactly one copy", async () => {
+      const dbPath = join(testRoot, "concurrent-store.db");
+      rmSync(dbPath, { force: true });
+      const modelDir = join(testRoot, "models");
+      mkdirSync(modelDir, { recursive: true });
+      const children: ChildProcess[] = [];
+
+      const spawnSidecar = () =>
+         new Promise<ChildProcess>((resolve, reject) => {
+            const c = spawn(
+               binaryPath,
+               ["--model-repo", "Xenova/all-MiniLM-L6-v2", "--models-dir", modelDir, "--db-path", dbPath],
+               { stdio: ["pipe", "pipe", "pipe"], windowsHide: true }
+            );
+            children.push(c);
+            let buf = "";
+            let ready = false;
+            const fail = (error: Error) => {
+               if (ready) return;
+               c.stdout?.off("data", onData);
+               reject(error);
+            };
+            const onData = (d: Buffer) => {
+               buf += d.toString();
+               const lines = buf.split("\n");
+               buf = lines.pop() ?? "";
+               for (const line of lines) {
+                  if (!line.trim()) continue;
+                  const parsed = JSON.parse(line);
+                  if (parsed.id === 0 && parsed.dim !== undefined) {
+                     ready = true;
+                     c.stdout?.off("data", onData);
+                     resolve(c);
+                  }
+               }
+            };
+            c.stdout?.on("data", onData);
+            c.on("error", fail);
+            c.on("exit", (code, signal) => {
+               if (!ready) fail(new Error(`sidecar exited before ready (code=${code}, signal=${signal ?? ""})`));
+            });
+         });
+
+      const ask = (c: ChildProcess, msg: Record<string, unknown>) =>
+         new Promise<unknown>((resolve, reject) => {
+            const id = 9000 + Math.floor(Math.random() * 1000);
+            const timer = setTimeout(() => reject(new Error(`timeout on ${JSON.stringify(msg)}`)), 15000);
+            const onData = (d: Buffer) => {
+               for (const line of d.toString().split("\n")) {
+                  if (!line.trim()) continue;
+                  try {
+                     const parsed = JSON.parse(line);
+                     if (parsed.id === id) {
+                        clearTimeout(timer);
+                        c.stdout?.off("data", onData);
+                        if (parsed.error) reject(new Error(parsed.error));
+                        else resolve(parsed);
+                     }
+                  } catch {
+                     /* partial line */
+                  }
+               }
+            };
+            c.stdout?.on("data", onData);
+            c.stdin?.write(JSON.stringify({ id, ...msg }) + "\n");
+         });
+
+      const filePath = join(testRoot, "race-target.ts");
+      const chunks = Array.from({ length: 4 }, (_, i) => ({
+         text: `export const value${i} = ${i};`,
+         start_line: i + 1,
+         end_line: i + 1,
+         embedding: Array.from({ length: 384 }, () => 0.05)
+      }));
+      const storeMsg = {
+         store: { file_path: filePath, mtime: 1234.0, size: 200, chunks }
+      };
+
+      try {
+         const [a, b] = await Promise.all([spawnSidecar(), spawnSidecar()]);
+         // Both sidecars store the SAME file at the SAME time. Whichever
+         // commits first wins; the other's re-check sees the committed row
+         // and skips. The DB must end with exactly one copy of the file.
+         const [ra, rb] = await Promise.all([ask(a, storeMsg), ask(b, storeMsg)]);
+         expect((ra as any).error).toBeUndefined();
+         expect((rb as any).error).toBeUndefined();
+         expect(Number((ra as any).stored ?? 0) + Number((rb as any).stored ?? 0)).toBe(4);
+
+         const check = await ask(a, { status: {} });
+         expect((check as any).chunks).toBe(4);
+      } finally {
+         await Promise.all(children.map(stopChild));
+      }
+   }, 90000);
+});

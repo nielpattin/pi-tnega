@@ -19,7 +19,7 @@ export async function astReplace(
    pathFilter = "",
    dryRun = false,
    signal?: AbortSignal
-): Promise<{ file: string; matches: number; diff?: string }[]> {
+): Promise<{ file: string; matches: number; added: number; removed: number; diff?: string }[]> {
    await startRustSidecar(loadConfig().model, getDbPath());
    return rustAstReplace(pattern, rewrite, lang, pathFilter, dryRun, signal);
 }

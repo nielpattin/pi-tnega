@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { homedir } from "node:os";
+import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Config, DEFAULT_CONFIG } from "./types.js";
 
@@ -8,11 +9,16 @@ import { type Config, DEFAULT_CONFIG } from "./types.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-let _configDir: string | null = null;
+let _agentDir: string | null = null;
 let _activeCwd: string = process.cwd();
 
-export function setActiveCwd(cwd: string) {
+export function setActiveCwd(cwd: string, sessionDir?: string): void {
    _activeCwd = cwd;
+   if (sessionDir) {
+      // Sessions live at <agentDir>/sessions/<encoded-cwd>, so the agent dir
+      // is two levels up from the session dir.
+      _agentDir = dirname(dirname(sessionDir));
+   }
 }
 
 export function getActiveCwd(): string {
@@ -21,34 +27,50 @@ export function getActiveCwd(): string {
 
 // ── Paths ──
 
-function getRepoRoot(): string {
-   // Walk up to find .pi directory
-   let dir = _activeCwd;
-   while (dir.length > 3) {
-      if (existsSync(join(dir, ".pi"))) return dir;
-      dir = dirname(dir);
-   }
-   return _activeCwd;
+/** The pi agent dir (e.g. ~/.pi/agent), resolved the same way pi does. */
+export function getAgentDir(): string {
+   if (_agentDir) return _agentDir;
+   const envDir = process.env.PI_CODING_AGENT_DIR ?? process.env.TAU_CODING_AGENT_DIR;
+   return envDir ? resolve(envDir) : join(homedir(), ".pi", "agent");
 }
 
+/**
+ * Encode a cwd the same way pi names its session folders:
+ * `--` + absolute path with `/`, `\`, `:` flattened to `-` + `--`
+ * (e.g. `C:\Users\niel\.pi\agent` → `--C--Users-niel-.pi-agent--`).
+ */
+export function encodeCwd(cwd: string): string {
+   const resolved = resolve(cwd);
+   return `--${resolved.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+}
+
+/**
+ * Per-project index dir: the current cwd's pi session folder, so the DB
+ * lives exactly where pi's sessions for this project live and never inside
+ * the project itself.
+ */
 export function getProjectDir(): string {
-   if (_configDir) return _configDir;
-   _configDir = join(getRepoRoot(), ".pi", "cortex");
-   return _configDir;
+   return join(getAgentDir(), "sessions", encodeCwd(_activeCwd));
+}
+
+/** Global config dir (config.json, models, log) under the agent dir. */
+function getGlobalDir(): string {
+   return join(getAgentDir(), ".pi", "cortex");
 }
 
 export function getDbPath(): string {
-   return join(getProjectDir(), "index.db");
+   return join(getProjectDir(), "pi-cortex.db");
 }
 
 export function getLogPath(): string {
-   const dir = getProjectDir();
+   const dir = getGlobalDir();
    mkdirSync(dir, { recursive: true });
    return join(dir, "pi-cortex.log");
 }
 
+/** Global model cache, shared by every project's index. */
 export function getModelsDir(): string {
-   const dir = join(getRepoRoot(), ".pi", "cortex", "models");
+   const dir = join(getGlobalDir(), "models");
    mkdirSync(dir, { recursive: true });
    return dir;
 }
@@ -81,10 +103,10 @@ export function expandEnvVars(val: string): string {
 // ── Config loading ──
 
 export function loadConfig(): Config {
-   const projectDir = getProjectDir();
-   mkdirSync(projectDir, { recursive: true });
+   const configDir = getGlobalDir();
+   mkdirSync(configDir, { recursive: true });
 
-   const configPath = join(projectDir, "config.json");
+   const configPath = join(configDir, "config.json");
    let config: Config;
 
    if (existsSync(configPath)) {

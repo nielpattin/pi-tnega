@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { appendFileSync, existsSync, readdirSync, renameSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { getLogPath, getModelsDir } from "./config.js";
 import type { StatusResult, SearchResult, SymbolResult, CallGraphResult, ScanFile, IndexFileResult } from "./types.js";
 
@@ -14,8 +14,9 @@ const binaryName = process.platform === "win32" ? "pi-embedder.exe" : "pi-embedd
 export const binaryPath = join(__dirname, "..", "rust-embedder", "target", "release", binaryName);
 
 // Log rotation threshold. ONNX init emits ~50KB; watcher events are sparse;
-// 5MB holds weeks of normal use before rotating.
-const MAX_LOG_BYTES = 5 * 1024 * 1024;
+// 20MB holds months of normal use (including per-request roundtrip lines)
+// before rotating.
+const MAX_LOG_BYTES = 20 * 1024 * 1024;
 
 // `ChildProcess` trips oxlint's `typescript/no-redundant-type-constituents`
 // because recent @types/node exposes it as a type containing `any`. Importing
@@ -38,6 +39,7 @@ interface RustSidecarChildProcess {
    stderr: RustSidecarStdout | null;
    killed: boolean;
    exitCode: number | null;
+   pid?: number;
    kill(signal?: string | number): boolean;
    on(event: "error", listener: (err: Error) => void): this;
    on(event: "exit", listener: (code: number | null, signal: string | null) => void): this;
@@ -46,7 +48,7 @@ interface RustSidecarChildProcess {
 }
 let child: RustSidecarChildProcess | null = null;
 let nextId = 1;
-const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; kind: string }>();
 let buf = "";
 let ready = false;
 let startingPromise: Promise<void> | null = null;
@@ -59,6 +61,18 @@ export function setWatcherCallback(cb: ((event: Record<string, unknown>) => void
    watcherCallback = cb;
 }
 
+/**
+ * Append a timestamped line to the per-project pi-cortex.log. Best-effort:
+ * logging failures must never break tool calls.
+ */
+export function logLine(line: string): void {
+   try {
+      appendFileSync(getLogPath(), `[ts ${new Date().toISOString()}] ${line}\n`, "utf-8");
+   } catch {
+      /* swallow */
+   }
+}
+
 export function rustSend(msg: Record<string, unknown>, timeout = 10000, signal?: AbortSignal): Promise<unknown> {
    return new Promise((resolve, reject) => {
       if (!child?.stdin?.writable || !ready) {
@@ -66,12 +80,15 @@ export function rustSend(msg: Record<string, unknown>, timeout = 10000, signal?:
          return;
       }
       const id = nextId++;
-      pending.set(id, { resolve, reject });
+      const kind = Object.keys(msg).join(",");
+      pending.set(id, { resolve, reject, kind });
+      logLine(`send id=${id} kind=${kind} payload=${JSON.stringify(msg)}`);
       child.stdin.write(JSON.stringify({ id, ...msg }) + "\n");
 
       const abort = () => {
          if (pending.has(id)) {
             pending.delete(id);
+            logLine(`recv id=${id} kind=${kind} ABORTED`);
             reject(new Error("Aborted"));
          }
       };
@@ -87,6 +104,7 @@ export function rustSend(msg: Record<string, unknown>, timeout = 10000, signal?:
       const timer = setTimeout(() => {
          if (pending.has(id)) {
             pending.delete(id);
+            logLine(`recv id=${id} kind=${kind} TIMEOUT after ${timeout}ms`);
             reject(new Error(`Timeout after ${timeout}ms`));
          }
       }, timeout);
@@ -120,11 +138,22 @@ function doStartSidecar(model: string, dbPath: string): Promise<void> {
          return;
       }
 
-      // Rotate an oversized log before starting — single back-buffer at <log>.1.
+      // Rotate an oversized log before starting — keep the last two
+      // generations (<log>.1, <log>.2) so nothing is lost mid-rotation.
       // NB: getLogPath() also mkdir's the project dir if missing.
       const logPath = getLogPath();
       try {
          if (statSync(logPath).size > MAX_LOG_BYTES) {
+            try {
+               unlinkSync(`${logPath}.2`);
+            } catch {
+               /* no .2 yet */
+            }
+            try {
+               renameSync(`${logPath}.1`, `${logPath}.2`);
+            } catch {
+               /* no .1 yet */
+            }
             renameSync(logPath, `${logPath}.1`);
          }
       } catch {
@@ -132,9 +161,13 @@ function doStartSidecar(model: string, dbPath: string): Promise<void> {
       }
 
       const modelsDir = getModelsDir();
+      // The DB lives in the per-project session folder; make sure it exists
+      // before the sidecar opens the DB (Connection::open fails otherwise).
+      mkdirSync(dirname(dbPath), { recursive: true });
       child = spawn(binaryPath, ["--model-repo", model, "--models-dir", modelsDir, "--db-path", dbPath], {
          stdio: ["pipe", "pipe", "pipe"]
       });
+      logLine(`sidecar spawn pid=${child.pid ?? "?"} binary=${binaryPath}`);
       buf = "";
       ready = false;
       let stderrBuf = "";
@@ -180,6 +213,7 @@ function doStartSidecar(model: string, dbPath: string): Promise<void> {
          const text = data.toString("utf-8");
          if (text.includes("[embedder] ready")) {
             ready = true;
+            logLine("sidecar ready");
             settle(resolve);
          }
       };
@@ -233,13 +267,20 @@ function doStartSidecar(model: string, dbPath: string): Promise<void> {
                   const p = pending.get(parsed.id)!;
                   pending.delete(parsed.id);
                   if (parsed.error) {
+                     logLine(`recv id=${parsed.id} kind=${p.kind} ERROR: ${parsed.error}`);
                      p.reject(new Error(parsed.error));
                   } else {
+                     const n =
+                        (parsed.results as unknown[] | undefined)?.length ??
+                        (parsed.symbols as unknown[] | undefined)?.length ??
+                        0;
+                     logLine(`recv id=${parsed.id} kind=${p.kind} ok (${n} results)`);
                      p.resolve(parsed);
                   }
                }
                // Unsolicited watcher events have no `id` field.
                if (parsed.watcher_event && !parsed.id && watcherCallback) {
+                  logLine(`watcher event ${JSON.stringify(parsed.watcher_event)}`);
                   watcherCallback(parsed.watcher_event as Record<string, unknown>);
                }
             } catch {
@@ -257,6 +298,13 @@ function doStartSidecar(model: string, dbPath: string): Promise<void> {
       child.on("exit", (code, signal) => {
          child = null;
          ready = false;
+         logLine(`sidecar exited code=${code} signal=${signal ?? ""}`);
+         // A crash mid-request must surface immediately — otherwise in-flight
+         // tool calls hang until their timeout and look "stuck".
+         for (const [id, p] of pending) {
+            p.reject(new Error(`Sidecar exited (code=${code})`));
+            pending.delete(id);
+         }
          if (!settled)
             settle(() =>
                reject(
@@ -303,7 +351,8 @@ export async function rustIndex(
    overlap: number,
    prefix: string,
    skipEmbed?: boolean,
-   watchDirs?: string[]
+   watchDirs?: string[],
+   rebuildFts?: boolean
 ): Promise<{ files?: IndexFileResult[]; indexed?: { files: number; chunks: number } }> {
    const msg: Record<string, unknown> = {
       index: {
@@ -313,7 +362,8 @@ export async function rustIndex(
          prefix,
          skip_embed: skipEmbed ?? false,
          store: !skipEmbed,
-         watch_dirs: watchDirs ?? []
+         watch_dirs: watchDirs ?? [],
+         rebuild_fts: rebuildFts ?? true
       }
    };
    return rustSend(msg, 300000) as any;
@@ -345,8 +395,13 @@ export async function rustSearch(
    return (r as any).results;
 }
 
-export async function rustTextSearch(query: string, topK: number, pathFilter?: string): Promise<SearchResult[]> {
-   const r = await rustSend({ text_search: { query, top_k: topK, path_filter: pathFilter ?? null } }, 15000);
+export async function rustTextSearch(
+   query: string,
+   topK: number,
+   pathFilter?: string,
+   signal?: AbortSignal
+): Promise<SearchResult[]> {
+   const r = await rustSend({ text_search: { query, top_k: topK, path_filter: pathFilter ?? null } }, 15000, signal);
    return (r as any).results;
 }
 
@@ -356,11 +411,29 @@ export async function rustStatus(): Promise<StatusResult> {
 
 export async function rustSymbolSearch(
    symbol: string,
+   kind?: string,
    pathFilter?: string,
    signal?: AbortSignal
 ): Promise<SymbolResult[]> {
-   const r = await rustSend({ symbol_search: { pattern: symbol, path_filter: pathFilter ?? null } }, 15000, signal);
+   const r = await rustSend(
+      { symbol_search: { pattern: symbol, kind: kind ?? null, path_filter: pathFilter ?? null } },
+      15000,
+      signal
+   );
    return (r as any).results ?? [];
+}
+
+export async function rustOutline(
+   path: string,
+   signal?: AbortSignal
+): Promise<{
+   path: string;
+   files: number;
+   truncated: boolean;
+   symbols: { symbol: string; kind: string; path: string; start_line: number; end_line: number }[];
+}> {
+   const r = await rustSend({ outline: { path } }, 15000, signal);
+   return (r as any) ?? { path, files: 0, truncated: false, symbols: [] };
 }
 
 export async function rustCallGraph(
@@ -447,7 +520,7 @@ export async function rustAstReplace(
    pathFilter = "",
    dryRun = false,
    signal?: AbortSignal
-): Promise<Array<{ file: string; matches: number; diff?: string }>> {
+): Promise<Array<{ file: string; matches: number; added: number; removed: number; diff?: string }>> {
    const r = await rustSend(
       { ast_replace: { pattern, rewrite, lang, path_filter: pathFilter, dry_run: dryRun } },
       30000,
