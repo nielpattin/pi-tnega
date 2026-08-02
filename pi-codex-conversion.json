@@ -13,12 +13,12 @@
     "imageGeneration": false,
     "viewImageFallback": false,
     "applyPatchOnly": true,
-    "viewImageOnly": true,
+    "viewImageOnly": false,
     "webRunOnly": false,
     "imageGenerationOnly": false
   },
   "ui": {
-    "statusLine": true,
+    "statusLine": false,
     "toolRenaming": true,
     "compactTools": true,
     "codeModeDetails": false,
@@ -29,7 +29,7 @@
     "backgroundShellCloseShortcut": "alt+r"
   },
   "compaction": {
-    "responsesCompaction": true
+    "responsesCompaction": false
   },
   "beta": {
     "codeMode": false,
@@ -37,7 +37,8 @@
     "v2UserMessageRetention": 64
   },
   "voice": {
-    "v3Voice": "cove",
+    "inputDevice": "wasapi:{0.0.1.00000000}.{ecf7b97e-4485-41e5-8d6e-6f4bfce7bc83}",
+    "v3Voice": "sol",
     "dictationShortcut": "ctrl+alt+d",
     "realtimeShortcut": "ctrl+alt+space",
     "muteShortcut": "ctrl+alt+m",
@@ -45,7 +46,7 @@
     "dictationShortcutMode": "push"
   },
   "openai": {
-    "fast": true,
+    "fast": false,
     "verbosity": "low",
     "forceCachedWebSockets": true,
     "harnessIdentifierHeader": false,
