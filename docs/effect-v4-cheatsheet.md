@@ -279,13 +279,7 @@ yield * Effect.logInfo("spawn", { id });
 // Effect.fn("name") attaches withSpan automatically
 ```
 
-### 4.14 Testing
-
-- Prefer `ManagedRuntime.make(testLayer)` + `runPromise` / `runPromiseExit` (matches tasks tests).
-- Effect docs also show `@effect/vitest` `it.effect` — optional if added as a devDep later.
-- Provide fake services with `Layer.succeed(Service, Service.of({...}))`.
-
-### 4.15 Predicate module
+### 4.14 Predicate module
 
 Do not invent `isRecord` / `isString` helpers. Use `Predicate` from `effect`.
 
@@ -324,5 +318,4 @@ pnpm --filter copy-all check
 pnpm --filter ask-user check
 # after harbor exists:
 pnpm --dir extensions/pi-harbor check
-pnpm --dir extensions/pi-harbor test
 ```

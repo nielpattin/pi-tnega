@@ -4,7 +4,6 @@
 
 - **No unprompted releases or Git mutations:** Do not run `git commit`, `git push`, or `pnpm release` unless the user explicitly requests it.
 - **Use surgical edits:** Touch only what the task requires. Preserve existing comments and structure unless changing them is necessary.
-- **Always verify:** After completing changes, run `pnpm check` from the repository root. Do not declare success until linting, type checking, and tests pass across all packages and extensions.
 
 ## Repository layout and commands
 
@@ -22,7 +21,18 @@
 
     ```text
     pnpm --dir extensions/pi-harbor check
-    pnpm --dir extensions/pi-harbor test
+    ```
+
+- Run lint for a single extension from the repository root with:
+
+    ```text
+    pnpm lint extensions/<extension-name>
+    ```
+
+    Example:
+
+    ```text
+    pnpm lint extensions/pi-acks
     ```
 
 ## Effect code
@@ -56,11 +66,13 @@ The contributor monorepo workflow for creating packages, adding changesets, vers
     export * from "./<extension-name>.ts";
     ```
 
-## Tests and validation
+## Verification workflow
 
-- Use Vitest for tests.
-- Place tests in the same directory as the code under test.
-- Name test files with the `.test.ts` suffix.
-- Run `pnpm lint` for lint-only validation.
-- Run `pnpm test` for test-only validation.
-- Run `pnpm check` from the repository root for the authoritative lint, type-check, and test validation.
+Follow this order for code changes:
+
+1. Run `pnpm lint`.
+2. Run `pnpm typecheck`.
+3. Run `pnpm fmt`.
+4. Run `git diff --check`.
+
+If linting or type checking fails, fix the problem and continue again from the failed step.

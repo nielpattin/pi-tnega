@@ -1,6 +1,6 @@
 # Monorepo Development & Contributor Guide
 
-This document provides the full contributor workflow for developing, testing, versioning, and publishing packages within this monorepo.
+This document provides the full contributor workflow for developing, versioning, and publishing packages within this monorepo.
 
 ---
 
@@ -13,10 +13,11 @@ This document provides the full contributor workflow for developing, testing, ve
     - [`pi-permission-system`](./extensions/pi-permission-system): Central permission gates for tools, bash, MCP, skills, file paths, and subagents.
     - [`pi-reference`](./extensions/pi-reference): Project reference declaration & resolution with `@alias` autocomplete.
     - [`pi-station`](./extensions/pi-station): Status bar, layout manager, bash mode, hashline editor with in-chat diff preview.
+    - [`pi-harbor`](./extensions/pi-harbor): Agent jobs, Agy/Pi harnesses, process supervision, inter-agent messaging, Vibe mode, and the `/tasks` dashboard.
 - **Workflow & Automation Tools**:
     - `.changeset/`: Changesets configuration and pending change notes.
     - `.github/workflows/publish.yml`: GitHub Actions manual tag-based package publish workflow.
-    - `.husky/`: Local Git hooks (`pre-commit` runs `lint-staged`, `pre-push` runs tests + changeset gate).
+    - `.husky/`: Local Git hooks (`pre-commit` runs `lint-staged`, `pre-push` runs the changeset gate).
     - `scripts/`:
         - `require-changeset.mjs`: Pre-push check requiring changesets for package edits.
         - `sync-monorepo-changelog.mjs`: Aggregates package changelogs into root `CHANGELOG.md`.
@@ -32,13 +33,14 @@ agent-root/
 │   └── publish.yml               # exact manual npm publish
 ├── .husky/
 │   ├── pre-commit                # pnpm lint-staged
-│   └── pre-push                  # pnpm test + changeset gate
+│   └── pre-push                  # changeset gate
 ├── .nvmrc                        # Node 24
 ├── openspec/                     # change proposals and specs
 ├── extensions/
 │   ├── pi-permission-system      # permission system extension
 │   ├── pi-reference              # project references extension
-│   └── pi-station                # published npm extension
+│   ├── pi-station                # published npm extension
+│   └── pi-harbor                 # agent jobs and process supervision extension
 ├── scripts/
 │   ├── release.mjs               # legacy per-package release orchestrator
 │   ├── require-changeset.mjs     # local changeset gate
@@ -50,7 +52,6 @@ agent-root/
 ├── package.json                  # workspaces, shared devDeps, scripts
 ├── pnpm-workspace.yaml           # packages/* and extensions/* workspace definitions
 ├── tsconfig.json                 # shared TS config
-└── vitest.config.ts              # tests and coverage
 ```
 
 ---
@@ -67,27 +68,23 @@ pnpm install
 
 ## 3. Daily Development & Quality Gates
 
-Run checks and tests from root:
+Run checks from root:
 
-| Command          | Purpose                                                                    |
-| ---------------- | -------------------------------------------------------------------------- |
-| `pnpm check`     | Full verification: formatting check, linting, typechecking, and unit tests |
-| `pnpm test`      | Run Vitest unit test suite (`vitest run`)                                  |
-| `pnpm coverage`  | Run test coverage with Vitest                                              |
-| `pnpm typecheck` | Run TypeScript 7 type check (`tsc --noEmit`)                               |
-| `pnpm lint`      | Run `oxlint` across all files                                              |
-| `pnpm lint:fix`  | Auto-fix linting issues                                                    |
-| `pnpm fmt`       | Format files using `oxfmt`                                                 |
-| `pnpm fmt:check` | Check code formatting compliance                                           |
+| Command          | Purpose                                            |
+| ---------------- | -------------------------------------------------- |
+| `pnpm typecheck` | Run TypeScript 7 type check across project configs |
+| `pnpm lint`      | Run `oxlint` across all files                      |
+| `pnpm lint:fix`  | Auto-fix linting issues                            |
+| `pnpm fmt`       | Format files using `oxfmt`                         |
 
 ### Package-Specific Commands
 
 Run scripts for individual packages from the root using `pnpm --dir`:
 
 ```bash
-pnpm --dir extensions/pi-permission-system test
 pnpm --dir extensions/pi-permission-system check
-pnpm --dir extensions/pi-station test
+pnpm --dir extensions/pi-harbor check
+pnpm --dir extensions/pi-station typecheck
 ```
 
 ---
@@ -124,7 +121,7 @@ pnpm --dir extensions/pi-station test
 - **Raw TypeScript Extensions** (`pi-permission-system`, `pi-reference`, `pi-station`, `pi-harbor`, and others):
     - Published directly as raw TypeScript source files (`.ts`).
     - Loaded by Pi harness at runtime via `jiti`. No `dist/` build step is required.
-- Ensure changes pass `pnpm check` and add appropriate tests in `extensions/<name>/test/` or root `tests/`.
+- Ensure changes pass the applicable root checks (`pnpm lint`, `pnpm typecheck`, `pnpm fmt`, and `git diff --check`).
 
 ---
 
@@ -226,4 +223,4 @@ Use the helper script `publish.sh` to trigger GitHub Actions:
 
 - **No Unprompted Git Commits / Pushes**: Do NOT execute `git commit`, `git push`, or `pnpm release` unless explicitly requested by the user.
 - **Surgical Edits**: Touch only what is necessary for the task. Preserve comments and structure.
-- **Always Verify**: Verify changes with `pnpm check` or `pnpm test` before declaring success.
+- **Always Verify**: Run `pnpm lint`, `pnpm typecheck`, `pnpm fmt`, and `git diff --check` before declaring success.
