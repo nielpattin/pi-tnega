@@ -1,6 +1,6 @@
 # Monorepo Development & Contributor Guide
 
-This document provides the full contributor workflow for developing, versioning, and publishing packages within this monorepo.
+This document provides the full contributor workflow for developing and publishing packages within this monorepo.
 
 ---
 
@@ -15,12 +15,9 @@ This document provides the full contributor workflow for developing, versioning,
     - [`pi-station`](./extensions/pi-station): Status bar, layout manager, bash mode, hashline editor with in-chat diff preview.
     - [`pi-harbor`](./extensions/pi-harbor): Agent jobs, Agy/Pi harnesses, process supervision, inter-agent messaging, Vibe mode, and the `/tasks` dashboard.
 - **Workflow & Automation Tools**:
-    - `.changeset/`: Changesets configuration and pending change notes.
     - `.github/workflows/publish.yml`: GitHub Actions manual tag-based package publish workflow.
-    - `.husky/`: Local Git hooks (`pre-commit` runs `lint-staged`, `pre-push` runs the changeset gate).
+    - `.husky/`: Local Git hooks (`pre-commit` runs `lint-staged`).
     - `scripts/`:
-        - `require-changeset.mjs`: Pre-push check requiring changesets for package edits.
-        - `sync-monorepo-changelog.mjs`: Aggregates package changelogs into root `CHANGELOG.md`.
         - `release.mjs`: Legacy single-package release orchestrator.
     - `publish.sh`: Helper script to trigger GitHub workflow dispatch for package releases.
 
@@ -28,12 +25,10 @@ This document provides the full contributor workflow for developing, versioning,
 
 ```text
 agent-root/
-├── .changeset/                   # Changesets config and notes
 ├── .github/workflows/
 │   └── publish.yml               # exact manual npm publish
 ├── .husky/
-│   ├── pre-commit                # pnpm lint-staged
-│   └── pre-push                  # changeset gate
+│   └── pre-commit                # pnpm lint-staged
 ├── .nvmrc                        # Node 24
 ├── openspec/                     # change proposals and specs
 ├── extensions/
@@ -43,10 +38,9 @@ agent-root/
 │   └── pi-harbor                 # agent jobs and process supervision extension
 ├── scripts/
 │   ├── release.mjs               # legacy per-package release orchestrator
-│   ├── require-changeset.mjs     # local changeset gate
-│   └── sync-monorepo-changelog.mjs
+│   └── typecheck.mjs             # project-wide type check
 ├── publish.sh                    # gh workflow dispatch helper
-├── CHANGELOG.md                  # generated package changelog summary
+├── CHANGELOG.md                  # package changelog summary
 ├── oxlint.config.ts              # oxlint config
 ├── oxfmt.config.ts               # oxfmt config
 ├── package.json                  # workspaces, shared devDeps, scripts
@@ -112,7 +106,6 @@ pnpm --dir extensions/pi-station typecheck
     ```
 3. **Add `tsconfig.json`**: Extend the monorepo root TypeScript configuration (`../../tsconfig.base.json`).
 4. **Workspace Link**: `pnpm-workspace.yaml` automatically detects folders inside `packages/*` and `extensions/*`. Run `pnpm install` to update workspace links.
-5. **Add Initial Changeset**: Run `pnpm changeset` to record the initial package intent.
 
 ---
 
@@ -125,50 +118,7 @@ pnpm --dir extensions/pi-station typecheck
 
 ---
 
-## 6. Changesets & Versioning Workflow
-
-Packages use independent versioning managed by Changesets.
-
-### Step 6.1: Record a Changeset
-
-When modifying any file inside `extensions/`:
-
-```bash
-pnpm changeset
-```
-
-Select the affected package(s), specify the version bump type (`patch`, `minor`, `major`), and enter a brief description of the changes.
-
-### Step 6.2: Pre-Push Changeset Gate
-
-Git pre-push hook (`.husky/pre-push`) automatically verifies changesets:
-
-```bash
-node scripts/require-changeset.mjs origin/main
-```
-
-If package source files were modified without a corresponding `.changeset/*.md` file, the push is blocked.
-
-- _Emergency Bypass_: Set `SKIP_CHANGESET_CHECK=1` or `SKIP_HOOKS=1` in environment variables if bypassing intentionally.
-
----
-
-## 7. Version Bumping & Changelog Synchronization
-
-To apply changesets and bump package versions:
-
-```bash
-pnpm version-packages
-```
-
-What `pnpm version-packages` does:
-
-1. `changeset version`: Consumes `.changeset/*.md` files, bumps versions in `extensions/*/package.json`, and appends entries to `extensions/*/CHANGELOG.md`.
-2. `pnpm changelog:sync`: Executes `scripts/sync-monorepo-changelog.mjs`, which extracts the latest version entry from each package changelog and syncs them into the root `CHANGELOG.md` between `<!-- package-changelog-summary -->` comments.
-
----
-
-## 8. Package Dry-Run (Package Packaging Verification)
+## 6. Package Dry-Run (Package Packaging Verification)
 
 Before publishing, verify the contents of the generated tarball:
 
@@ -183,16 +133,16 @@ pnpm --dir extensions/pi-station pack --dry-run
 
 ---
 
-## 9. Publishing Packages to npm
+## 7. Publishing Packages to npm
 
 Publishing is **manual, exact, tag-based, and single-package**.
 
-### Step 9.1: Git Tag Convention
+### Step 7.1: Git Tag Convention
 
-Changesets uses scoped package tags formatted as `@nielpattin/<pkg-name>@<version>`.
+Publishing uses scoped package tags formatted as `@nielpattin/<pkg-name>@<version>`.
 Example: `@nielpattin/pi-station@0.9.0`
 
-### Step 9.2: Trigger Release Workflow
+### Step 7.2: Trigger Release Workflow
 
 Use the helper script `publish.sh` to trigger GitHub Actions:
 
@@ -200,7 +150,7 @@ Use the helper script `publish.sh` to trigger GitHub Actions:
 ./publish.sh pi-station --tag '@nielpattin/pi-station@0.9.0'
 ```
 
-### Step 9.3: Automated Publish Pipeline (`.github/workflows/publish.yml`)
+### Step 7.3: Automated Publish Pipeline (`.github/workflows/publish.yml`)
 
 1. Checks out the exact tag commit: `git checkout --detach "<tag>"`.
 2. Validates package version matches tag: `@nielpattin/<pkg>@<version>`.
@@ -210,7 +160,7 @@ Use the helper script `publish.sh` to trigger GitHub Actions:
 
 ---
 
-## 10. Local Pi Extension Installation & Testing
+## 8. Local Pi Extension Installation & Testing
 
 - Pi loads extensions directly from TypeScript files using `jiti`.
 - To test locally in Pi:
@@ -219,8 +169,8 @@ Use the helper script `publish.sh` to trigger GitHub Actions:
 
 ---
 
-## 11. Guidelines & Constraints
+## 9. Guidelines & Constraints
 
-- **No Unprompted Git Commits / Pushes**: Do NOT execute `git commit`, `git push`, or `pnpm release` unless explicitly requested by the user.
+- **No Unprompted Git Commits / Pushes**: Do NOT execute `git commit` or `git push` unless explicitly requested by the user.
 - **Surgical Edits**: Touch only what is necessary for the task. Preserve comments and structure.
 - **Always Verify**: Run `pnpm lint`, `pnpm typecheck`, `pnpm fmt`, and `git diff --check` before declaring success.

@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-Independent [Pi coding agent](https://github.com/earendil-works/pi-coding-agent) extensions focused on developer workflow. This repo keeps small Pi packages in one workspace while preserving independent package versions, release notes, and npm publishing.
+Independent [Pi coding agent](https://github.com/earendil-works/pi-coding-agent) extensions focused on developer workflow. This repo keeps small Pi packages in one workspace and publishes them to npm.
 
 All extensions publish raw TypeScript source that Pi loads through jiti, so they are not built to `dist/`.
 
@@ -37,26 +37,24 @@ pnpm typecheck           # typecheck all project configs
 git diff --check         # verify whitespace
 ```
 
-See **[DEVELOPMENT.md](./DEVELOPMENT.md)** for detailed contributor instructions on creating and editing packages, changesets, versioning, publishing, project structure, and tooling.
+See **[DEVELOPMENT.md](./DEVELOPMENT.md)** for detailed contributor instructions on creating and editing packages, publishing, project structure, and tooling.
 
 ## Project Structure
 
 ```text
 agent-root/
-├── .changeset/                   # Changesets config and notes
 ├── .github/workflows/
 │   └── publish.yml               # exact manual npm publish
 ├── .husky/
-│   ├── pre-commit                # pnpm lint-staged
-│   └── pre-push                  # changeset gate
+│   └── pre-commit                # pnpm lint-staged
 ├── extensions/
 │   ├── pi-permission-system      # permission system extension
 │   ├── pi-reference              # project references extension
 │   ├── pi-station                # published npm extension
 │   └── pi-harbor                 # agent jobs and process supervision extension
-├── scripts/                      # release & changelog scripts
+├── scripts/                      # release and typecheck scripts
 ├── publish.sh                    # gh workflow dispatch helper
-├── CHANGELOG.md                  # generated package changelog summary
+├── CHANGELOG.md                  # package changelog summary
 └── package.json                  # workspaces, shared devDeps, scripts
 ```
 
@@ -64,7 +62,6 @@ agent-root/
 
 | Tool       | Config                | Purpose                        |
 | ---------- | --------------------- | ------------------------------ |
-| Changesets | `.changeset/`         | Versioning and changelogs      |
 | oxlint     | `oxlint.config.ts`    | Linting                        |
 | oxfmt      | `oxfmt.config.ts`     | Formatting                     |
 | TypeScript | `tsconfig.json`       | Type checking                  |

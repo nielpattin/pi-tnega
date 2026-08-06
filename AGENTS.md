@@ -2,7 +2,7 @@
 
 ## Non-negotiable rules
 
-- **No unprompted releases or Git mutations:** Do not run `git commit`, `git push`, or `pnpm release` unless the user explicitly requests it.
+- **No unprompted releases or Git mutations:** Do not run `git commit`, `git push`, or release/publish flows unless the user explicitly requests it.
 - **Use surgical edits:** Touch only what the task requires. Preserve existing comments and structure unless changing them is necessary.
 
 ## Repository layout and commands
@@ -52,7 +52,7 @@ External repositories are vendored under `repos/` as read-only reference materia
 
 ## Contributor workflow
 
-The contributor monorepo workflow for creating packages, adding changesets, versioning, and publishing lives in [`DEVELOPMENT.md`](./DEVELOPMENT.md).
+The contributor monorepo workflow for creating and publishing packages lives in [`DEVELOPMENT.md`](./DEVELOPMENT.md).
 
 - Follow `DEVELOPMENT.md` for package work.
 - Do not invent an alternate release flow.

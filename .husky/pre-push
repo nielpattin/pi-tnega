@@ -1,5 +1,0 @@
-# Git exports local repository variables into hooks. Clear the parent repo
-# environment so nested Git commands operate on their cwd.
-unset $(git rev-parse --local-env-vars)
-
-node scripts/require-changeset.mjs origin/main
