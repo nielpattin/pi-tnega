@@ -14,7 +14,7 @@ export type AccountProviderId = (typeof SUPPORTED_PROVIDER_IDS)[number];
 
 export interface ProviderOwnedOAuth {
    login(interaction: AuthInteraction): Promise<OAuthCredential>;
-   refresh(credential: OAuthCredential, signal?: AbortSignal): Promise<OAuthCredential>;
+   refresh(credential: OAuthCredential, signal: AbortSignal): Promise<OAuthCredential>;
    toAuth(credential: OAuthCredential): Promise<ModelAuth>;
 }
 

@@ -41,6 +41,7 @@
       "toolOutput": "gray",
 
       "selectedBg": "darkGray",
+      "scrollbarThumb": "darkGray",
       "customMessageBg": "userMsgBg",
       "customMessageText": "",
       "customMessageLabel": "accent",
@@ -76,6 +77,7 @@
       "thinkingMedium": "#5f7e97",
       "thinkingHigh": "#7e57c2",
       "thinkingXhigh": "#c792ea",
+      "thinkingMax": "#c792ea",
 
       "bashMode": "green"
    }

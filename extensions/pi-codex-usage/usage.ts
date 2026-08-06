@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const JWT_CLAIM_PATH = "https://api.openai.com/auth";
@@ -42,6 +42,13 @@ export function buildCodexUsageUrl(): string {
    return `${DEFAULT_CODEX_BASE_URL}/wham/usage`;
 }
 
+function applyProviderHeaders(target: Headers, source: ProviderHeaders | undefined): void {
+   for (const [key, value] of Object.entries(source ?? {})) {
+      if (value === null) target.delete(key);
+      else target.set(key, value);
+   }
+}
+
 function extractBearerToken(headers: Headers): string | undefined {
    const authorization = headers.get("authorization")?.trim();
    const match = authorization?.match(/^Bearer\s+(.+)$/i);
@@ -65,8 +72,9 @@ async function buildCodexUsageHeaders(ctx: ExtensionContext, model: RuntimeModel
    const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
    if (!auth.ok) throw new Error(auth.error);
 
-   const headers = new Headers(model.headers);
-   for (const [key, value] of Object.entries(auth.headers ?? {})) headers.set(key, value);
+   const headers = new Headers();
+   applyProviderHeaders(headers, model.headers);
+   applyProviderHeaders(headers, auth.headers);
    if (auth.apiKey) headers.set("authorization", `Bearer ${auth.apiKey}`);
 
    const token = auth.apiKey ?? extractBearerToken(headers);

@@ -8,7 +8,7 @@
       "typecheck": "tsc --noEmit -p tsconfig.json"
    },
    "dependencies": {
-      "@earendil-works/pi-tui": "^0.83.0"
+      "@earendil-works/pi-tui": "^0.84.0"
    },
    "peerDependencies": {
       "@earendil-works/pi-coding-agent": "*",

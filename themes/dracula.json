@@ -38,6 +38,7 @@
       "text": "fg",
       "thinkingText": "cyan",
       "selectedBg": "bgPurple",
+      "scrollbarThumb": "bgPurple",
       "userMessageBg": "bgPink",
       "userMessageText": "fg",
       "customMessageBg": "bgCyan",
@@ -76,6 +77,7 @@
       "thinkingMedium": "purple",
       "thinkingHigh": "cyan",
       "thinkingXhigh": "pink",
+      "thinkingMax": "pink",
       "bashMode": "orange"
    }
 }

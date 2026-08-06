@@ -35,6 +35,7 @@
       "thinkingText": "brightBlack",
 
       "selectedBg": "brightBlack",
+      "scrollbarThumb": "brightBlack",
       "userMessageBg": "",
       "userMessageText": "",
       "customMessageBg": "",
@@ -77,6 +78,7 @@
       "thinkingMedium": "cyan",
       "thinkingHigh": "magenta",
       "thinkingXhigh": "red",
+      "thinkingMax": "red",
 
       "bashMode": "green"
    }

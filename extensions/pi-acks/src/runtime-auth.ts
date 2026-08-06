@@ -1,4 +1,4 @@
-import type { ModelAuth, OAuthCredential } from "@earendil-works/pi-ai";
+import type { AuthOperationOptions, ModelAuth, OAuthCredential, ProviderHeaders } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AccountProviderAdapter, AccountProviderId } from "./oauth.js";
 
@@ -6,8 +6,8 @@ export const RUNTIME_FAIL_CLOSED_API_KEY = "pi-acks-auth-failed";
 const REFRESH_SKEW_MS = 5 * 60 * 1000;
 
 type RuntimeAuthStorage = {
-   setRuntimeApiKey(provider: string, apiKey: string): void | Promise<void>;
-   removeRuntimeApiKey(provider: string): void | Promise<void>;
+   setRuntimeApiKey(provider: string, apiKey: string, options?: AuthOperationOptions): void | Promise<void>;
+   removeRuntimeApiKey(provider: string, options?: AuthOperationOptions): void | Promise<void>;
 };
 
 type PersistentCredentialStore = {
@@ -125,7 +125,7 @@ export class RuntimeAuthCoordinator {
                credential = latestCredential;
                if (latestCredential.expires > now + REFRESH_SKEW_MS) return latest;
                try {
-                  const refreshed = await this.provider.oauth.refresh(latestCredential);
+                  const refreshed = await refreshProviderCredential(this.provider.oauth, latestCredential, ctx.signal);
                   credential = refreshed;
                   return {
                      ...latest,
@@ -311,6 +311,14 @@ export class RuntimeAuthCoordinator {
             if (value !== null && resolved?.headers?.[name] !== value) {
                throw new Error(`Pi did not apply the runtime ${this.provider.displayName} headers.`);
             }
+            if (
+               value === null &&
+               resolved?.headers &&
+               Object.hasOwn(resolved.headers, name) &&
+               resolved.headers[name] !== null
+            ) {
+               throw new Error(`Pi did not remove the runtime ${this.provider.displayName} header.`);
+            }
          }
       }
    }
@@ -493,10 +501,10 @@ class RuntimeApiKeyController {
       snapshot: RuntimeOverrideSnapshot | undefined,
       apiKey: string
    ): Promise<"applied" | "stale" | "unavailable"> {
-      if (!(await this.set(snapshot, apiKey))) return "stale";
+      if (!(await this.set(snapshot, apiKey, false, ctx.signal))) return "stale";
       const matches = await this.matches(ctx, apiKey);
       if (matches !== false) return "applied";
-      if (!(await this.set(snapshot, apiKey, true))) return "stale";
+      if (!(await this.set(snapshot, apiKey, true, ctx.signal))) return "stale";
       return (await this.matches(ctx, apiKey)) === false ? "unavailable" : "applied";
    }
 
@@ -514,7 +522,7 @@ class RuntimeApiKeyController {
       state.generation += 1;
       await enqueueMutation(state, async () => {
          if (!state.mayHaveOverride) return;
-         await target.removeRuntimeApiKey(this.providerId);
+         await target.removeRuntimeApiKey(this.providerId, { signal: ctx.signal });
          state.appliedApiKey = undefined;
          state.mayHaveOverride = false;
       });
@@ -532,7 +540,12 @@ class RuntimeApiKeyController {
       }
    }
 
-   private async set(snapshot: RuntimeOverrideSnapshot | undefined, apiKey: string, force = false): Promise<boolean> {
+   private async set(
+      snapshot: RuntimeOverrideSnapshot | undefined,
+      apiKey: string,
+      force = false,
+      signal?: AbortSignal
+   ): Promise<boolean> {
       if (!snapshot) throw new Error("This Pi version does not expose runtime provider authentication.");
       const { generation, state, target } = snapshot;
       return enqueueMutation(state, async () => {
@@ -540,7 +553,7 @@ class RuntimeApiKeyController {
          if (!force && state.appliedApiKey === apiKey) return true;
          state.appliedApiKey = undefined;
          state.mayHaveOverride = true;
-         await target.setRuntimeApiKey(this.providerId, apiKey);
+         await target.setRuntimeApiKey(this.providerId, apiKey, { signal });
          state.appliedApiKey = apiKey;
          return state.generation === generation;
       });
@@ -553,6 +566,23 @@ class RuntimeApiKeyController {
          this.states.set(target, state);
       }
       return state;
+   }
+}
+
+async function refreshProviderCredential(
+   oauth: AccountProviderAdapter["oauth"],
+   credential: OAuthCredential,
+   parentSignal: AbortSignal | undefined
+): Promise<OAuthCredential> {
+   const operationController = new AbortController();
+   const signal = parentSignal
+      ? AbortSignal.any([parentSignal, operationController.signal])
+      : operationController.signal;
+   try {
+      signal.throwIfAborted();
+      return await oauth.refresh(credential, signal);
+   } finally {
+      operationController.abort();
    }
 }
 
@@ -574,14 +604,22 @@ function readProviderModels(ctx: ExtensionContext, providerId: string): NonNulla
          cost: (model.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }) as never,
          contextWindow: typeof model.contextWindow === "number" ? model.contextWindow : 0,
          maxTokens: typeof model.maxTokens === "number" ? model.maxTokens : 0,
-         ...(model.headers ? { headers: model.headers as Record<string, string> } : {}),
+         ...(model.headers ? { headers: toConfigHeaders(model.headers as ProviderHeaders) } : {}),
          ...(model.compat ? { compat: model.compat as never } : {})
       }));
 }
 
+function toConfigHeaders(headers: ProviderHeaders): Record<string, string> {
+   const result: Record<string, string> = {};
+   for (const [name, value] of Object.entries(headers)) {
+      if (value !== null) result[name] = value;
+   }
+   return result;
+}
+
 function mergeConfigHeaders(
    previous: Record<string, string> | undefined,
-   headers: Record<string, string | null>
+   headers: ProviderHeaders
 ): Record<string, string> {
    const result = { ...previous };
    for (const [name, value] of Object.entries(headers)) {
@@ -664,11 +702,11 @@ function findProviderModel(
 async function getApiKeyAndHeaders(
    ctx: ExtensionContext,
    model: { provider: string; id: string; baseUrl?: string }
-): Promise<{ ok: true; apiKey?: string; headers?: Record<string, string> } | { ok: false; error: string } | undefined> {
+): Promise<{ ok: true; apiKey?: string; headers?: ProviderHeaders } | { ok: false; error: string } | undefined> {
    const registry = ctx.modelRegistry as unknown as {
       getApiKeyAndHeaders?: (
          candidate: unknown
-      ) => Promise<{ ok: true; apiKey?: string; headers?: Record<string, string> } | { ok: false; error: string }>;
+      ) => Promise<{ ok: true; apiKey?: string; headers?: ProviderHeaders } | { ok: false; error: string }>;
    };
    return typeof registry.getApiKeyAndHeaders === "function" ? registry.getApiKeyAndHeaders(model) : undefined;
 }

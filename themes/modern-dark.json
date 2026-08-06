@@ -34,6 +34,7 @@
       "thinkingText": "mutedGray",
 
       "selectedBg": "selectedBg",
+      "scrollbarThumb": "dimGray",
       "userMessageBg": "userMsgBg",
       "userMessageText": "",
       "customMessageBg": "customMsgBg",
@@ -76,6 +77,7 @@
       "thinkingMedium": "#8c5c37",
       "thinkingHigh": "orangeMuted",
       "thinkingXhigh": "orange",
+      "thinkingMax": "orangeBright",
 
       "bashMode": "orangeMuted"
    },

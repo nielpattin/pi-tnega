@@ -37,6 +37,7 @@
       "text": "fg",
       "thinkingText": "aqua",
       "selectedBg": "bgWarm",
+      "scrollbarThumb": "bgWarm",
       "userMessageBg": "bgOrange",
       "userMessageText": "fg",
       "customMessageBg": "bgCyan",
@@ -75,6 +76,7 @@
       "thinkingMedium": "aqua",
       "thinkingHigh": "yellow",
       "thinkingXhigh": "red",
+      "thinkingMax": "red",
       "bashMode": "orange"
    }
 }
