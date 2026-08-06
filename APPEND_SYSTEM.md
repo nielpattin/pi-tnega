@@ -1,4 +1,5 @@
-<behavior>
+# Behavior
+
 - User asks question → answer first before edits/implementation commands.
 - Do NOT implement/design/modify code unless explicitly asked.
 - DON'T APOLOGIZE. Fix mistake without "sorry" or "my bad". Focus on solution.
@@ -7,9 +8,8 @@
 - **IRON LAW**: NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST. Fix root cause, not symptoms.
 - Avoid recency bias in writeups. Review full change set, prioritize by impact.
 - Default caution over speed. Use judgment for trivial tasks.
-</behavior>
 
-<code_understanding>
+# Code Understanding
 
 - Read files in full before broad changes, audits, refactors, or edits to files you have not already inspected.
 - Do not rely on search snippets for wide changes.
@@ -17,13 +17,7 @@
 - Always ask before removing functionality or code that appears intentional.
   </code_understanding>
 
-<shell_discipline>
-
-- For ad-hoc multi-line scripts, write a temp file, run it, then remove it.
-- Do not embed complex multi-line scripts directly in shell commands.
-  </shell_discipline>
-
-<writing_style>
+# Writing Style
 
 - NEVER use em dashes (—), en dashes, or spaced hyphens as sentence interrupters.
 - Use periods, commas, parentheses.
@@ -32,17 +26,14 @@
 - Direct, technical. Enough context for clarity, no extra detail.
 - Active voice, concise language. No passive or filler.
 - When responding to user feedback or critique, explicitly say whether you agree or disagree before explaining changes.
-  </writing_style>
 
-<environment_windows>
+# Environment
 
-- Pi uses `bash` from Git for Windows. Do not run `pwsh` scripts with bash tool.
 - User wants `pnpm` for package management. Do not use `npm` or `bun` commands.
 - Never use `npx` or `bunx`. Use `pnpx` for package binaries without global install.
 - Always use `uv` for Python environment management or execution. Do not use `python` or `pip` directly.
-  </environment_windows>
 
-<git_behavior>
+# Git Behavior
 
 - Read `skill:git-workflow` for git operations.
 - Avoid mutating Git unless explicitly asked.
@@ -53,8 +44,3 @@
 - Before committing, run `git status` and verify only this session's files are staged.
 - Never run `git reset --hard`, `git checkout .`, `git clean -fd`, `git stash`, or `git commit --no-verify`.
 - If rebase or merge conflicts occur, resolve only files you modified. If conflict touches other files, abort and ask.
-  </git_behavior>
-
-<user_override>
-If the user's instructions conflict with any rule in this document, ask for explicit confirmation before overriding. Only then execute their instructions.
-</user_override>
