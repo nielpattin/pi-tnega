@@ -65,7 +65,7 @@ agent-root/
 | oxlint     | `oxlint.config.ts`    | Linting                        |
 | oxfmt      | `oxfmt.config.ts`     | Formatting                     |
 | TypeScript | `tsconfig.json`       | Type checking                  |
-| Git hooks  | `.githooks/`            | Pre-commit lint-staged         |
+| Git hooks  | `.githooks/`          | Pre-commit lint-staged         |
 | pnpm       | `pnpm-workspace.yaml` | Package manager and workspaces |
 
 ## License

@@ -137,43 +137,43 @@ export interface TaskSpec {
 }
 
 // --- Tagged Error Classes (Effect Schema) ---
-export class CapacityError extends Schema.TaggedErrorClass<CapacityError>()("CapacityError", {
+export class CapacityError extends Schema.TaggedError<CapacityError>()("CapacityError", {
    message: Schema.String,
    limit: Schema.Number
 }) {}
 
-export class ConcurrencyLimitError extends Schema.TaggedErrorClass<ConcurrencyLimitError>()("ConcurrencyLimitError", {
+export class ConcurrencyLimitError extends Schema.TaggedError<ConcurrencyLimitError>()("ConcurrencyLimitError", {
    message: Schema.String,
    limit: Schema.Number
 }) {}
 
-export class AgentNotFoundError extends Schema.TaggedErrorClass<AgentNotFoundError>()("AgentNotFoundError", {
+export class AgentNotFoundError extends Schema.TaggedError<AgentNotFoundError>()("AgentNotFoundError", {
    message: Schema.String,
    agent: Schema.String
 }) {}
 
-export class SchemaConversionError extends Schema.TaggedErrorClass<SchemaConversionError>()("SchemaConversionError", {
+export class SchemaConversionError extends Schema.TaggedError<SchemaConversionError>()("SchemaConversionError", {
    message: Schema.String
 }) {}
 
-export class SchemaValidationError extends Schema.TaggedErrorClass<SchemaValidationError>()("SchemaValidationError", {
+export class SchemaValidationError extends Schema.TaggedError<SchemaValidationError>()("SchemaValidationError", {
    message: Schema.String
 }) {}
 
-export class ControlError extends Schema.TaggedErrorClass<ControlError>()("ControlError", {
+export class ControlError extends Schema.TaggedError<ControlError>()("ControlError", {
    message: Schema.String
 }) {}
 
-export class CancelError extends Schema.TaggedErrorClass<CancelError>()("CancelError", {
+export class CancelError extends Schema.TaggedError<CancelError>()("CancelError", {
    message: Schema.String
 }) {}
 
-export class DuplicateJobError extends Schema.TaggedErrorClass<DuplicateJobError>()("DuplicateJobError", {
+export class DuplicateJobError extends Schema.TaggedError<DuplicateJobError>()("DuplicateJobError", {
    message: Schema.String,
    id: Schema.String
 }) {}
 
-export class ManifestSerializationError extends Schema.TaggedErrorClass<ManifestSerializationError>()(
+export class ManifestSerializationError extends Schema.TaggedError<ManifestSerializationError>()(
    "ManifestSerializationError",
    {
       message: Schema.String,
@@ -181,7 +181,7 @@ export class ManifestSerializationError extends Schema.TaggedErrorClass<Manifest
    }
 ) {}
 
-export class ManifestPersistenceError extends Schema.TaggedErrorClass<ManifestPersistenceError>()(
+export class ManifestPersistenceError extends Schema.TaggedError<ManifestPersistenceError>()(
    "ManifestPersistenceError",
    {
       message: Schema.String,
@@ -189,7 +189,7 @@ export class ManifestPersistenceError extends Schema.TaggedErrorClass<ManifestPe
    }
 ) {}
 
-export class ParentSessionActivationError extends Schema.TaggedErrorClass<ParentSessionActivationError>()(
+export class ParentSessionActivationError extends Schema.TaggedError<ParentSessionActivationError>()(
    "ParentSessionActivationError",
    {
       message: Schema.String,

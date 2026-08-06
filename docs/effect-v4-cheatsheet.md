@@ -1,9 +1,8 @@
 # Effect v4 Cheatsheet (Repo-Wide Guide)
 
 > **Single Source of Truth** for Effect usage in this monorepo (`C:/Users/niel/.pi/agent`).
-> **Version:** Pinned to `effect@4.0.0-beta.101` across all Effect-using packages.
+> **Version:** Pinned to `effect@4.0.0-beta.104` across all Effect-using packages.
 > **Canonical idioms:** `repos/effect/LLMS.md` (vendored Effect source of truth). Prefer examples from that file and `repos/effect/ai-docs/**` over web search.
-> **Note:** Older per-extension docs under `extensions/*/docs/` are obsolete for Effect patterns. Use this file.
 
 ---
 
@@ -11,13 +10,12 @@
 
 Effect is the **async runtime core** for process lifecycle, fiber orchestration, concurrency caps, resource teardown, and typed errors.
 
-| Package                           | Key Usage                                                                                                                                          |
-| :-------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `extensions/tasks`                | Task lifecycle, `Context.Service` manager, `Scope` per task, `Stream` event pump, `waitInterest` / `Effect.ensuring`, `ManagedRuntime` + `runTool` |
-| `extensions/background-terminals` | Process supervision, `FiberSet` cleanup, `Deferred` settled signal, `Effect.callback` for child close, tree kill + `Scope` finalizers              |
-| `extensions/copy-all`             | `Effect.callback` for clipboard process, `Data.TaggedError`                                                                                        |
-| `extensions/ask-user`             | `Effect.tryPromise` + `runPromiseExit` for TUI prompts                                                                                             |
-| `extensions/pi-harbor` (planned)  | Unified `HarborLive` layer: jobs, processes, mail, vibe; same runtime boundary pattern                                                             |
+| Package / script                  | Key Usage                                                                                                               |
+| :-------------------------------- | :----------------------------------------------------------------------------------------------------------------------- |
+| `extensions/ask-user`             | `Effect.tryPromise` + `Effect.runPromiseExit` for TUI prompts                                                           |
+| `extensions/copy-all`             | `Effect.callback` for clipboard processes, `Data.TaggedError`                                                          |
+| `extensions/pi-harbor`            | `Context.Service`, `Layer`, `ManagedRuntime`, `Deferred`, `Effect.callback`, explicit `Scope`, and typed domain errors |
+| `scripts/sync-reference-repos.ts` | Effect CLI, `Schema`, `FileSystem`, `Stream`, and `ChildProcessSpawner`                                                 |
 
 ### When NOT to Use Effect
 
@@ -30,13 +28,16 @@ Effect is the **async runtime core** for process lifecycle, fiber orchestration,
 
 ```json
 "dependencies": {
-  "effect": "4.0.0-beta.101"
+  "effect": "4.0.0-beta.104"
+},
+"devDependencies": {
+  "@effect/platform-node": "4.0.0-beta.104"
 }
 ```
 
 - Pin exact version (no `^` / `~`) while on v4 beta.
 - TypeScript: project TS (do **not** install `@effect/tsgo`).
-- Imports: from `"effect"` only (e.g. `import { Effect, Context, Layer, Schema, Stream } from "effect"`).
+- Use `"effect"` for core APIs. Use documented subpaths such as `"effect/unstable/process"` and `"@effect/platform-node/..."` where required.
 
 ---
 
@@ -61,21 +62,16 @@ Use generator style. Attach behavior with combinators after the generator body.
 ```ts
 import { Effect, Schema } from "effect";
 
-export class SomeError extends Schema.TaggedErrorClass<SomeError>()("SomeError", {
+export class SomeError extends Schema.TaggedError<SomeError>()("SomeError", {
     message: Schema.String
 }) {}
 
-export const processItem = Effect.fn("processItem")(
-    function* (n: number): Effect.fn.Return<string, SomeError> {
-        yield* Effect.logInfo("Received number:", n);
-        if (n < 0) {
-            return yield* new SomeError({ message: "negative" });
-        }
-        return String(n);
-    },
-    Effect.catch((error) => Effect.logError(`failed: ${error}`))
-);
-// Pass extra combinators as extra args to Effect.fn — do NOT .pipe the Effect.fn result for those.
+export const processItem = Effect.fn("processItem")(function* (n: number): Effect.fn.Return<string, SomeError> {
+    if (n < 0) {
+        return yield* new SomeError({ message: "negative" });
+    }
+    return String(n);
+});
 ```
 
 ### 4.2 Creating effects
@@ -86,52 +82,38 @@ export const processItem = Effect.fn("processItem")(
 | Sync throw-prone             | `Effect.sync(() => ...)` / `Effect.try({ try, catch })`             |
 | Promise                      | `Effect.tryPromise({ try, catch })` / `Effect.promise`              |
 | Node callback / EventEmitter | `Effect.callback((resume) => { ...; return Effect.sync(cleanup) })` |
-| Optional                     | `Effect.fromOption` / `Effect.fromNullable` patterns as needed      |
 
 ### 4.3 Error model
 
-**Preferred for new code (LLMS.md):** `Schema.TaggedErrorClass`
+**Preferred for new code (LLMS.md):** `Schema.TaggedError`
 
 ```ts
 import { Schema } from "effect";
 
-export class SpawnError extends Schema.TaggedErrorClass<SpawnError>()("SpawnError", {
+export class SpawnError extends Schema.TaggedError<SpawnError>()("SpawnError", {
     message: Schema.String,
     cause: Schema.optional(Schema.Defect())
 }) {}
 ```
 
-**Existing repo code often uses:** `Data.TaggedError` (tasks / background-terminals / copy-all). Keep that shape when editing those files; prefer `Schema.TaggedErrorClass` in **new** packages (harbor).
-
-Catch:
-
-```ts
-effect.pipe(
-    Effect.catchTag("SpawnError", (e) => Effect.succeed(fallback)),
-    Effect.catch((e) => Effect.succeed(defaultValue))
-);
-```
+**Existing repo code uses:** `Data.TaggedError` in `extensions/copy-all`; Harbor and the sync script use `Schema.TaggedError`.
 
 ### 4.4 Schema for domain + validation
 
 All untrusted input validation goes through `Schema` (decode/encode). Avoid hand-rolled predicates for domain parsing.
 
 ```ts
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 
-export class User extends Schema.Class<User>("harbor/User")({
-    id: Schema.String,
-    name: Schema.NonEmptyString
-}) {}
-
-export const decodeUser = Schema.decodeUnknownEffect(User);
+const JsonSource = Schema.fromJsonString(Schema.Unknown);
+export const decodeJsonSource = Schema.decodeUnknownEffect(JsonSource);
 ```
 
 **Harbor note:** Pi tool _parameter_ schemas stay TypeBox (Pi SDK). Harbor _internal_ domain + `outputSchema` validation prefer Effect `Schema` where possible; TypeBox remains for tool JSON Schema surfaces.
 
 ### 4.5 Services: `Context.Service` + static `layer`
 
-Canonical shape from LLMS.md and tasks:
+Canonical shape for Harbor services:
 
 ```ts
 import { Context, Effect, Layer } from "effect";
@@ -172,30 +154,27 @@ const HarborLive = TaskManager.layer.pipe(
 - `Layer.provideMerge`: expose outer + provided services.
 - Root assembly: `ManagedRuntime.make(HarborLive)` in `runtime.ts`. Name the layer `HarborLive` (a `Layer`), not "ManagedRuntime".
 
-### 4.6 Resources: `Scope`, `acquireRelease`, finalizers
+### 4.6 Resources: explicit `Scope`
+
+Harbor creates an explicit scope for each external agent process, provides that scope to its polling effects, and closes it when the process settles or is cancelled.
 
 ```ts
-yield * Effect.addFinalizer(() => Effect.sync(() => cleanup()));
-
-const resource =
-    yield *
-    Effect.acquireRelease(
-        Effect.sync(() => openThing()),
-        (thing) => Effect.sync(() => thing.close())
-    );
+const scope = yield* Scope.make();
+yield* Scope.provide(work, scope);
+yield* Scope.close(scope, undefined as any);
 ```
 
-Per-job pattern (tasks / terminals): `Scope.make` per entry, `Scope.provide(Effect.forkScoped(work), scope)`, on settle `Scope.close(scope, Exit.void)`.
+Use `Effect.forkScoped` for work that must follow the lifetime of an enclosing scope.
 
 ### 4.7 Reservation + interest (concurrency caps)
 
-**Correct pattern (do not hold Mutex across async spawn):**
+TaskManager and ProcessSupervisor reserve capacity before spawning work:
 
-1. Synchronously check `running + reserved + n <= CAP` before first yield.
-2. Increment `reserved` (sync).
-3. Spawn async work.
-4. On register success: `running++`, `reserved--`.
-5. Always `reserved--` / interest release in `Effect.ensuring` (interrupt-safe).
+1. Check the current running count plus the incoming count before spawning.
+2. Increment the reservation synchronously.
+3. Spawn the async work.
+4. Convert the reservation into a running entry on success.
+5. Release the reservation in `Effect.ensuring` on every exit path.
 
 Track `waitInterest` and `killInterest`. Prune only when both are 0 and status is not `running`.
 
@@ -206,41 +185,24 @@ const wait = Effect.gen(function* () {
 });
 ```
 
-### 4.8 Fibers, FiberSet, Deferred, Queue, Stream
+### 4.8 Fibers, Deferred, and streams
 
-| Primitive                 | Use                                        |
-| :------------------------ | :----------------------------------------- |
-| `Effect.forkScoped`       | Background pump tied to job `Scope`        |
-| `FiberSet`                | Batch of cleanup fibers (terminals)        |
-| `Deferred`                | One-shot "process settled" / wait cell     |
-| `Queue`                   | Backend event buffers (`Stream.fromQueue`) |
-| `Stream.runForEach`       | Consume child session events               |
-| `Effect.runForkWith(ctx)` | Detached fork preserving manager services  |
+| Primitive           | Current use                                                                 |
+| :------------------ | :--------------------------------------------------------------------------- |
+| `Effect.forkScoped` | Background decoding work tied to a Harbor scope                         |
+| `Deferred`          | Job and process settlement signals                                       |
+| `Effect.runFork`    | Completing settlement deferreds from synchronous listener callbacks     |
+| `Stream`            | Concurrently collecting child-process stdout and stderr in the sync script |
 
-### 4.9 PubSub (mail / change bus)
-
-For multi-subscriber job-change or mail events:
+### 4.9 Interrupts and timeouts
 
 ```ts
-import { Effect, Layer, PubSub, Stream, Context } from "effect";
+yield* work.pipe(Effect.timeout("2000 millis"), Effect.ignore);
 
-const pubsub = yield * PubSub.bounded<JobEvent>({ capacity: 256, replay: 32 });
-yield * Effect.addFinalizer(() => PubSub.shutdown(pubsub));
-const subscribe = Stream.fromPubSub(pubsub);
+const exit = await Effect.runPromiseExit(effect, signal ? { signal } : undefined);
 ```
 
-MailBus can use per-recipient queues **or** PubSub + filter; prefer Effect primitives over raw `Set` of callbacks for new code.
-
-### 4.10 Interrupt, timeout, result
-
-```ts
-yield * child.interrupt.pipe(Effect.timeout("2 seconds"), Effect.ignore);
-const result = yield * work.pipe(Effect.result); // Result.success | Result.failure
-// Effect v4: Either renamed to Result
-import { Result } from "effect";
-```
-
-### 4.11 ManagedRuntime + tool boundary
+### 4.10 ManagedRuntime + tool boundary
 
 Pi tools are plain `async` functions. Bridge once:
 
@@ -266,32 +228,22 @@ export async function runTool<A, E>(
 }
 ```
 
-### 4.12 Child processes
+### 4.11 Child processes
 
-Repo pattern today: Node `spawn` + `Effect.callback` + tree kill helpers (copy from background-terminals).
+`pi-harbor` uses Node `spawn` wrapped with `Effect.callback` in `ShellExecutor` and `ProcessSupervisor`. The repository sync script uses `effect/unstable/process` and `ChildProcessSpawner` for Git subprocesses.
 
-Effect also documents `effect/unstable/process` + `ChildProcessSpawner` for Effect-native process APIs. Harbor Phase 1 copies the proven Node+callback pattern; Phase 3 may evaluate unstable process modules.
+### 4.12 Logging
 
-### 4.13 Logging / spans
-
-```ts
-yield * Effect.logInfo("spawn", { id });
-// Effect.fn("name") attaches withSpan automatically
-```
-
-### 4.14 Predicate module
-
-Do not invent `isRecord` / `isString` helpers. Use `Predicate` from `effect`.
+Use `Console.log` for CLI output in `scripts/sync-reference-repos.ts`. Keep Effect orchestration and process lifecycle inside the Effect program.
 
 ---
 
-## 5. v3 → v4 deltas that matter here
+## 5. Current repo conventions
 
-1. Platform modules merged into core `effect` where applicable.
-2. `Either` → `Result`.
-3. Services: `Context.Service` (not old Tag-only style for new code).
-4. Prefer `Schema.TaggedErrorClass` for new errors.
-5. Prefer `Effect.fn("Name.method")` for service methods.
+1. Use `Context.Service` with a static `layer` for Harbor services.
+2. Use `Schema.TaggedError` for Harbor and script domain errors.
+3. Use `Data.TaggedError` only where existing `copy-all` code already uses it.
+4. Prefer `Effect.fn("Name.method")` for named Effect functions.
 
 ---
 
@@ -301,9 +253,9 @@ When implementing `extensions/pi-harbor`, every service must:
 
 1. Use `Context.Service<Name, Shape>()("harbor/Name")` with `static layer`.
 2. Implement methods with `Effect.fn("Name.method")`.
-3. Use `Schema.TaggedErrorClass` for domain errors.
+3. Use `Schema.TaggedError` for domain errors.
 4. Reserve slots sync; release with `Effect.ensuring`.
-5. Use per-entry `Scope` + finalizers for children.
+5. Use an explicit per-entry `Scope` and close it when the child settles.
 6. Expose one `HarborLive` layer + `makeHarborRuntime()` + `runTool`.
 7. Keep TUI code outside Effect fibers (call into runtime only).
 
@@ -312,10 +264,12 @@ When implementing `extensions/pi-harbor`, every service must:
 ## 7. Verification
 
 ```bash
-pnpm --filter tasks check
-pnpm --filter background-terminals check
-pnpm --filter copy-all check
-pnpm --filter ask-user check
-# after harbor exists:
+pnpm typecheck
+pnpm lint
+pnpm fmt
+git diff --check
+pnpm --dir extensions/ask-user check
+pnpm --dir extensions/copy-all check
 pnpm --dir extensions/pi-harbor check
+pnpm sync:repos --dry-run
 ```

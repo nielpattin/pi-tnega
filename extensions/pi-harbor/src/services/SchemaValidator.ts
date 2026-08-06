@@ -22,8 +22,7 @@ export class SchemaValidator extends Context.Service<SchemaValidator, SchemaVali
             return yield* Effect.try({
                try: () => {
                   const document = JsonSchema.fromSchemaDraft2020_12(jsonSchemaDoc as any);
-                  const representation = SchemaRepresentation.fromJsonSchemaDocument(document);
-                  return SchemaRepresentation.toSchema(representation) as Schema.Schema<any>;
+                  return SchemaRepresentation.fromJsonSchemaDocument(document) as Schema.Schema<any>;
                },
                catch: (cause) =>
                   new SchemaConversionError({
