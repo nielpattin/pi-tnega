@@ -16,7 +16,6 @@ This document provides the full contributor workflow for developing and publishi
     - [`pi-harbor`](./extensions/pi-harbor): Agent jobs, Agy/Pi harnesses, process supervision, inter-agent messaging, Vibe mode, and the `/tasks` dashboard.
 - **Workflow & Automation Tools**:
     - `.github/workflows/publish.yml`: GitHub Actions manual tag-based package publish workflow.
-    - `hooks/`: Plain Git hooks (`pre-commit` runs `lint-staged`), enabled via `core.hooksPath`.
     - `scripts/`:
         - `release.mjs`: Legacy single-package release orchestrator.
     - `publish.sh`: Helper script to trigger GitHub workflow dispatch for package releases.
@@ -27,8 +26,6 @@ This document provides the full contributor workflow for developing and publishi
 agent-root/
 ├── .github/workflows/
 │   └── publish.yml               # exact manual npm publish
-├── hooks/
-│   └── pre-commit                # pnpm lint-staged
 ├── .nvmrc                        # Node 24
 ├── openspec/                     # change proposals and specs
 ├── extensions/
@@ -56,6 +53,14 @@ Install dependencies for all workspace packages from the root directory:
 
 ```bash
 pnpm install
+```
+
+### Git Hooks
+
+Git runs the pre-commit hook from its default location `.git/hooks/` (no config needed). The hook runs `pnpm lint-staged`; because hooks are not versioned, recreate it on a fresh clone:
+
+```bash
+printf '#!/usr/bin/env sh\n\npnpm lint-staged --concurrent false --relative\n' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 ```
 
 ---
