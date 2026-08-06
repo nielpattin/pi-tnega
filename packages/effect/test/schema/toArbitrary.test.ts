@@ -1,4 +1,4 @@
-import { BigDecimal, Chunk, DateTime, Effect, HashMap, HashSet, Option, Order, Schema, SchemaIssue } from "effect"
+import { BigDecimal, Chunk, DateTime, Effect, HashMap, HashSet, Order, Schema, SchemaIssue } from "effect"
 import { FastCheck, TestSchema } from "effect/testing"
 import { describe, it } from "vitest"
 import { assertInclude, assertInstanceOf, deepStrictEqual, strictEqual, throws } from "../utils/assert.ts"
@@ -55,7 +55,7 @@ function CustomArray<A extends Schema.Constraint>(
     () => (input, ast) =>
       globalThis.Array.isArray(input)
         ? Effect.succeed(input as ReadonlyArray<A["Type"]>)
-        : Effect.fail(new SchemaIssue.InvalidType(ast, Option.some(input))),
+        : Effect.fail(new SchemaIssue.InvalidType(ast)),
     { toArbitrary }
   )
 }
@@ -283,7 +283,7 @@ describe("Arbitrary generation", () => {
       const result = Schema.toArbitrary(schema, { report: true })
 
       deepStrictEqual(result.report.warnings, [])
-      FastCheck.assert(FastCheck.property(result.value, (s) => s === "a"), { numRuns: 20 })
+      FastCheck.assert(FastCheck.property(result.value, (s) => s.startsWith("a") && s.endsWith("a")), { numRuns: 20 })
     })
 
     it("should not report warnings for constructive built-in filters", () => {
@@ -590,6 +590,18 @@ describe("Arbitrary generation", () => {
       verifyGeneration(
         Schema.Tuple([Schema.String, Schema.optional(Schema.Number)])
       )
+    })
+
+    it("generates values valid for optional tuple positions", () => {
+      const schema = Schema.Tuple([
+        Schema.optionalKey(Schema.String),
+        Schema.optionalKey(Schema.Number)
+      ])
+
+      FastCheck.assert(FastCheck.property(Schema.toArbitrary(schema), Schema.is(schema)), {
+        numRuns: 100,
+        seed: 17
+      })
     })
   })
 
@@ -1154,10 +1166,6 @@ describe("Arbitrary generation", () => {
       })))
     })
 
-    it("DateValid", () => {
-      verifyGeneration(Schema.DateValid)
-    })
-
     it("isGreaterThanOrEqualToBigInt", () => {
       verifyGeneration(Schema.BigInt.check(Schema.isGreaterThanOrEqualToBigInt(BigInt(0))))
     })
@@ -1221,7 +1229,7 @@ describe("Arbitrary generation", () => {
 
     it("non-natural Date order", () => {
       const order = Order.flip(Order.Date)
-      verifyGeneration(Schema.DateValid.check(Schema.makeIsGreaterThan({ order })(new Date(0))))
+      verifyGeneration(Schema.Date.check(Schema.makeIsGreaterThan({ order })(new Date(0))))
     })
 
     it("non-natural BigInt order", () => {
@@ -1418,6 +1426,12 @@ describe("Arbitrary generation", () => {
       verifyGeneration(Schema.String.check(Schema.isEndsWith("a")))
     })
 
+    it("literal string checks with regexp syntax", () => {
+      verifyGeneration(Schema.String.check(Schema.isStartsWith("a.b")))
+      verifyGeneration(Schema.String.check(Schema.isEndsWith("a+b")))
+      verifyGeneration(Schema.String.check(Schema.isIncludes("[")))
+    })
+
     it("Number", () => {
       verifyGeneration(Schema.Number)
     })
@@ -1530,17 +1544,9 @@ describe("Arbitrary generation", () => {
       })))
     })
 
-    it("isValidDate", () => {
-      verifyGeneration(Schema.Date.check(Schema.isDateValid()))
-    })
-
-    it("isValidDate & isGreaterThanOrEqualToDate", () => {
-      verifyGeneration(Schema.Date.check(Schema.isDateValid(), Schema.isGreaterThanOrEqualToDate(new Date(0))))
-    })
-
     it("Date with non-natural order", () => {
       const order = Order.flip(Order.Date)
-      verifyGeneration(Schema.DateValid.check(Schema.makeIsGreaterThan({ order })(new Date(0))))
+      verifyGeneration(Schema.Date.check(Schema.makeIsGreaterThan({ order })(new Date(0))))
     })
 
     it("isGreaterThanOrEqualToBigInt", () => {
