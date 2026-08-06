@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 type ChildProcess = ReturnType<typeof spawn>;
 
 export function buildAgyArgv(params: {
+   agent?: string;
    model?: string;
    effort?: string;
    cwd?: string;
@@ -17,6 +18,9 @@ export function buildAgyArgv(params: {
    prompt: string;
 }): string[] {
    const argv: string[] = [];
+   if (params.agent && !params.conversationId) {
+      argv.push("--agent", params.agent);
+   }
    if (params.model) {
       argv.push("--model", params.model);
    }
@@ -40,6 +44,7 @@ export function buildAgyArgv(params: {
 }
 
 export interface AgyOneShotParams {
+   agent?: string;
    model?: string;
    effort?: string;
    cwd?: string;
@@ -60,6 +65,7 @@ export interface AgyOneShotResult {
 
 export interface CreateAgyFsmSessionOptions {
    id?: string;
+   agent?: string;
    model?: string;
    effort?: string;
    cwd?: string;
@@ -202,6 +208,7 @@ export function createAgyFsmSession(options: CreateAgyFsmSessionOptions): AgyFsm
       const generation = ++processGeneration;
       startLogPoller();
       const argv = buildAgyArgv({
+         agent: options.agent,
          model: options.model,
          effort: options.effort,
          cwd: options.cwd,
@@ -245,9 +252,10 @@ export function createAgyFsmSession(options: CreateAgyFsmSessionOptions): AgyFsm
          );
          activeProc = proc;
       } else if (options.executor) {
-         const spawnEff = options.executor.spawnProcess(commandString, {
+         const spawnEff = options.executor.spawnProcess("agy", {
             cwd: options.cwd,
-            env: { HARBOR_CHILD_SESSION: "1" }
+            env: { HARBOR_CHILD_SESSION: "1" },
+            args: argv
          });
          void Effect.runPromise(spawnEff).then(
             (child: ChildProcess) => {
@@ -479,7 +487,7 @@ export function createAgyFsmSession(options: CreateAgyFsmSessionOptions): AgyFsm
 }
 
 export interface AgyBackendShape {
-   readonly runOneShot: (params: AgyOneShotParams) => Effect.Effect<AgyOneShotResult>;
+   readonly runOneShot: (params: AgyOneShotParams) => Effect.Effect<AgyOneShotResult, Error>;
    readonly createFsmSession: (options: CreateAgyFsmSessionOptions) => AgyFsmSession;
 }
 
@@ -490,18 +498,21 @@ export class AgyBackend extends Context.Service<AgyBackend, AgyBackendShape>()("
          const executor = yield* ShellExecutor;
 
          const runOneShot = Effect.fn("AgyBackend.runOneShot")(function* (params) {
+            const argv = params.overrideCommand ? undefined : buildAgyArgv(params);
             let commandString: string;
             if (params.overrideCommand) {
                commandString = params.overrideCommand;
             } else {
-               const argv = buildAgyArgv(params);
-               const escapedArgv = argv.map((a) => (a.includes(" ") ? `"${a}"` : a));
+               const escapedArgv = argv!.map((a) => (a.includes(" ") ? `"${a}"` : a));
                commandString = `agy ${escapedArgv.join(" ")}`;
             }
 
-            const child = yield* executor.spawnProcess(commandString, {
+            const child = yield* executor.spawnProcess(params.overrideCommand ? commandString : "agy", {
                cwd: params.cwd,
-               env: { HARBOR_CHILD_SESSION: "1" }
+               env: { HARBOR_CHILD_SESSION: "1" },
+               ...(params.overrideCommand
+                  ? { shell: process.platform === "win32" ? (process.env.ComSpec ?? "cmd.exe") : undefined }
+                  : { args: argv! })
             });
 
             let stdout = "";

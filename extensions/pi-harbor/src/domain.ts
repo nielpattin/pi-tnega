@@ -51,8 +51,10 @@ export interface Job {
    readonly model?: string;
    readonly thinking?: string;
    readonly cwd?: string;
-   readonly origin?: "standard" | "vibe" | "btw";
+   readonly origin?: "standard" | "btw";
    readonly promptOrCommand: string;
+   /** Captured worker system prompt for takeover display only. */
+   systemPrompt?: string;
    status: JobStatus;
    readonly createdAt: number;
    startedAt?: number;
@@ -62,7 +64,7 @@ export interface Job {
    signal?: string;
    resultData?: unknown;
    errorText?: string;
-   rawText?: string;
+   /** Semantic worker trace used by takeover, including Agy tool steps. */
    transcript?: ReadonlyArray<JobTranscriptEntry>;
    waitInterest: number;
    killInterest: number;
@@ -93,20 +95,12 @@ export interface ProcessEntry {
    settledAt?: number;
    exitCode?: number;
    signal?: string;
+   errorText?: string;
+   resultText?: string;
    stdoutBytes: number;
    stderrBytes: number;
    processWaitInterest: number;
    processKillInterest: number;
-}
-
-export interface MailboxMessage {
-   readonly id: string;
-   readonly senderId: string;
-   readonly recipientId: string;
-   readonly payload: string;
-   readonly replyTo?: string;
-   readonly timestamp: number;
-   readonly consumed: boolean;
 }
 
 export interface AgentDefinition {
@@ -118,8 +112,6 @@ export interface AgentDefinition {
    readonly harness: HarnessName;
    readonly enabled: boolean;
    readonly source: "builtin" | "global" | "project";
-   /** Vibe director profiles (fast/good) live in the same agents list with a [vibe] tag. */
-   readonly kind?: "agent" | "vibe";
    readonly body: string;
    readonly model?: string;
    readonly thinking?: string;
@@ -136,14 +128,11 @@ export interface TaskSpec {
    model?: string;
    thinking?: string;
    tools?: readonly string[];
-   /** Internal harness override used by vibe profiles. */
-   harness?: HarnessName;
-   /** Internal worker system-prompt override. Empty vibe body inherits the parent prompt. */
-   systemPrompt?: string;
+   /** Internal harness override used by task profiles. */ harness?: HarnessName;
+   /** Internal worker system-prompt override. */ systemPrompt?: string;
    cwd?: string;
    outputSchema?: unknown;
-   /** Provider-facing name for background execution. Normalized to `async` internally. */
-   background?: boolean;
+   /** Harbor tasks always run in the background; results are delivered automatically. */
    async?: boolean;
 }
 
@@ -216,7 +205,7 @@ export function formatJobId(seq: number): string {
 }
 
 export function formatProcessId(seq: number): string {
-   return `bash-${seq}`;
+   return `process-${seq}`;
 }
 
 export function normalizeTaskSpecs(params: any): TaskSpec[] {
@@ -226,9 +215,9 @@ export function normalizeTaskSpecs(params: any): TaskSpec[] {
       agent: spec.agent,
       model: spec.model,
       outputSchema: spec.outputSchema,
-      // `async` remains an internal compatibility field. The provider-facing
-      // task contract calls this behavior `background`.
-      async: spec.background === true || spec.async === true
+      // Harbor tasks are always async: the parent never blocks waiting for a
+      // worker. Results arrive automatically when the worker settles.
+      async: true
    });
 
    if (Array.isArray(params?.tasks)) {

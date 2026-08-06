@@ -3,18 +3,18 @@
  *
  * Product gate (must be true before calling "done"):
  * - tools register with execute handlers that call HarborLive + runTool
- * - commands register real handlers (tasks/agents text, vibe toggle, btw spawn)
+ * - commands register real handlers (tasks/agents text, btw spawn)
  * - cutover fails closed without legacy force-excludes
  * - session_start enforces parent vs worker surfaces
  */
 
 import type { ExtensionAPI, ExtensionContext, SessionStartEvent } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, keyHint } from "@earendil-works/pi-coding-agent";
-import { Effect } from "effect";
-import { Box, Text } from "@earendil-works/pi-tui";
+import { Box, Text, type Component, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeHarborRuntime, runTool } from "./runtime.js";
+import { buildWorkerSystemPrompt as orderWorkerSystemPrompt } from "./backends/pi.js";
 import { JobRegistry } from "./services/JobRegistry.js";
 import { ProcessSupervisor } from "./services/ProcessSupervisor.js";
 import { TaskManager } from "./services/TaskManager.js";
@@ -24,7 +24,6 @@ import {
    flushPendingWrites
 } from "./services/HarborJobRecovery.js";
 import { createDeferredResultDelivery } from "./services/ResultDelivery.js";
-import { VibeState, isDirectorTool } from "./services/VibeState.js";
 import { AgentsStore } from "./services/AgentsStore.js";
 import {
    handleTask,
@@ -34,24 +33,37 @@ import {
    TASK_TOOL_BASE_PROMPT_GUIDELINES,
    augmentTaskToolMetadata
 } from "./tools/task.js";
-import { handleHub, ParentHubToolParamsSchema, WorkerHubToolParamsSchema } from "./tools/hub.js";
+import { handleJobCancel, handleJobList, JobCancelToolParamsSchema, JobListToolParamsSchema } from "./tools/jobs.js";
+import {
+   handleProcessRestart,
+   handleProcessSnapshot,
+   handleProcessStart,
+   ProcessRestartToolParamsSchema,
+   ProcessSnapshotToolParamsSchema,
+   ProcessStartToolParamsSchema
+} from "./tools/process.js";
 import { handleSubmit, SubmitToolParamsSchema } from "./tools/submit.js";
-import { VibeToolParamsSchema, type VibeToolParams } from "./tools/vibe.js";
-import { handleVibeCommand } from "./commands/vibe.js";
 import { handleBtwCommand, formatBtwResultEntry } from "./commands/btw.js";
 import { formatJobTable, formatProcessTable } from "./ui/formatters.js";
 import { buildAgentsPanelViewModel, openAgentsPanel } from "./ui/agents-panel.js";
 import { openTasksDashboard } from "./ui/tasks-dashboard.js";
 import { ASYNC_TASK_WIDGET_KEY, createAsyncTaskWidget, summarizeAsyncTaskStatus } from "./ui/async-task-widget.js";
 import {
-   renderHubCall,
-   renderHubResult,
+   renderJobCancelCall,
+   renderJobCancelResult,
+   renderJobListCall,
+   renderJobListResult,
+   renderProcessRestartCall,
+   renderProcessRestartResult,
+   renderProcessSnapshotCall,
+   renderProcessSnapshotResult,
+   renderProcessStartCall,
+   renderProcessStartResult,
    renderTaskCall,
    renderTaskResult,
-   renderVibeCall,
-   renderVibeResult
+   taskTraceLines
 } from "./ui/tool-renderers.js";
-import type { Job } from "./domain.js";
+import type { Job, ProcessEntry } from "./domain.js";
 
 export type HarborRuntime = ReturnType<typeof makeHarborRuntime>;
 
@@ -75,50 +87,44 @@ function loadSettingsExtensionsFromDisk(): string[] {
    }
 }
 
-const MODEL_TOOL_STRING_LIMIT = 2_000;
-const MODEL_TOOL_ARRAY_LIMIT = 8;
-const MODEL_TOOL_CONTENT_LIMIT = 16_000;
-const MODEL_TOOL_OMITTED_KEYS = new Set(["rawText", "transcript", "promptOrCommand"]);
+class LimitedText implements Component {
+   constructor(
+      private readonly text: string,
+      private readonly maxLines: number,
+      private readonly overflowLines?: (hiddenLines: number) => ReadonlyArray<string>,
+      private readonly showOverflowWhenVisible = false
+   ) {}
 
-function compactModelValue(value: unknown, depth = 0): unknown {
-   if (typeof value === "string") {
-      return value.length <= MODEL_TOOL_STRING_LIMIT
-         ? value
-         : `${value.slice(0, MODEL_TOOL_STRING_LIMIT)}\n… [truncated ${value.length - MODEL_TOOL_STRING_LIMIT} characters]`;
+   render(width: number): string[] {
+      const wrapped = wrapTextWithAnsi(this.text, Math.max(1, width));
+      const visible = wrapped.slice(0, this.maxLines);
+      const hiddenLines = Math.max(0, wrapped.length - visible.length);
+      if (this.overflowLines && (hiddenLines > 0 || this.showOverflowWhenVisible)) {
+         visible.push(...this.overflowLines(hiddenLines));
+      }
+      return visible;
    }
-   if (value === null || typeof value !== "object") return value;
-   if (depth >= 5) return "[nested value omitted]";
-   if (Array.isArray(value)) {
-      const compact = value.slice(0, MODEL_TOOL_ARRAY_LIMIT).map((item) => compactModelValue(item, depth + 1));
-      if (value.length > MODEL_TOOL_ARRAY_LIMIT)
-         compact.push(`… [${value.length - MODEL_TOOL_ARRAY_LIMIT} more items]`);
-      return compact;
-   }
-   const compact: Record<string, unknown> = {};
-   for (const [key, item] of Object.entries(value)) {
-      if (!MODEL_TOOL_OMITTED_KEYS.has(key)) compact[key] = compactModelValue(item, depth + 1);
-   }
-   return compact;
+
+   invalidate(): void {}
 }
 
-function modelFacingText(payload: unknown): string {
-   const compact = compactModelValue(payload);
-   const text = typeof compact === "string" ? compact : JSON.stringify(compact, null, 2);
-   if (text.length <= MODEL_TOOL_CONTENT_LIMIT) return text;
-   return JSON.stringify(
-      {
-         ok: typeof payload === "object" && payload !== null && "ok" in payload ? payload.ok : true,
-         truncated: true,
-         message: "Tool result exceeded the model-facing output limit. Expand the tool row for full details."
-      },
-      null,
-      2
-   );
+function fullResultText(payload: unknown): string {
+   if (typeof payload === "string") return payload;
+   return JSON.stringify(payload, null, 2) ?? String(payload);
+}
+
+function collapsedResultText(payload: unknown): string {
+   if (typeof payload === "string") return payload;
+   if (payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
+      const summary = (payload as { summary?: unknown }).summary;
+      if (typeof summary === "string") return summary;
+   }
+   return fullResultText(payload);
 }
 
 function asTextResult(payload: unknown) {
    return {
-      content: [{ type: "text" as const, text: modelFacingText(payload) }],
+      content: [{ type: "text" as const, text: fullResultText(payload) }],
       details: payload
    };
 }
@@ -128,66 +134,6 @@ function asErrorResult(message: string) {
       content: [{ type: "text" as const, text: message }],
       details: { ok: false, error: message }
    };
-}
-
-/**
- * Build the model-facing response for an explicit `hub wait` on task jobs.
- *
- * Because `modelFacingText`/`compactModelValue` depth counting starts at the
- * root of the payload, returning a full `{ ok: true, jobs: [...] }` envelope
- * pushes `resultData` several levels deep and causes ordinary nested results to
- * be replaced with `[nested value omitted]`. This helper surfaces each job's
- * bounded output directly, resetting the depth budget for the actual result
- * while keeping the full job records in `details` for UI rendering.
- */
-function asHubWaitResult(jobs: ReadonlyArray<Job>) {
-   const outputs = jobs.map((job) => {
-      const output = job.errorText ?? job.resultData ?? "(no result returned)";
-      return {
-         id: job.id,
-         name: job.name,
-         status: job.status,
-         output: modelFacingText(output)
-      };
-   });
-
-   let text: string;
-   if (outputs.length === 1) {
-      text = outputs[0].output;
-   } else {
-      text = outputs.map((o) => `Job ${o.id} (${o.status}):\n${o.output}`).join("\n\n");
-   }
-
-   if (text.length > MODEL_TOOL_CONTENT_LIMIT) {
-      text = JSON.stringify(
-         {
-            ok: true,
-            truncated: true,
-            message: "Hub wait result exceeded the model-facing output limit. Expand the tool row for full details."
-         },
-         null,
-         2
-      );
-   }
-
-   return {
-      content: [{ type: "text" as const, text }],
-      details: { ok: true, jobs }
-   };
-}
-
-function customEntries(ctx: ExtensionContext): Array<{ customType?: string; data?: unknown }> {
-   try {
-      return ctx.sessionManager.getEntries().map((entry) => {
-         const anyEntry = entry as { type?: string; customType?: string; data?: unknown };
-         if (anyEntry.type === "custom") {
-            return { customType: anyEntry.customType, data: anyEntry.data };
-         }
-         return { customType: anyEntry.customType, data: anyEntry.data };
-      });
-   } catch {
-      return [];
-   }
 }
 
 function registerWorkerTools(pi: ExtensionAPI, runtime: HarborRuntime): void {
@@ -209,41 +155,10 @@ function registerWorkerTools(pi: ExtensionAPI, runtime: HarborRuntime): void {
          }
       }
    });
-
-   pi.registerTool({
-      name: "hub",
-      label: "Hub",
-      description:
-         "Run synchronous shell commands and exchange worker mailbox messages with exec, send, inbox, list, and wait-from operations.",
-      promptSnippet: "Run synchronous worker shell commands and exchange mailbox messages.",
-      promptGuidelines: [
-         "Use hub exec for synchronous shell commands in Pi worker sessions; hub async execution is unavailable to workers.",
-         "Use hub send, inbox, list, and wait-from only for worker mailbox communication.",
-         "Worker hub list returns mailbox peers. It does not return parent task jobs or OS processes."
-      ],
-      parameters: WorkerHubToolParamsSchema,
-      renderCall: renderHubCall,
-      renderResult: renderHubResult,
-      async execute(_toolCallId, params, signal) {
-         try {
-            const result = await runTool(
-               runtime,
-               handleHub(params, {
-                  isWorker: true
-               }),
-               { signal, interruptMessage: "hub aborted" }
-            );
-            return asTextResult(result);
-         } catch (err) {
-            return asErrorResult(err instanceof Error ? err.message : String(err));
-         }
-      }
-   });
 }
 
 interface ParentToolDelivery {
    readonly ready: Promise<void>;
-   readonly consume: (ids: Iterable<string>) => void;
    readonly notifyAsyncWidget: (ctx: ExtensionContext) => void;
 }
 
@@ -298,8 +213,13 @@ interface TaskToolAugmentation {
    readonly additionalGuidelines: ReadonlyArray<string>;
 }
 
+const EMPTY_TASK_TOOL_AUGMENTATION: TaskToolAugmentation = {
+   descriptionAppendix: "",
+   additionalGuidelines: []
+};
+
 async function resolveTaskToolAugmentation(runtime: HarborRuntime, cwd?: string): Promise<TaskToolAugmentation> {
-   if (!cwd) return { descriptionAppendix: "", additionalGuidelines: [] };
+   if (!cwd) return EMPTY_TASK_TOOL_AUGMENTATION;
    try {
       const agents = await runTool(
          runtime,
@@ -307,7 +227,7 @@ async function resolveTaskToolAugmentation(runtime: HarborRuntime, cwd?: string)
       );
       return augmentTaskToolMetadata(agents);
    } catch {
-      return { descriptionAppendix: "", additionalGuidelines: [] };
+      return EMPTY_TASK_TOOL_AUGMENTATION;
    }
 }
 
@@ -315,12 +235,12 @@ function createTaskToolDefinition(
    runtime: HarborRuntime,
    delivery: ParentToolDelivery,
    augmentation: TaskToolAugmentation
-) {
+): any {
    const description = augmentation.descriptionAppendix
       ? `${TASK_TOOL_BASE_DESCRIPTION}\n\n${augmentation.descriptionAppendix}`
       : TASK_TOOL_BASE_DESCRIPTION;
    return {
-      name: "task" as const,
+      name: "task_spawn" as const,
       label: "Task",
       description,
       promptSnippet: TASK_TOOL_BASE_PROMPT_SNIPPET,
@@ -332,7 +252,7 @@ function createTaskToolDefinition(
          _toolCallId: string,
          params: any,
          signal: AbortSignal | undefined,
-         onUpdate: any,
+         _onUpdate: any,
          ctx: ExtensionContext
       ) {
          try {
@@ -345,8 +265,7 @@ function createTaskToolDefinition(
                   parentSessionFile: ctx.sessionManager.getSessionFile?.(),
                   modelRegistry: ctx.modelRegistry,
                   inheritedModel: ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined,
-                  cwd: ctx.cwd,
-                  onUpdate: (summary) => onUpdate?.(asTextResult(summary))
+                  cwd: ctx.cwd
                }),
                { signal, interruptMessage: "task aborted" }
             );
@@ -359,150 +278,147 @@ function createTaskToolDefinition(
    };
 }
 
-function registerParentTools(pi: ExtensionAPI, runtime: HarborRuntime, delivery: ParentToolDelivery): void {
-   pi.registerTool(createTaskToolDefinition(runtime, delivery, { descriptionAppendix: "", additionalGuidelines: [] }));
+const TASK_JOB_PROMPT_GUIDELINES = [
+   "Use job_list to see task and process job status.",
+   "Use job_cancel with a task job ID to cancel a delegated task."
+];
 
-   // Parent hub overrides worker hub with full ops (same name; last register wins on load order).
-   // We keep a single hub tool that detects worker via options at call sites.
-   pi.registerTool({
-      name: "hub",
-      label: "Hub",
-      description:
-         "Monitor agent jobs, wait for task results, supervise named OS processes, run shell commands, and exchange mailbox messages. Use jobs/describe/wait/cancel for jobs; ps/start/logs/stop/restart for processes; send/inbox/list/wait-from for messages.",
-      promptSnippet: "Monitor task jobs, supervise named processes, execute shell commands, and exchange messages.",
-      promptGuidelines: [
-         'Use hub { op: "jobs" } to list agent jobs and hub { op: "describe", id: "task-1" } to inspect one job.',
-         'Background task results arrive automatically. Use hub { op: "wait", target: "jobs", ids: ["task-1"] } only for manual recovery or explicitly requested blocking. Call hub wait alone in its tool batch.',
-         "Use hub process operations with process names. hub logs, stop, restart, and process describe do not accept task job ids.",
-         'Use hub { op: "ps" } to list supervised OS processes. hub { op: "list" } lists mailbox peers, not jobs or processes.',
-         "Hub has no status, get-status, peek, message, or log operation. Use hub jobs, describe, wait, send, or logs as documented."
-      ],
-      parameters: ParentHubToolParamsSchema,
-      renderCall: renderHubCall,
-      renderResult: renderHubResult,
-      async execute(_toolCallId, params, signal) {
+const PROCESS_JOB_PROMPT_GUIDELINES = [
+   'Use process_start ONLY for never-ending services that run until stopped, for example { name: "api", command: "pnpm dev" }. For one-shot checks (pnpm lint, pnpm exec tsc --noEmit, pnpm fmt, git diff --check) use bash.',
+   "process_start creates a retained process-N job. It is not a one-shot shell.",
+   "Use process_snapshot with a process job ID to read a retained process job.",
+   "Use job_cancel with a process job ID to stop a retained process job.",
+   "Use process_restart with a process job ID to restart a retained process job."
+];
+
+const JOB_CANCEL_PROMPT_GUIDELINES = [
+   "Use job_cancel with a task job ID to cancel a delegated task.",
+   "Use job_cancel with a process job ID to stop a long-running process."
+];
+
+interface ParentActionToolDefinition {
+   readonly name: string;
+   readonly label: string;
+   readonly description: string;
+   readonly promptSnippet: string;
+   readonly promptGuidelines: ReadonlyArray<string>;
+   readonly parameters: any;
+   readonly renderCall: any;
+   readonly renderResult: any;
+   readonly handler: (params: any) => any;
+   readonly interruptMessage: string;
+}
+
+function createParentActionToolDefinition(
+   runtime: HarborRuntime,
+   delivery: ParentToolDelivery,
+   definition: ParentActionToolDefinition
+) {
+   return {
+      name: definition.name,
+      label: definition.label,
+      description: definition.description,
+      promptSnippet: definition.promptSnippet,
+      promptGuidelines: [...definition.promptGuidelines],
+      parameters: definition.parameters,
+      renderCall: definition.renderCall,
+      renderResult: definition.renderResult,
+      async execute(_toolCallId: string, params: any, signal: AbortSignal | undefined) {
          try {
-            const result = await runTool(runtime, handleHub(params, { isWorker: false }), {
+            await delivery.ready;
+            const result = await runTool(runtime, definition.handler(params), {
                signal,
-               interruptMessage: "hub aborted"
+               interruptMessage: definition.interruptMessage
             });
-            if (params.op === "wait" && params.target === "jobs") {
-               delivery.consume(params.ids);
-               const hubResult = result as { ok?: boolean; jobs?: Job[] };
-               if (hubResult.ok === true && Array.isArray(hubResult.jobs)) {
-                  return asHubWaitResult(hubResult.jobs);
-               }
-            }
             return asTextResult(result);
          } catch (err) {
             return asErrorResult(err instanceof Error ? err.message : String(err));
          }
       }
-   });
-
-   pi.registerTool({
-      name: "vibe",
-      label: "Vibe",
-      description:
-         "Control Vibe Director workers with spawn, send, wait, kill, and list operations. Use fast or good for spawn and reuse returned session handles for later operations. Available only while Vibe mode is active.",
-      promptSnippet: "Control Vibe workers with spawn, send, wait, kill, and list operations.",
-      promptGuidelines: [
-         'Use vibe { op: "spawn", cli: "fast" | "good", prompt: "..." } to delegate work and retain the returned session handle.',
-         'Use vibe { op: "wait", sessions: ["session-id"] } before depending on a worker result.',
-         "Use vibe send mode steer to interrupt current work and followUp to queue instructions after the current turn.",
-         "Use vibe kill only for an active returned session handle."
-      ],
-      parameters: VibeToolParamsSchema,
-      renderCall: renderVibeCall,
-      renderResult: renderVibeResult,
-      async execute(_toolCallId, rawParams, signal, _onUpdate, ctx) {
-         try {
-            await runTool(runtime, ensureParentSessionRecovery(ctx.sessionManager.getSessionFile?.()));
-            const params = rawParams as VibeToolParams;
-            if (params.op === "spawn") {
-               const vibes = await runTool(
-                  runtime,
-                  AgentsStore.use((store) => store.getVibeProfiles())
-               );
-               const profile = vibes[params.cli] ?? vibes.fast;
-               const harness = profile.harness ?? "pi";
-               const activeProfile = harness === "pi" ? profile.pi : profile.agy;
-               const blockedTools = new Set(["task", "vibe"]);
-               const tools = [...(activeProfile?.tools ?? profile.tools ?? [])].filter(
-                  (tool) => !blockedTools.has(tool)
-               );
-               for (const required of ["submit", "hub"]) {
-                  if (!tools.includes(required)) tools.push(required);
-               }
-               const profileBody = activeProfile?.body ?? profile.body;
-               const systemPrompt = profileBody?.trim() ? profileBody : ctx.getSystemPrompt();
-               const job = await runTool(
-                  runtime,
-                  TaskManager.use((manager) =>
-                     manager.spawnTask(
-                        {
-                           task: params.prompt,
-                           name: params.name ?? `vibe-${params.cli}`,
-                           model: activeProfile?.model,
-                           thinking: activeProfile?.reasoning_effort,
-                           tools,
-                           harness,
-                           systemPrompt
-                        },
-                        {
-                           ownerSessionId: ctx.sessionManager.getSessionId?.() ?? "parent",
-                           origin: "vibe",
-                           parentSessionFile: ctx.sessionManager.getSessionFile?.()
-                        }
-                     )
-                  ),
-                  { signal, interruptMessage: "vibe spawn aborted" }
-               );
-               return asTextResult({ ok: true, id: job.id, title: job.name, harness, status: job.status });
-            }
-
-            if (params.op === "send") {
-               await runTool(
-                  runtime,
-                  TaskManager.use((manager) =>
-                     manager.controlJob(params.session, params.message, params.mode ?? "followUp")
-                  ),
-                  { signal, interruptMessage: "vibe send aborted" }
-               );
-               return asTextResult({ ok: true, session: params.session, delivered: true });
-            }
-
-            if (params.op === "wait") {
-               const settled = await runTool(
-                  runtime,
-                  JobRegistry.use((registry) => registry.awaitSettlement(params.sessions ?? [], params.timeout)),
-                  { signal, interruptMessage: "vibe wait aborted" }
-               );
-               return asTextResult({ ok: true, jobs: settled });
-            }
-
-            if (params.op === "kill") {
-               const job = await runTool(
-                  runtime,
-                  TaskManager.use((manager) => manager.cancelJob(params.session)),
-                  { signal, interruptMessage: "vibe kill aborted" }
-               );
-               return asTextResult({ ok: true, session: params.session, job });
-            }
-
-            const jobs = await runTool(
-               runtime,
-               JobRegistry.use((registry) => registry.list())
-            );
-            return asTextResult({ ok: true, jobs: jobs.filter((job) => job.origin === "vibe") });
-         } catch (err) {
-            return asErrorResult(err instanceof Error ? err.message : String(err));
-         }
-      }
-   });
+   };
 }
 
-function registerParentCommands(pi: ExtensionAPI, runtime: HarborRuntime): void {
+function buildWorkerPromptForTurn(systemPrompt: string): string {
+   return orderWorkerSystemPrompt(systemPrompt).trim();
+}
+
+function registerParentTools(pi: ExtensionAPI, runtime: HarborRuntime, delivery: ParentToolDelivery): void {
+   pi.registerTool(createTaskToolDefinition(runtime, delivery, EMPTY_TASK_TOOL_AUGMENTATION));
+   pi.registerTool(
+      createParentActionToolDefinition(runtime, delivery, {
+         name: "job_list",
+         label: "Job List",
+         description: "List agent task jobs and long-running process jobs.",
+         promptSnippet: "List Harbor jobs.",
+         promptGuidelines: TASK_JOB_PROMPT_GUIDELINES,
+         parameters: JobListToolParamsSchema,
+         renderCall: renderJobListCall,
+         renderResult: renderJobListResult,
+         handler: handleJobList,
+         interruptMessage: "job_list aborted"
+      })
+   );
+   pi.registerTool(
+      createParentActionToolDefinition(runtime, delivery, {
+         name: "job_cancel",
+         label: "Job Cancel",
+         description: "Cancel an agent task or stop a long-running process by job ID.",
+         promptSnippet: "Cancel or stop a Harbor job.",
+         promptGuidelines: JOB_CANCEL_PROMPT_GUIDELINES,
+         parameters: JobCancelToolParamsSchema,
+         renderCall: renderJobCancelCall,
+         renderResult: renderJobCancelResult,
+         handler: handleJobCancel,
+         interruptMessage: "job_cancel aborted"
+      })
+   );
+   pi.registerTool(
+      createParentActionToolDefinition(runtime, delivery, {
+         name: "process_start",
+         label: "Process Start",
+         description:
+            "Start a retained long-running process job that runs until stopped (for example pnpm dev). For one-shot shell checks like lint, typecheck, fmt, or git diff, use bash instead.",
+         promptSnippet:
+            "Start a retained process only for never-ending services (pnpm dev). Use bash for one-shot checks.",
+         promptGuidelines: PROCESS_JOB_PROMPT_GUIDELINES,
+         parameters: ProcessStartToolParamsSchema,
+         renderCall: renderProcessStartCall,
+         renderResult: renderProcessStartResult,
+         handler: handleProcessStart,
+         interruptMessage: "process_start aborted"
+      })
+   );
+   pi.registerTool(
+      createParentActionToolDefinition(runtime, delivery, {
+         name: "process_snapshot",
+         label: "Process Snapshot",
+         description: "Read status and recent logs for a retained process job. For one-shot bash output use bash.",
+         promptSnippet: "Read a retained process snapshot. Use bash for one-shot checks.",
+         promptGuidelines: PROCESS_JOB_PROMPT_GUIDELINES,
+         parameters: ProcessSnapshotToolParamsSchema,
+         renderCall: renderProcessSnapshotCall,
+         renderResult: renderProcessSnapshotResult,
+         handler: handleProcessSnapshot,
+         interruptMessage: "process_snapshot aborted"
+      })
+   );
+   pi.registerTool(
+      createParentActionToolDefinition(runtime, delivery, {
+         name: "process_restart",
+         label: "Process Restart",
+         description: "Restart a retained process job by Harbor job ID.",
+         promptSnippet: "Restart a retained process job.",
+         promptGuidelines: PROCESS_JOB_PROMPT_GUIDELINES,
+         parameters: ProcessRestartToolParamsSchema,
+         renderCall: renderProcessRestartCall,
+         renderResult: renderProcessRestartResult,
+         handler: handleProcessRestart,
+         interruptMessage: "process_restart aborted"
+      })
+   );
+}
+
+function registerParentCommands(pi: ExtensionAPI, runtime: HarborRuntime, delivery: ParentToolDelivery): void {
    pi.registerCommand("tasks", {
       description: "List harbor jobs and background processes",
       handler: async (_args, ctx) => {
@@ -537,17 +453,13 @@ function registerParentCommands(pi: ExtensionAPI, runtime: HarborRuntime): void 
             runtime,
             AgentsStore.use((s) => s.listAgents(ctx.cwd))
          );
-         const vibes = await runTool(
-            runtime,
-            AgentsStore.use((s) => s.getVibeProfiles(ctx.cwd))
-         );
-         const model = buildAgentsPanelViewModel({ agents, vibeProfiles: vibes });
+         const model = buildAgentsPanelViewModel({ agents });
          const lines = [
             "Harbor /agents",
             "",
-            "Agents (including vibe profiles):",
+            "Agents:",
             ...model.agents.map((a) => {
-               const tag = a.kind === "vibe" ? " [vibe]" : a.source === "builtin" ? " [built-in]" : "";
+               const tag = a.source === "builtin" ? " [built-in]" : "";
                return `  - ${a.name}${tag} (${a.harness}) ${a.enabled ? "on" : "off"}`;
             })
          ];
@@ -565,37 +477,6 @@ function registerParentCommands(pi: ExtensionAPI, runtime: HarborRuntime): void 
             });
          }
          pi.appendEntry("harbor-agents-snapshot", { model, at: Date.now() });
-      }
-   });
-
-   pi.registerCommand("vibe", {
-      description: "Toggle Director / Vibe mode",
-      handler: async (_args, ctx) => {
-         const vibe = await runTool(runtime, VibeState);
-         const message = handleVibeCommand(
-            {
-               getActiveTools: () => pi.getActiveTools(),
-               setActiveTools: (tools) => pi.setActiveTools(tools),
-               getAllTools: () => pi.getAllTools().map((t) => t.name),
-               appendEntry: (type, data) => pi.appendEntry(type, data),
-               getEntries: () => customEntries(ctx),
-               setStatusWidget: (text) => {
-                  if (!ctx.hasUI) return;
-                  if (text) ctx.ui.setStatus?.("vibe", text);
-                  else ctx.ui.setStatus?.("vibe", undefined);
-               }
-            },
-            {
-               isVibeActive: () => Effect.runSync(vibe.isVibeActive),
-               setVibeActive: (active) => {
-                  Effect.runSync(vibe.setVibeActive(active));
-               },
-               terminateVibeSessions: () => {
-                  Effect.runSync(vibe.terminateVibeSessions);
-               }
-            }
-         );
-         if (ctx.hasUI) ctx.ui.notify(message, "info");
       }
    });
 
@@ -666,84 +547,203 @@ export function registerHarborExtension(pi: ExtensionAPI, options?: HarborExtens
    // ExtensionAPI has no getSettings(); previous code always saw [] and false-blocked cutover.
    const settingsExtensions = options?.settingsExtensions ?? loadSettingsExtensionsFromDisk();
 
-   // Worker tools always present (submit + restricted hub).
+   // Worker tools always present (submit only).
    registerWorkerTools(pi, runtime);
 
    const resultDelivery = createDeferredResultDelivery();
    const asyncWidget = makeAsyncTaskWidgetState(runtime);
    let parentContext: ExtensionContext | undefined;
+   let activeOwnerSessionId: string | undefined;
+   let activeParentSessionFile: string | undefined;
+   let switchingParent = false;
    let unsubscribeSettled: (() => void) | undefined;
+   let unsubscribeProcessSettled: (() => void) | undefined;
+   const pendingProcessResults = new Map<string, ProcessEntry>();
 
    const deliverResult = (job: Job) => {
       const output = job.errorText ?? job.resultData ?? "(no result returned)";
       pi.sendMessage(
          {
             customType: "harbor-result",
-            content: `Task ${job.name ?? job.id} (${job.id}) ${job.status}.\n${modelFacingText(output)}`,
+            content: `Task ${job.name ?? job.id} (${job.id}) ${job.status}.\n${fullResultText(output)}`,
             display: true,
-            details: { id: job.id, name: job.name, status: job.status }
+            details: {
+               id: job.id,
+               name: job.name,
+               status: job.status,
+               result: output,
+               transcript: job.transcript
+            }
          },
          { deliverAs: "steer", triggerTurn: true }
       );
    };
    const flushResults = () => {
-      for (const job of resultDelivery.drain()) deliverResult(job);
+      for (const job of resultDelivery.pending()) {
+         try {
+            deliverResult(job);
+            resultDelivery.consume([job.id]);
+         } catch {
+            // Keep failed deliveries queued for the next idle lifecycle event.
+         }
+      }
    };
-   const deliveryReady = runTool(
-      runtime,
-      JobRegistry.use((registry) =>
-         registry.onSettled((job) => {
-            if (job.async === true && parentContext) void asyncWidget.update(parentContext);
-            if (job.async !== true || resultDelivery.shouldSuppress(job)) return;
-            resultDelivery.defer({ ...job });
-            if (parentContext && parentContext.isIdle()) flushResults();
-         })
-      )
-   ).then((unsubscribe) => {
-      unsubscribeSettled = unsubscribe;
-   });
+   const deliverProcessResult = (process: ProcessEntry) => {
+      const failed = process.status === "failed";
+      const output = failed
+         ? (process.errorText ??
+           `Process exited with ${process.exitCode !== undefined ? `code ${process.exitCode}` : `signal ${process.signal ?? "unknown"}`}`)
+         : (process.resultText ?? "(no output)");
+      const outcome = failed ? "failed" : "exited";
+      const termination =
+         process.exitCode !== undefined
+            ? ` (${process.exitCode})`
+            : process.signal !== undefined
+              ? ` (${process.signal})`
+              : "";
+      pi.sendMessage(
+         {
+            customType: "harbor-result",
+            content: `Process ${process.name ?? process.id} (${process.id}) ${outcome}${termination}.\n${fullResultText(output)}`,
+            display: true,
+            details: { kind: "process", id: process.id, name: process.name, status: process.status }
+         },
+         { deliverAs: "steer", triggerTurn: true }
+      );
+   };
+   const flushProcessResults = () => {
+      for (const [id, process] of pendingProcessResults) {
+         try {
+            deliverProcessResult(process);
+            pendingProcessResults.delete(id);
+         } catch {
+            // Keep failed deliveries queued for the next idle lifecycle event.
+         }
+      }
+   };
+   const flushDeferredResults = () => {
+      flushResults();
+      flushProcessResults();
+   };
+   const deliveryReady = Promise.all([
+      runTool(
+         runtime,
+         JobRegistry.use((registry) =>
+            registry.onSettled((job) => {
+               if (switchingParent || !parentContext || job.ownerSessionId !== activeOwnerSessionId) return;
+               void asyncWidget.update(parentContext);
+               if (resultDelivery.shouldSuppress(job)) return;
+               resultDelivery.defer({ ...job });
+               if (parentContext.isIdle()) flushDeferredResults();
+            })
+         )
+      ).then((unsubscribe) => {
+         unsubscribeSettled = unsubscribe;
+      }),
+      runTool(
+         runtime,
+         ProcessSupervisor.use((supervisor) =>
+            supervisor.onSettled((process) => {
+               if (switchingParent || !parentContext) return;
+               if (
+                  (process.status !== "failed" && process.status !== "exited") ||
+                  process.processWaitInterest > 0 ||
+                  process.processKillInterest > 0
+               )
+                  return;
+               pendingProcessResults.set(process.id, { ...process });
+               if (parentContext && parentContext.isIdle()) flushDeferredResults();
+            })
+         )
+      ).then((unsubscribe) => {
+         unsubscribeProcessSettled = unsubscribe;
+      })
+   ]).then(() => undefined);
 
    // Parent tools + commands only when cutover passes.
    const delivery: ParentToolDelivery = {
       ready: deliveryReady,
-      consume: (ids) => resultDelivery.consume(ids),
       notifyAsyncWidget: (ctx) => void asyncWidget.update(ctx)
    };
    registerParentTools(pi, runtime, delivery);
-   registerParentCommands(pi, runtime);
+   registerParentCommands(pi, runtime, delivery);
 
    pi.registerMessageRenderer("harbor-result", (message, { expanded }, theme) => {
-      const details = (message.details ?? {}) as { id?: string; name?: string; status?: string };
+      const details = (message.details ?? {}) as {
+         kind?: "process" | "task";
+         id?: string;
+         name?: string;
+         status?: string;
+         transcript?: unknown;
+         result?: unknown;
+      };
       const failed = details.status === "failed" || details.status === "cancelled";
       const bgColor = failed ? "toolErrorBg" : "toolSuccessBg";
+      const content = typeof message.content === "string" ? message.content : "";
+      const body = content.split("\n").slice(1).join("\n").trim();
+      const bodyLines = body.length > 0 ? body.split("\n") : [];
       const bgBadge = theme.fg("customMessageLabel", "[bg]");
-      const title = theme.fg("toolTitle", theme.bold("task"));
-      const name = theme.fg("accent", details.name ?? details.id ?? "task");
+      const title = theme.fg("toolTitle", theme.bold(details.kind === "process" ? "process" : "task"));
+      const name = theme.fg("accent", details.name ?? details.id ?? (details.kind === "process" ? "process" : "task"));
       const meta = theme.fg("muted", ` · ${details.id ?? "?"} · ${details.status ?? "completed"}`);
       const indicator = theme.fg(failed ? "error" : "success", failed ? "✗" : "✓");
       const header = `${bgBadge} ${title} ${name}${meta} ${indicator}`;
 
-      const content = typeof message.content === "string" ? message.content : "";
-      const body = content.split("\n").slice(1).join("\n").trim();
-      const bodyLines = body.length > 0 ? body.split("\n") : [];
-      const preview = expanded ? bodyLines : bodyLines.slice(0, 8);
-      const hiddenCount = !expanded ? bodyLines.length - preview.length : 0;
-
-      const lines = [header];
-      if (bodyLines.length > 0) {
-         lines.push(theme.fg("dim", "---"));
+      if (details.kind === "process") {
+         const preview = expanded ? bodyLines : bodyLines.slice(-5);
+         const hiddenCount = expanded ? 0 : bodyLines.length - preview.length;
+         const lines = [header, theme.fg("dim", "---")];
+         if (hiddenCount > 0) {
+            lines.push(
+               theme.fg("muted", `... (${hiddenCount} earlier lines,`) +
+                  ` ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`
+            );
+         }
          for (const line of preview) lines.push(theme.fg("toolOutput", line));
+
+         const box = new Box(1, 1, (text) => theme.bg(bgColor, text));
+         box.addChild(new Text(lines.join("\n"), 0, 0));
+         return box;
       }
-      if (hiddenCount > 0) {
-         const lineWord = hiddenCount === 1 ? "line" : "lines";
-         lines.push(
-            theme.fg("muted", `... (${hiddenCount} more ${lineWord},`) +
+
+      const traceLines = taskTraceLines(details.transcript, theme, expanded);
+      const taskBody =
+         details.result === undefined
+            ? body
+            : expanded
+              ? fullResultText(details.result)
+              : collapsedResultText(details.result);
+      const taskBodyLines = taskBody.length > 0 ? taskBody.split("\n") : [];
+      const detailLines = [...traceLines, ...taskBodyLines];
+      const box = new Box(1, 1, (text) => theme.bg(bgColor, text));
+      const headerLines = [header];
+      if (detailLines.length > 0) headerLines.push(theme.fg("dim", "---"));
+      box.addChild(new Text(headerLines.join("\n"), 0, 0));
+      if (detailLines.length > 0) {
+         const styledDetail = detailLines
+            .map((line, index) => (index < traceLines.length ? line : theme.fg("toolOutput", line)))
+            .join("\n");
+         const overflowLine = (hiddenLines: number) => {
+            const lineWord = hiddenLines === 1 ? "line" : "lines";
+            return (
+               theme.fg("muted", `... (${hiddenLines} more ${lineWord},`) +
                ` ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`
+            );
+         };
+         const schemaOverflowLines = (_hiddenLines: number) => [
+            theme.fg("dim", "---"),
+            theme.fg("muted", "(") + `${keyHint("app.tools.expand", "to see schema")}${theme.fg("muted", ")")}`
+         ];
+         const hasFullResult = details.result !== undefined;
+         box.addChild(
+            new LimitedText(
+               styledDetail,
+               expanded ? Number.POSITIVE_INFINITY : 6,
+               hasFullResult ? schemaOverflowLines : (hiddenLines) => [overflowLine(hiddenLines)],
+               hasFullResult && !expanded
+            )
          );
       }
-
-      const box = new Box(1, 1, (text) => theme.bg(bgColor, text));
-      box.addChild(new Text(lines.join("\n"), 0, 0));
       return box;
    });
    pi.registerEntryRenderer("harbor-result", (entry) => {
@@ -760,10 +760,14 @@ export function registerHarborExtension(pi: ExtensionAPI, options?: HarborExtens
    pi.on("session_start", async (_event: SessionStartEvent, ctx) => {
       // Print/worker child sessions: only worker tools.
       if (ctx.mode === "print" || !ctx.hasUI) {
+         parentContext = undefined;
+         activeOwnerSessionId = undefined;
+         activeParentSessionFile = undefined;
+         switchingParent = false;
          const workerOnly = pi
             .getAllTools()
             .map((t) => t.name)
-            .filter((name) => name === "submit" || name === "hub");
+            .filter((name) => name === "submit" || name === "bash");
          try {
             pi.setActiveTools(workerOnly);
          } catch {
@@ -772,14 +776,32 @@ export function registerHarborExtension(pi: ExtensionAPI, options?: HarborExtens
          return;
       }
 
-      parentContext = ctx;
+      const parentSessionFile = ctx.sessionManager.getSessionFile?.();
+      const requestedOwnerSessionId = ctx.sessionManager.getSessionId?.() ?? "parent";
+      if (
+         parentContext &&
+         !switchingParent &&
+         activeOwnerSessionId === requestedOwnerSessionId &&
+         activeParentSessionFile === parentSessionFile
+      ) {
+         return;
+      }
+
+      const previousContext = parentContext;
+      switchingParent = true;
+      parentContext = undefined;
+      activeOwnerSessionId = undefined;
 
       // Reset per-parent result delivery and async widget state.
       resultDelivery.clear();
-      asyncWidget.clear(parentContext);
+      pendingProcessResults.clear();
+      asyncWidget.clear(previousContext);
 
-      const parentSessionFile = ctx.sessionManager.getSessionFile?.();
-      await runTool(runtime, activateParentSession(parentSessionFile)).catch((error: unknown) => {
+      let activationSucceeded = true;
+      try {
+         await runTool(runtime, activateParentSession(parentSessionFile));
+      } catch (error: unknown) {
+         activationSucceeded = false;
          try {
             const message = error instanceof Error ? error.message : String(error);
             console.error(`[harbor] session activation failed: ${message}`);
@@ -793,11 +815,21 @@ export function registerHarborExtension(pi: ExtensionAPI, options?: HarborExtens
                // ignore notify failure
             }
          }
-      });
+      }
+
+      if (!activationSucceeded) {
+         switchingParent = false;
+         return;
+      }
+
+      parentContext = ctx;
+      activeOwnerSessionId = requestedOwnerSessionId;
+      activeParentSessionFile = parentSessionFile;
+      switchingParent = false;
 
       void asyncWidget.update(ctx);
       void deliveryReady.then(() => {
-         if (typeof ctx.isIdle === "function" && ctx.isIdle()) flushResults();
+         if (typeof ctx.isIdle === "function" && ctx.isIdle()) flushDeferredResults();
       });
 
       // Refresh task tool metadata with the enabled agents for this cwd before the system prompt is built.
@@ -805,38 +837,29 @@ export function registerHarborExtension(pi: ExtensionAPI, options?: HarborExtens
       pi.registerTool(createTaskToolDefinition(runtime, delivery, taskAugmentation));
 
       try {
-         const normalTools = pi.getActiveTools().filter((name) => name !== "vibe" && !name.startsWith("vibe_"));
+         const normalTools = pi.getActiveTools().filter((name) => name !== "submit");
          pi.setActiveTools(normalTools);
       } catch {
          // session_start may run before active-tool mutation is available in some hosts.
       }
    });
 
-   pi.on("agent_end", flushResults);
-   pi.on("agent_settled", flushResults);
-
-   pi.on("tool_call", async (event) => {
-      try {
-         const active = await runTool(
-            runtime,
-            VibeState.use((v) => v.isVibeActive)
-         );
-         if (active && !isDirectorTool(event.toolName)) {
-            return {
-               block: true,
-               reason: `Tool '${event.toolName}' is disabled in Vibe Director mode.`
-            };
-         }
-      } catch {
-         // ignore
-      }
-      return undefined;
+   pi.on("before_agent_start", (event) => {
+      // Worker prompts move the selected body and contract before Pi's native prompt sections.
+      const finalPrompt = parentContext ? event.systemPrompt : buildWorkerPromptForTurn(event.systemPrompt);
+      return finalPrompt === event.systemPrompt ? undefined : { systemPrompt: finalPrompt };
    });
+
+   pi.on("agent_end", flushDeferredResults);
+   pi.on("agent_settled", flushDeferredResults);
 
    pi.on("session_shutdown", async () => {
       const shutdownContext = parentContext;
+      switchingParent = true;
       asyncWidget.clear(parentContext);
       parentContext = undefined;
+      activeOwnerSessionId = undefined;
+      activeParentSessionFile = undefined;
       resultDelivery.clear();
       try {
          await deliveryReady;
@@ -845,10 +868,21 @@ export function registerHarborExtension(pi: ExtensionAPI, options?: HarborExtens
       }
       unsubscribeSettled?.();
       unsubscribeSettled = undefined;
+      unsubscribeProcessSettled?.();
+      unsubscribeProcessSettled = undefined;
+      pendingProcessResults.clear();
       try {
          await runTool(
             runtime,
-            TaskManager.use((s) => s.disposeAll)
+            TaskManager.use((s) => s.disposeAllSessions)
+         );
+      } catch {
+         // ignore
+      }
+      try {
+         await runTool(
+            runtime,
+            ProcessSupervisor.use((s) => s.disposeAll)
          );
       } catch {
          // ignore

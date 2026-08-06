@@ -1,9 +1,9 @@
-import type { Theme } from "@earendil-works/pi-coding-agent";
+import { keyHint, type Theme } from "@earendil-works/pi-coding-agent";
 import { Text, type Component } from "@earendil-works/pi-tui";
-import type { HubToolParams } from "../tools/hub.js";
-import type { TaskSpec } from "../domain.js";
+import type { JobCancelToolParams, JobListToolParams } from "../tools/jobs.js";
+import type { ProcessRestartToolParams, ProcessSnapshotToolParams, ProcessStartToolParams } from "../tools/process.js";
+import type { JobTranscriptEntry, TaskSpec } from "../domain.js";
 import type { TaskToolParams } from "../tools/task.js";
-import type { VibeToolParams } from "../tools/vibe.js";
 
 interface ToolResultLike {
    readonly content: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
@@ -20,12 +20,15 @@ interface TaskRenderState {
    spinnerTimer?: ReturnType<typeof setTimeout>;
    spinnerRunning?: boolean;
    jobStatuses?: ReadonlyArray<string | undefined>;
+   startedAt?: number;
+   endedAt?: number;
 }
 
 interface RenderContext {
    readonly isError?: boolean;
    readonly state?: TaskRenderState;
    readonly invalidate?: () => void;
+   readonly executionStarted?: boolean;
 }
 
 type Details = Record<string, unknown>;
@@ -87,7 +90,7 @@ function resultPrelude(
    if (options.isPartial) return new Text(theme.fg("warning", `${noun} working…`), 0, 0);
    const error = errorText(result);
    if (context.isError || error) {
-      const message = error ?? (preview(textContent(result), 160) || `${noun} failed`);
+      const message = error ?? (textContent(result).trim() || `${noun} failed`);
       return new Text(theme.fg("error", `✗ ${message}`), 0, 0);
    }
    return undefined;
@@ -98,34 +101,36 @@ function fallbackResult(result: ToolResultLike, theme: Theme): Component {
    return new Text(theme.fg("muted", text || "Done"), 0, 0);
 }
 
+const JOB_JSON_PREVIEW_LINES = 6;
+
+function renderJsonResult(details: Details, options: RenderOptions, theme: Theme): Component {
+   const json = JSON.stringify(details, null, 2);
+   const lines = json.split("\n");
+   const visibleLines = options.expanded ? lines : lines.slice(0, JOB_JSON_PREVIEW_LINES);
+   // Pi owns the expand/collapse interaction and passes `expanded` back to
+   // this renderer. Do not replace the hidden JSON with a lossy ellipsis.
+   const rendered = visibleLines.map((line) => theme.fg("toolOutput", line));
+   return new Text(rendered.join("\n"), 0, 0);
+}
+
 const TASK_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 
-function taskIndicator(index: number, theme: Theme, context?: RenderContext, isAsync?: boolean): string {
+function taskIndicator(index: number, theme: Theme, context?: RenderContext): string {
    const status = context?.state?.jobStatuses?.[index];
    if (status === "completed") return statusMark(status, theme);
    if (status === "failed" || status === "cancelled") return statusMark(status, theme);
-   if (isAsync) return theme.fg("muted", "·");
-   return theme.fg("warning", taskSpinnerFrame(context));
+   return theme.fg("muted", "·");
 }
 
-function taskSpinnerFrame(context?: RenderContext): string {
-   const state = context?.state;
-   if (!state || !context.invalidate) return TASK_SPINNER_FRAMES[0];
-   state.spinnerRunning ??= true;
-   state.spinnerIndex ??= 0;
-   if (state.spinnerRunning && !state.spinnerTimer) {
-      state.spinnerTimer = setTimeout(() => {
-         state.spinnerTimer = undefined;
-         if (!state.spinnerRunning) return;
-         state.spinnerIndex = ((state.spinnerIndex ?? 0) + 1) % TASK_SPINNER_FRAMES.length;
-         context.invalidate?.();
-      }, 80);
-   }
-   return TASK_SPINNER_FRAMES[state.spinnerIndex];
+function taskCountLabel(count: number): string {
+   return `${count} task${count === 1 ? "" : "s"}`;
 }
 
-function jobCountLabel(count: number): string {
-   return `${count} job${count === 1 ? "" : "s"}`;
+function taskCallPhase(status: string | undefined, theme: Theme): string {
+   if (status === "completed") return `${theme.fg("muted", "completed")} ${statusMark(status, theme)}`;
+   if (status === "failed") return `${theme.fg("muted", "failed")} ${statusMark(status, theme)}`;
+   if (status === "cancelled") return `${theme.fg("muted", "cancelled")} ${statusMark(status, theme)}`;
+   return theme.fg("muted", "started");
 }
 
 /** Render a Harbor task tool call as a compact task plan. */
@@ -133,26 +138,24 @@ export function renderTaskCall(args: Partial<TaskToolParams>, theme: Theme, cont
    const batch = "tasks" in args && Array.isArray(args.tasks) ? args.tasks : undefined;
    const rawTasks = batch ?? ("task" in args && typeof args.task === "string" ? [args] : []);
    const tasks = rawTasks as ReadonlyArray<Partial<TaskSpec>>;
-   const countLabel = jobCountLabel(tasks.length);
+   const countLabel = taskCountLabel(tasks.length);
    if (tasks.length === 1) {
       const task = tasks[0];
       const name = stringValue(task.name) ?? "task";
-      const agent = stringValue(task.agent) ?? "task";
-      const isAsync = task.background === true || task.async === true;
-      const indicator = isAsync ? "" : ` ${taskIndicator(0, theme, context, isAsync)}`;
+      const phase = taskCallPhase(context?.state?.jobStatuses?.[0], theme);
       return new Text(
-         `${theme.fg("toolTitle", theme.bold("task"))} ${theme.fg("accent", name)} ${theme.fg("muted", `· ${agent}  ${countLabel}`)}${indicator}\n${theme.fg("dim", stringValue(task.task) ?? "")}`,
+         `${theme.fg("toolTitle", theme.bold("task"))} ${theme.fg("accent", name)} ${phase}\n${theme.fg("dim", stringValue(task.task) ?? "")}`,
          0,
          0
       );
    }
-   const lines = [theme.fg("toolTitle", theme.bold(`task ${countLabel}`))];
+   const lines = [`${theme.fg("toolTitle", theme.bold("task"))} ${theme.fg("muted", `batch started · ${countLabel}`)}`];
    for (let index = 0; index < tasks.length; index++) {
       const task = tasks[index];
       const name = stringValue(task.name) ?? "task";
       const agent = stringValue(task.agent) ?? "task";
       lines.push(
-         `${taskIndicator(index, theme, context, task.background === true || task.async === true)} ${theme.fg("accent", name)} ${theme.fg("muted", `· ${agent}`)} ${theme.fg("dim", preview(task.task))}`
+         `${taskIndicator(index, theme, context)} ${theme.fg("accent", name)} ${theme.fg("muted", `· ${agent}`)} ${theme.fg("dim", preview(task.task))}`
       );
    }
    return new Text(lines.join("\n"), 0, 0);
@@ -199,15 +202,54 @@ export function renderTaskResult(
    if (prelude) return prelude;
    if (!isRecord(result.details)) return fallbackResult(result, theme);
    const jobs = records(result.details.jobs);
-   if (jobs.length === 0) return fallbackResult(result, theme);
-   const allSettled = jobs.every((job) => {
+   const taskRows = jobs.length > 0 ? jobs : stringValue(result.details.id) ? [result.details] : [];
+   if (taskRows.length === 0) return fallbackResult(result, theme);
+   const allSettled = taskRows.every((job) => {
       const status = stringValue(job.status);
       return status === "completed" || status === "failed" || status === "cancelled";
    });
+   const isSpawnAcknowledgement = taskRows.length > 0 && taskRows.every((job) => stringValue(job.status) === "spawned");
+
+   if (!allSettled) {
+      if (isSpawnAcknowledgement) {
+         const lines = [theme.fg("dim", "---")];
+         if (options.expanded) {
+            lines.push(
+               ...expandedOutput(result.details)
+                  .split("\n")
+                  .map((line) => theme.fg("toolOutput", line))
+            );
+         } else {
+            lines.push(
+               theme.fg("muted", "(") + `${keyHint("app.tools.expand", "to see schema")}${theme.fg("muted", ")")}`
+            );
+         }
+         return new Text(lines.join("\n"), 0, 0);
+      }
+
+      const payload = options.expanded
+         ? expandedOutput(result.details)
+         : taskRows
+              .map((job) => {
+                 const id = stringValue(job.id) ?? "task";
+                 const name = stringValue(job.name) ?? id;
+                 const status = stringValue(job.status) ?? "pending";
+                 return `${id} · ${name} · ${status}`;
+              })
+              .join("\n");
+      const lines = [theme.fg("dim", "---"), ...payload.split("\n").map((line) => theme.fg("toolOutput", line))];
+      if (!options.expanded) {
+         lines.push(theme.fg("dim", "---"));
+         lines.push(
+            theme.fg("muted", "(") + `${keyHint("app.tools.expand", "to see schema")}${theme.fg("muted", ")")}`
+         );
+      }
+      return new Text(lines.join("\n"), 0, 0);
+   }
 
    const lines: string[] = [];
    if (allSettled) {
-      const outputs = jobs
+      const outputs = taskRows
          .map((job) => ({ job, output: job.result ?? job.resultData ?? job.errorText }))
          .filter((entry) => entry.output !== null && entry.output !== undefined);
       if (outputs.length > 0) {
@@ -216,30 +258,38 @@ export function renderTaskResult(
             if (outputs.length > 1) {
                lines.push(theme.fg("accent", stringValue(job.name) ?? stringValue(job.id) ?? "task"));
             }
-            const rendered = options.expanded ? expandedOutput(output) : outputPreview(output);
+            lines.push(...taskTraceLines(job.transcript, theme, options.expanded));
+            const rendered = options.expanded ? expandedOutput(output) : taskPayloadText(output);
             for (const line of rendered.split("\n")) lines.push(theme.fg("toolOutput", line));
+         }
+         if (!options.expanded) {
+            lines.push(theme.fg("dim", "---"));
+            lines.push(
+               theme.fg("muted", "(") + `${keyHint("app.tools.expand", "to see schema")}${theme.fg("muted", ")")}`
+            );
          }
       }
    }
    return new Text(lines.join("\n"), 0, 0);
 }
 
-function hubTarget(args: Partial<HubToolParams>): string {
-   if (args.op === "exec" || args.op === "start") return preview(args.command, 80);
-   if (args.op === "wait") return [args.target, ...(args.ids ?? [])].filter(Boolean).join(" ");
-   return args.name ?? args.id ?? args.to ?? args.from ?? "";
+/** Render a Harbor job list call. */
+export function renderJobListCall(
+   _args: Partial<JobListToolParams>,
+   theme: Theme,
+   _context?: RenderContext
+): Component {
+   return new Text(theme.fg("toolTitle", theme.bold("job_list")), 0, 0);
 }
 
-/** Render a Harbor hub call with its operation and concrete target. */
-export function renderHubCall(args: Partial<HubToolParams>, theme: Theme): Component {
-   const op = args.op ?? "…";
-   const target = hubTarget(args);
-   const suffix = args.op === "logs" && args.lines ? ` · ${args.lines} lines` : "";
-   return new Text(
-      `${theme.fg("toolTitle", theme.bold("hub"))} ${theme.fg("accent", op)}${target ? ` ${theme.fg("text", target)}` : ""}${theme.fg("dim", suffix)}`,
-      0,
-      0
-   );
+/** Render a Harbor job cancellation call. */
+export function renderJobCancelCall(
+   args: Partial<JobCancelToolParams>,
+   theme: Theme,
+   _context?: RenderContext
+): Component {
+   const id = stringValue(args.id) ?? "job";
+   return new Text(`${theme.fg("toolTitle", theme.bold("job_cancel"))} ${theme.fg("accent", id)}`, 0, 0);
 }
 
 function recordOutput(item: Details): unknown {
@@ -253,9 +303,96 @@ function outputPreview(value: unknown): string {
    return "";
 }
 
+function taskPayloadText(value: unknown): string {
+   if (typeof value === "string") return value;
+   if (isRecord(value) && typeof value.summary === "string") return value.summary;
+   if (value === undefined) return "";
+   return JSON.stringify(value) ?? "";
+}
+
 function expandedOutput(value: unknown): string {
    if (typeof value === "string") return value;
    return value === undefined ? "" : JSON.stringify(value, null, 2);
+}
+
+export function taskTraceLines(value: unknown, theme: Theme, expanded: boolean): string[] {
+   if (!Array.isArray(value)) return [];
+   const entries = value.filter(isRecord) as ReadonlyArray<Partial<JobTranscriptEntry> & Details>;
+   const calls = entries.filter((entry) => entry.type === "tool-call");
+   if (calls.length === 0) return [];
+
+   const lines = [theme.fg("dim", "--- Tools ---")];
+   for (const call of calls) {
+      const args = isRecord(call.arguments) ? call.arguments : undefined;
+      const argsText =
+         args && expanded ? ` ${expandedOutput(args)}` : args ? ` ${preview(JSON.stringify(args), 120)}` : "";
+      lines.push(theme.fg("accent", `→ ${stringValue(call.toolName) ?? "tool"}${argsText}`));
+      const result = entries.find((entry) => entry.type === "tool-result" && entry.toolCallId === call.toolCallId);
+      if (!result) continue;
+      const content = Array.isArray(result.content)
+         ? result.content
+              .filter(isRecord)
+              .map((part) => stringValue(part.text))
+              .filter((text): text is string => text !== undefined)
+              .join("\n")
+         : "";
+      const resultText = expanded ? content : preview(content, 120);
+      const mark = result.isError === true ? "✗" : "✓";
+      lines.push(
+         theme.fg(
+            result.isError === true ? "error" : "dim",
+            `  ${mark} ${stringValue(result.toolName) ?? "tool"}${resultText ? ` · ${resultText}` : ""}`
+         )
+      );
+   }
+   return lines;
+}
+
+function transcriptEntryLines(entry: Details, expanded: boolean, theme: Theme): string[] {
+   const type = stringValue(entry.type);
+   if (type === "user" || type === "assistant") {
+      const text = stringValue(entry.text) ?? "";
+      return [theme.fg("accent", `${type}:`) + (text ? ` ${theme.fg("toolOutput", text)}` : "")];
+   }
+   if (type === "tool-call") {
+      const toolName = stringValue(entry.toolName) ?? "tool";
+      const args = expanded ? expandedOutput(entry.arguments) : JSON.stringify(entry.arguments ?? {});
+      return [theme.fg("accent", `tool use ${toolName}:`) + ` ${theme.fg("toolOutput", args)}`];
+   }
+   if (type === "tool-result") {
+      const toolName = stringValue(entry.toolName) ?? "tool";
+      const content = Array.isArray(entry.content)
+         ? entry.content
+              .filter(isRecord)
+              .map((part) => stringValue(part.text))
+              .filter((text): text is string => text !== undefined)
+              .join("\n")
+         : "";
+      return [
+         theme.fg(entry.isError === true ? "error" : "accent", `tool result ${toolName}:`) +
+            (content ? ` ${theme.fg(entry.isError === true ? "error" : "toolOutput", content)}` : "")
+      ];
+   }
+   return [];
+}
+
+function renderJobTranscript(job: Details, options: RenderOptions, theme: Theme): Component {
+   const status = stringValue(job.status) ?? "unknown";
+   const id = stringValue(job.id) ?? "task";
+   const name = stringValue(job.name) ?? id;
+   const transcript = records(job.transcript);
+   const transcriptLines = transcript.flatMap((entry) => transcriptEntryLines(entry, options.expanded, theme));
+   const visibleLines = options.expanded ? transcriptLines : transcriptLines.slice(0, 6);
+   const lines = [
+      `${statusMark(status, theme)} ${theme.fg("accent", name)} ${theme.fg("muted", `· ${id} · ${status}`)}`,
+      theme.fg("dim", "---"),
+      ...visibleLines
+   ];
+   if (!options.expanded && visibleLines.length < transcriptLines.length) {
+      lines.push(theme.fg("dim", "---"));
+      lines.push(theme.fg("muted", "(") + `${keyHint("app.tools.expand", "to see schema")}${theme.fg("muted", ")")}`);
+   }
+   return new Text(lines.join("\n"), 0, 0);
 }
 
 function renderRecordList(
@@ -268,8 +405,8 @@ function renderRecordList(
    const shown = options.expanded ? items : items.slice(0, 4);
    for (const item of shown) {
       const status = stringValue(item.status);
-      const id = stringValue(item.id) ?? stringValue(item.name) ?? stringValue(item.senderId) ?? "item";
-      const detail = status ?? stringValue(item.payload) ?? stringValue(item.agent) ?? "";
+      const id = stringValue(item.id) ?? stringValue(item.name) ?? "item";
+      const detail = status ?? stringValue(item.agent) ?? "";
       const output = recordOutput(item);
       const summary = outputPreview(output);
       lines.push(
@@ -283,27 +420,104 @@ function renderRecordList(
    return new Text(lines.join("\n"), 0, 0);
 }
 
-/** Render a Harbor hub result without exposing raw JSON envelopes. */
-export function renderHubResult(
+const PROCESS_PREVIEW_LINES = 5;
+
+function formatDuration(ms: number): string {
+   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function outputLines(value: unknown): string[] {
+   if (typeof value !== "string") return [];
+   const normalized = value.replace(/\r\n?/g, "\n").trim();
+   return normalized.length > 0 ? normalized.split("\n") : [];
+}
+
+function renderProcessJobResult(
+   process: Details,
+   options: RenderOptions,
+   theme: Theme,
+   snapshotLines: ReadonlyArray<string> = []
+): Component {
+   const status = stringValue(process.status);
+   const exitCode = numberValue(process.exitCode);
+   const readyState = isRecord(process.readyState) ? process.readyState : undefined;
+   const ready = status === "running" && process.readyCondition !== undefined && readyState?.ready === true;
+   const terminal = status === "exited" || status === "failed";
+
+   let marker = theme.fg("muted", "·");
+   let label = status ?? "unknown";
+   if (ready) {
+      marker = theme.fg("success", "✓");
+      label = "ready";
+   } else if (status === "running" || status === "starting") {
+      marker = theme.fg("warning", "●");
+   } else if (status === "exited") {
+      marker = theme.fg(exitCode === undefined || exitCode === 0 ? "success" : "error", "✓");
+      label = `exited (${exitCode ?? "?"})`;
+   } else if (status === "failed") {
+      marker = theme.fg("error", "✗");
+      label = `failed${exitCode !== undefined ? ` (${exitCode})` : ""}`;
+   }
+
+   const pid = numberValue(process.pid);
+   const pidText = pid !== undefined && pid > 0 ? ` · pid ${pid}` : "";
+   const spawnTime = numberValue(process.spawnTime);
+   const settledAt = numberValue(process.settledAt);
+   const durationText =
+      terminal && spawnTime !== undefined
+         ? ` · ${formatDuration(Math.max(0, (settledAt ?? Date.now()) - spawnTime))}`
+         : "";
+   const renderedLines = [`${marker} ${label}${pidText}${durationText}`];
+
+   const errorOutput = outputLines(process.errorText);
+   const resultOutput = outputLines(process.resultText);
+   const output = errorOutput.length > 0 ? errorOutput : resultOutput;
+   const hiddenLineCount = errorOutput.length > 0 ? 0 : Math.max(0, output.length - PROCESS_PREVIEW_LINES);
+   const visibleOutput = options.expanded ? output : output.slice(-PROCESS_PREVIEW_LINES);
+   if (hiddenLineCount > 0) {
+      renderedLines.push(
+         theme.fg("muted", `... (${hiddenLineCount} earlier lines,`) +
+            ` ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`
+      );
+   }
+   renderedLines.push(...visibleOutput.map((line) => theme.fg(errorOutput.length > 0 ? "error" : "toolOutput", line)));
+
+   if (snapshotLines.length > 0) {
+      renderedLines.push(theme.fg("dim", "--- logs ---"));
+      const visibleSnapshotLines = options.expanded ? snapshotLines : snapshotLines.slice(-PROCESS_PREVIEW_LINES);
+      renderedLines.push(...visibleSnapshotLines.map((line) => theme.fg("toolOutput", line)));
+   }
+
+   return new Text(renderedLines.join("\n"), 0, 0);
+}
+
+/** Render a Harbor job result without exposing raw JSON envelopes. */
+export function renderJobListResult(
    result: ToolResultLike,
    options: RenderOptions,
    theme: Theme,
-   context: RenderContext
+   context: RenderContext,
+   noun = "job"
 ): Component {
-   const prelude = resultPrelude(result, options, theme, context, "hub");
+   const details = isRecord(result.details) ? result.details : undefined;
+   const prelude = resultPrelude(result, options, theme, context, noun);
    if (prelude) return prelude;
-   if (!isRecord(result.details)) return fallbackResult(result, theme);
-   for (const [key, noun] of [
+   if (!details) return fallbackResult(result, theme);
+   for (const [key, itemNoun] of [
       ["jobs", "job"],
-      ["processes", "process"],
-      ["messages", "message"],
-      ["peers", "peer"]
+      ["processes", "process"]
    ] as const) {
-      const items = records(result.details[key]);
-      if (Array.isArray(result.details[key])) return renderRecordList(noun, items, options, theme);
+      const items = records(details[key]);
+      if (Array.isArray(details[key])) return renderRecordList(itemNoun, items, options, theme);
    }
-   if (Array.isArray(result.details.lines)) {
-      const lines = result.details.lines.filter((line): line is string => typeof line === "string");
+   if (isRecord(details.process)) {
+      const lines = Array.isArray(details.lines)
+         ? details.lines.filter((line): line is string => typeof line === "string")
+         : [];
+      return renderProcessJobResult(details.process, options, theme, lines);
+   }
+   if (Array.isArray(details.lines)) {
+      const lines = details.lines.filter((line): line is string => typeof line === "string");
       const shown = options.expanded ? lines : lines.slice(-4);
       return new Text(
          `${theme.fg("muted", `${lines.length} log lines`)}\n${shown.map((line) => theme.fg("toolOutput", line)).join("\n")}`,
@@ -311,64 +525,79 @@ export function renderHubResult(
          0
       );
    }
-   const exitCode = numberValue(result.details.exitCode);
-   if (exitCode !== undefined) {
-      const output = preview(result.details.stdout, options.expanded ? 800 : 160);
-      return new Text(
-         `${statusMark(exitCode === 0 ? "completed" : "failed", theme)} ${theme.fg("muted", `exit ${exitCode}`)}${output ? `\n${theme.fg("toolOutput", output)}` : ""}`,
-         0,
-         0
-      );
+   const entity = isRecord(details.job) ? details.job : undefined;
+   if (entity) {
+      if (Array.isArray(entity.transcript) && entity.transcript.length > 0) {
+         return renderJobTranscript(entity, options, theme);
+      }
+      return renderRecordList("item", [entity], options, theme);
    }
-   const entity = isRecord(result.details.job)
-      ? result.details.job
-      : isRecord(result.details.process)
-        ? result.details.process
-        : undefined;
-   if (entity) return renderRecordList("item", [entity], options, theme);
-   return fallbackResult(result, theme);
+   return renderJsonResult(details, options, theme);
 }
 
-/** Render a unified Vibe tool call with its operation and worker/session target. */
-export function renderVibeCall(args: Partial<VibeToolParams>, theme: Theme): Component {
-   const op = args.op ?? "…";
-   let target = "";
-   let detail = "";
-   if (args.op === "spawn") {
-      target = args.cli ?? "profile";
-      detail = `${args.name ? `${args.name}  ` : ""}${preview(args.prompt)}`;
-   } else if (args.op === "send") {
-      target = args.session ?? "session";
-      detail = preview(args.message);
-   } else if (args.op === "kill") target = args.session ?? "session";
-   else if (args.op === "wait") target = `${args.sessions?.length ?? 0} sessions`;
-   const line = `${theme.fg("toolTitle", theme.bold("vibe"))} ${theme.fg("accent", op)}${target ? ` ${theme.fg("text", target)}` : ""}`;
-   return new Text(detail ? `${line}\n  ${theme.fg("dim", detail)}` : line, 0, 0);
+/** Render the process start call as a compact process lifecycle action. */
+export function renderProcessStartCall(
+   args: Partial<ProcessStartToolParams>,
+   theme: Theme,
+   _context?: RenderContext
+): Component {
+   return new Text(
+      `${theme.fg("toolTitle", theme.bold(`▶ ${stringValue(args.name) ?? "process"}`))}\n${theme.fg("toolTitle", theme.bold(`$ ${stringValue(args.command) ?? "..."}`))}`,
+      0,
+      0
+   );
 }
 
-/** Render a unified Vibe result as session state instead of a JSON envelope. */
-export function renderVibeResult(
+export function renderProcessSnapshotCall(
+   args: Partial<ProcessSnapshotToolParams>,
+   theme: Theme,
+   _context?: RenderContext
+): Component {
+   const id = stringValue(args.id) ?? "process";
+   return new Text(`${theme.fg("toolTitle", theme.bold("process_snapshot"))} ${theme.fg("accent", id)}`, 0, 0);
+}
+
+export function renderProcessRestartCall(
+   args: Partial<ProcessRestartToolParams>,
+   theme: Theme,
+   _context?: RenderContext
+): Component {
+   const id = stringValue(args.id) ?? "process";
+   return new Text(`${theme.fg("toolTitle", theme.bold("process_restart"))} ${theme.fg("accent", id)}`, 0, 0);
+}
+
+export function renderJobCancelResult(
    result: ToolResultLike,
    options: RenderOptions,
    theme: Theme,
    context: RenderContext
 ): Component {
-   const prelude = resultPrelude(result, options, theme, context, "vibe");
-   if (prelude) return prelude;
-   if (!isRecord(result.details)) return fallbackResult(result, theme);
-   const jobs = records(result.details.jobs);
-   if (Array.isArray(result.details.jobs)) return renderRecordList("Vibe job", jobs, options, theme);
-   const id = stringValue(result.details.id) ?? stringValue(result.details.session);
-   const status = stringValue(result.details.status) ?? (result.details.delivered === true ? "delivered" : undefined);
-   if (id) {
-      const title = stringValue(result.details.title);
-      const harness = stringValue(result.details.harness);
-      const metadata = [title, harness, status].filter(Boolean).join(" · ");
-      return new Text(
-         `${statusMark(status, theme)} ${theme.fg("accent", id)}${metadata ? ` ${theme.fg("muted", metadata)}` : ""}`,
-         0,
-         0
-      );
-   }
-   return fallbackResult(result, theme);
+   return renderJobListResult(result, options, theme, context, "job");
+}
+
+export function renderProcessStartResult(
+   result: ToolResultLike,
+   options: RenderOptions,
+   theme: Theme,
+   context: RenderContext
+): Component {
+   return renderJobListResult(result, options, theme, context, "process");
+}
+
+export function renderProcessSnapshotResult(
+   result: ToolResultLike,
+   options: RenderOptions,
+   theme: Theme,
+   context: RenderContext
+): Component {
+   return renderJobListResult(result, options, theme, context, "process");
+}
+
+export function renderProcessRestartResult(
+   result: ToolResultLike,
+   options: RenderOptions,
+   theme: Theme,
+   context: RenderContext
+): Component {
+   return renderJobListResult(result, options, theme, context, "process");
 }

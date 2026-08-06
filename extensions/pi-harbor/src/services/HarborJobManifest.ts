@@ -15,12 +15,6 @@ export const HARBOR_JOB_MANIFEST_LIMITS = {
    /** Terminal jobs older than this are eligible for pruning. */
    maxTerminalAgeMs: 30 * 24 * 60 * 60 * 1000,
 
-   /** How many transcript entries to keep in the persisted preview. */
-   maxPersistedTranscriptEntries: 5,
-
-   /** How many characters of the in-memory rawText to persist for a preview. */
-   maxPersistedRawTextChars: 1024,
-
    /** Maximum string length inside any normalized payload. */
    maxPersistedStringChars: 8192,
 
@@ -44,8 +38,6 @@ export const HARBOR_JOB_MANIFEST_LIMITS = {
 export function resetManifestLimits(): void {
    HARBOR_JOB_MANIFEST_LIMITS.maxTrackedJobs = 64;
    HARBOR_JOB_MANIFEST_LIMITS.maxTerminalAgeMs = 30 * 24 * 60 * 60 * 1000;
-   HARBOR_JOB_MANIFEST_LIMITS.maxPersistedTranscriptEntries = 5;
-   HARBOR_JOB_MANIFEST_LIMITS.maxPersistedRawTextChars = 1024;
    HARBOR_JOB_MANIFEST_LIMITS.maxPersistedStringChars = 8192;
    HARBOR_JOB_MANIFEST_LIMITS.maxPersistedArrayLength = 64;
    HARBOR_JOB_MANIFEST_LIMITS.maxPersistedNestingDepth = 8;
@@ -64,7 +56,6 @@ export interface ManifestSummary {
    readonly truncatedJobs: number;
    readonly droppedStringChars: number;
    readonly droppedArrayItems: number;
-   readonly droppedTranscriptEntries: number;
    readonly droppedJobs: number;
 }
 
@@ -120,21 +111,6 @@ function takePrefixWithinBound(value: string, maxLength: number): string {
    return value.slice(0, end);
 }
 
-function takeSuffixWithinBound(value: string, maxLength: number): string {
-   if (maxLength <= 0) return "";
-   const characters = Array.from(value);
-   let result = "";
-   let bytes = 0;
-   for (let i = characters.length - 1; i >= 0; i--) {
-      const character = characters[i]!;
-      const characterBytes = Buffer.byteLength(character, "utf8");
-      if (result.length + character.length > maxLength || bytes + characterBytes > maxLength) break;
-      result = character + result;
-      bytes += characterBytes;
-   }
-   return result;
-}
-
 function boundedMetadataText(full: string, maxLength: number, compact: string): string {
    if (persistedStringFits(full, maxLength)) return full;
    if (persistedStringFits(compact, maxLength)) return compact;
@@ -175,26 +151,6 @@ function truncateString(value: string, maxLength: number, state: NormalizationSt
    state.truncated = true;
    state.droppedStringChars += dropped;
    return result.value;
-}
-
-function truncateTailWithSuffix(
-   value: string,
-   maxLength: number,
-   suffixForDropped: (dropped: number) => string,
-   compactSuffix: string
-): { readonly value: string; readonly kept: string } {
-   if (maxLength <= 0) return { value: "", kept: "" };
-
-   let suffix = boundedMetadataText(suffixForDropped(value.length), maxLength, compactSuffix);
-   let kept = takeSuffixWithinBound(value, maxLength - suffix.length);
-   for (;;) {
-      const dropped = value.length - kept.length;
-      suffix = boundedMetadataText(suffixForDropped(dropped), maxLength, compactSuffix);
-      const candidate = `${suffix}${kept}`;
-      if (persistedStringFits(candidate, maxLength)) return { value: candidate, kept };
-      if (kept.length === 0) return { value: suffix, kept };
-      kept = takeSuffixWithinBound(value, kept.length - 1);
-   }
 }
 
 function boundString(value: string, state: NormalizationState): string {
@@ -345,102 +301,17 @@ function createRootNormalizationState(): NormalizationState {
    return { truncated: false, droppedStringChars: 0, droppedArrayItems: 0 };
 }
 
-function summarizeRawText(rawText: string | undefined, state: NormalizationState): string | undefined {
-   if (rawText === undefined || rawText.length === 0) return undefined;
-   const max = HARBOR_JOB_MANIFEST_LIMITS.maxPersistedRawTextChars;
-   if (rawText.length <= max) return boundString(rawText, state);
-
-   const kept = takeSuffixWithinBound(rawText, max);
-   const omitted = rawText.length - kept.length;
-   const result = truncateTailWithSuffix(
-      kept,
-      HARBOR_JOB_MANIFEST_LIMITS.maxPersistedStringChars,
-      () => `… [${omitted} earlier characters omitted]\\n`,
-      "[truncated]"
-   );
-   state.truncated = true;
-   state.droppedStringChars += omitted + (kept.length - result.kept.length);
-   return result.value;
-}
-
-function boundTranscriptContent(
-   content: ReadonlyArray<JobTranscriptContent>,
-   state: NormalizationState
-): ReadonlyArray<JobTranscriptContent> {
-   const max = HARBOR_JOB_MANIFEST_LIMITS.maxPersistedTranscriptEntries;
-   return content.slice(0, max).map((item) => {
-      if (item.type === "text") {
-         return { type: "text", text: boundString(item.text, state) };
-      }
-      return { type: "image", mimeType: boundString(item.mimeType, state) };
-   });
-}
-
-function previewTranscript(
-   transcript: ReadonlyArray<JobTranscriptEntry> | undefined,
-   state: NormalizationState
-): ReadonlyArray<JobTranscriptEntry> | undefined {
-   if (transcript === undefined || transcript.length === 0) return undefined;
-   const max = HARBOR_JOB_MANIFEST_LIMITS.maxPersistedTranscriptEntries;
-   const kept = transcript.length <= max ? transcript : transcript.slice(transcript.length - max);
-   if (transcript.length > max) {
-      state.truncated = true;
-      // Dropped entries are surfaced in the per-job summary through other metrics;
-      // we track them explicitly here as dropped array items for simplicity.
-      state.droppedArrayItems += transcript.length - max;
-   }
-
-   return kept.map((entry) => {
-      switch (entry.type) {
-         case "user":
-         case "thinking":
-         case "assistant":
-            return {
-               type: entry.type,
-               text: boundString(entry.text, state),
-               timestamp: entry.timestamp
-            };
-         case "tool-call":
-            return {
-               type: "tool-call",
-               toolCallId: boundString(entry.toolCallId, state),
-               toolName: boundString(entry.toolName, state),
-               arguments: toPersistableValue(
-                  entry.arguments,
-                  { depth: 0, seen: new Set(), path: "arguments" },
-                  state
-               ) as unknown,
-               timestamp: entry.timestamp
-            };
-         case "tool-result": {
-            return {
-               type: "tool-result",
-               toolCallId: boundString(entry.toolCallId, state),
-               toolName: boundString(entry.toolName, state),
-               content: boundTranscriptContent(entry.content, state),
-               isError: entry.isError,
-               timestamp: entry.timestamp
-            };
-         }
-         default:
-            return entry;
-      }
-   });
-}
-
 /** Result of normalizing a single job for persistence. */
 export interface NormalizedJobResult {
    readonly job: Job;
    readonly truncated: boolean;
    readonly droppedStringChars: number;
    readonly droppedArrayItems: number;
-   readonly droppedTranscriptEntries: number;
 }
 
 /**
- * Create a bounded, JSON-safe persisted copy of a job, keeping child session
- * references but replacing rawText with a preview and transcripts with the
- * most recent entries.
+ * Create a bounded, JSON-safe persisted copy of a job while keeping child
+ * session references and the captured worker system prompt.
  */
 export function normalizePersistedJob(job: Job): NormalizedJobResult {
    const state = createRootNormalizationState();
@@ -451,14 +322,14 @@ export function normalizePersistedJob(job: Job): NormalizedJobResult {
          : undefined;
 
    const normalizedErrorText = job.errorText !== undefined ? boundString(job.errorText, state) : undefined;
-
-   const rawTextSummary = summarizeRawText(job.rawText, state);
-
-   const transcriptPreview = previewTranscript(job.transcript, state);
-   const droppedTranscriptEntries =
-      job.transcript !== undefined && transcriptPreview !== undefined
-         ? job.transcript.length - transcriptPreview.length
-         : 0;
+   const normalizedTranscript =
+      job.transcript === undefined
+         ? undefined
+         : (toPersistableValue(
+              job.transcript,
+              { depth: 0, seen: new Set(), path: "transcript" },
+              state
+           ) as unknown as ReadonlyArray<JobTranscriptEntry>);
 
    const normalized: Job = {
       id: boundString(job.id, state),
@@ -473,6 +344,7 @@ export function normalizePersistedJob(job: Job): NormalizedJobResult {
       cwd: job.cwd === undefined ? undefined : boundString(job.cwd, state),
       origin: job.origin,
       promptOrCommand: boundString(job.promptOrCommand, state),
+      systemPrompt: job.systemPrompt === undefined ? undefined : boundString(job.systemPrompt, state),
       status: job.status,
       createdAt: job.createdAt,
       startedAt: job.startedAt,
@@ -482,8 +354,7 @@ export function normalizePersistedJob(job: Job): NormalizedJobResult {
       signal: job.signal,
       resultData: normalizedResultData,
       errorText: normalizedErrorText,
-      rawText: rawTextSummary,
-      transcript: transcriptPreview,
+      transcript: normalizedTranscript,
       waitInterest: 0,
       killInterest: 0,
       sessionFile: job.sessionFile === undefined ? undefined : boundString(job.sessionFile, state),
@@ -495,8 +366,7 @@ export function normalizePersistedJob(job: Job): NormalizedJobResult {
       let reduced: Job = {
          ...normalized,
          resultData: truncatedMarker("per-job byte limit exceeded"),
-         rawText: undefined,
-         transcript: undefined,
+         systemPrompt: undefined,
          promptOrCommand: normalized.promptOrCommand.slice(0, Math.min(normalized.promptOrCommand.length, 80))
       };
       // Recompute after reductions; if the prompt still pushes the record over
@@ -508,17 +378,15 @@ export function normalizePersistedJob(job: Job): NormalizedJobResult {
          job: reduced,
          truncated: true,
          droppedStringChars: state.droppedStringChars,
-         droppedArrayItems: state.droppedArrayItems,
-         droppedTranscriptEntries
+         droppedArrayItems: state.droppedArrayItems
       };
    }
 
    return {
       job: normalized,
-      truncated: state.truncated || droppedTranscriptEntries > 0,
+      truncated: state.truncated,
       droppedStringChars: state.droppedStringChars,
-      droppedArrayItems: state.droppedArrayItems,
-      droppedTranscriptEntries
+      droppedArrayItems: state.droppedArrayItems
    };
 }
 
@@ -602,22 +470,6 @@ function truncationText(label: string, omitted: number): string {
    return boundedMetadataText(full, HARBOR_JOB_MANIFEST_LIMITS.maxPersistedStringChars, "[__truncated]");
 }
 
-function removeJobPreviews(job: Job): {
-   readonly job: Job;
-   readonly rawChars: number;
-   readonly transcriptEntries: number;
-} {
-   return {
-      job: {
-         ...job,
-         rawText: undefined,
-         transcript: undefined
-      },
-      rawChars: job.rawText?.length ?? 0,
-      transcriptEntries: job.transcript?.length ?? 0
-   };
-}
-
 function compactJobSummaries(job: Job): {
    readonly job: Job;
    readonly droppedStringChars: number;
@@ -662,9 +514,7 @@ function compactJobSummaries(job: Job): {
          ...job,
          resultData,
          errorText,
-         promptOrCommand,
-         rawText: undefined,
-         transcript: undefined
+         promptOrCommand
       },
       droppedStringChars,
       changed
@@ -697,6 +547,7 @@ function minimalRecoveryJob(job: Job): {
          cwd: job.cwd,
          origin: job.origin,
          promptOrCommand: prompt,
+         systemPrompt: job.systemPrompt,
          status: job.status,
          createdAt: job.createdAt,
          startedAt: job.startedAt,
@@ -706,8 +557,6 @@ function minimalRecoveryJob(job: Job): {
          signal: job.signal,
          resultData: hasResult ? truncatedMarker("resultData summary omitted") : undefined,
          errorText: hasError ? truncationText("errorText", job.errorText?.length ?? 0) : undefined,
-         rawText: undefined,
-         transcript: undefined,
          waitInterest: 0,
          killInterest: 0,
          sessionFile: job.sessionFile,
@@ -729,7 +578,6 @@ export function buildPersistedIndex(jobs: ReadonlyArray<Job>, parentSessionFile?
    const truncatedJobIds = new Set<string>();
    let droppedStringChars = 0;
    let droppedArrayItems = 0;
-   let droppedTranscriptEntries = 0;
 
    for (const job of jobs) {
       const normalized = normalizePersistedJob(job);
@@ -737,7 +585,6 @@ export function buildPersistedIndex(jobs: ReadonlyArray<Job>, parentSessionFile?
       if (normalized.truncated) truncatedJobIds.add(job.id);
       droppedStringChars += normalized.droppedStringChars;
       droppedArrayItems += normalized.droppedArrayItems;
-      droppedTranscriptEntries += normalized.droppedTranscriptEntries;
    }
 
    // Retention uses the live snapshot, not normalized interest counters. The
@@ -753,7 +600,6 @@ export function buildPersistedIndex(jobs: ReadonlyArray<Job>, parentSessionFile?
       truncatedJobs: truncatedJobIds.size,
       droppedStringChars,
       droppedArrayItems,
-      droppedTranscriptEntries,
       droppedJobs
    };
 
@@ -769,19 +615,10 @@ export function buildPersistedIndex(jobs: ReadonlyArray<Job>, parentSessionFile?
    const maxManifestBytes = HARBOR_JOB_MANIFEST_LIMITS.maxPersistedManifestBytes;
 
    const applyReduction = (
-      reduction: (job: Job) => { readonly job: Job; readonly droppedStringChars: number; readonly changed: boolean },
-      includePreviewCounts = false
+      reduction: (job: Job) => { readonly job: Job; readonly droppedStringChars: number; readonly changed: boolean }
    ) => {
       const nextJobs: Job[] = [];
       for (const job of retainedForSize) {
-         if (includePreviewCounts) {
-            const preview = removeJobPreviews(job);
-            nextJobs.push(preview.job);
-            if (preview.rawChars > 0 || preview.transcriptEntries > 0) truncatedJobIds.add(job.id);
-            droppedStringChars += preview.rawChars;
-            droppedTranscriptEntries += preview.transcriptEntries;
-            continue;
-         }
          const next = reduction(job);
          nextJobs.push(next.job);
          if (next.changed) truncatedJobIds.add(job.id);
@@ -792,19 +629,14 @@ export function buildPersistedIndex(jobs: ReadonlyArray<Job>, parentSessionFile?
          ...summary,
          totalJobs: retainedForSize.length,
          truncatedJobs: truncatedJobIds.size,
-         droppedStringChars,
-         droppedTranscriptEntries
+         droppedStringChars
       };
       index = makeIndex();
       indexByteSize(index);
    };
 
-   // Measure before and after every whole-registry reduction. This first pass
-   // removes bounded previews, then compacts payload summaries. Recovery-critical
+   // Measure before and after every whole-registry reduction. Recovery-critical
    // configuration fields remain exact; jobs are dropped only after this pass.
-   if (indexByteSize(index) > maxManifestBytes) {
-      applyReduction((job) => ({ job, droppedStringChars: 0, changed: false }), true);
-   }
    if (indexByteSize(index) > maxManifestBytes) applyReduction(compactJobSummaries);
    if (indexByteSize(index) > maxManifestBytes) applyReduction(minimalRecoveryJob);
 
@@ -848,34 +680,10 @@ export function buildPersistedIndex(jobs: ReadonlyArray<Job>, parentSessionFile?
 const JOB_STATUSES: ReadonlySet<JobStatus> = new Set(["pending", "running", "completed", "failed", "cancelled"]);
 const JOB_KINDS: ReadonlySet<JobKind> = new Set(["agent", "bash"]);
 const JOB_HARNESSES: ReadonlySet<HarnessName> = new Set(["pi", "agy"]);
-const JOB_ORIGINS = new Set<"standard" | "vibe" | "btw">(["standard", "vibe", "btw"]);
+const JOB_ORIGINS = new Set<"standard" | "btw">(["standard", "btw"]);
 
 /** JSON value accepted in persisted tool arguments, resultData, and raw event data. */
 export type PersistedJsonValue = JsonValue;
-
-/** Content blocks emitted by the persisted tool-result serializer. */
-export type PersistedTranscriptContent =
-   | { readonly type: "text"; readonly text: string }
-   | { readonly type: "image"; readonly mimeType: string };
-
-/** Exact transcript entry variants emitted by the manifest serializer. */
-export type PersistedTranscriptEntry =
-   | { readonly type: "user" | "thinking" | "assistant"; readonly text: string; readonly timestamp?: number }
-   | {
-        readonly type: "tool-call";
-        readonly toolCallId: string;
-        readonly toolName: string;
-        readonly arguments: PersistedJsonValue;
-        readonly timestamp?: number;
-     }
-   | {
-        readonly type: "tool-result";
-        readonly toolCallId: string;
-        readonly toolName: string;
-        readonly content: ReadonlyArray<PersistedTranscriptContent>;
-        readonly isError: boolean;
-        readonly timestamp?: number;
-     };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
    return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -945,89 +753,96 @@ function parsePersistedJsonValue(value: unknown, depth = 0): JsonValue | undefin
    return parsed;
 }
 
-function parsePersistedTranscriptContent(value: unknown): PersistedTranscriptContent | undefined {
-   if (!isRecord(value) || !isPersistedString(value.type)) return undefined;
-   if (value.type === "text") {
-      if (!hasOnlyKeys(value, new Set(["type", "text"])) || !isPersistedString(value.text)) return undefined;
-      return { type: "text", text: value.text };
+function parseTranscriptContent(value: unknown): ReadonlyArray<JobTranscriptContent> | undefined {
+   if (!Array.isArray(value) || value.length > HARBOR_JOB_MANIFEST_LIMITS.maxPersistedArrayLength) return undefined;
+   const content: JobTranscriptContent[] = [];
+   for (const item of value) {
+      if (!isRecord(item) || typeof item.type !== "string") return undefined;
+      if (item.type === "text" && isPersistedString(item.text)) {
+         if (!hasOnlyKeys(item, new Set(["type", "text"]))) return undefined;
+         content.push({ type: "text", text: item.text });
+      } else if (item.type === "image" && isPersistedString(item.mimeType)) {
+         if (!hasOnlyKeys(item, new Set(["type", "mimeType"]))) return undefined;
+         content.push({ type: "image", mimeType: item.mimeType });
+      } else {
+         return undefined;
+      }
    }
-   if (value.type === "image") {
-      if (!hasOnlyKeys(value, new Set(["type", "mimeType"])) || !isPersistedString(value.mimeType)) return undefined;
-      return { type: "image", mimeType: value.mimeType };
-   }
-   return undefined;
+   return content;
 }
 
-function parsePersistedTranscriptEntry(value: unknown): PersistedTranscriptEntry | undefined {
-   if (!isRecord(value) || !isPersistedString(value.type)) return undefined;
+function parseTranscript(value: unknown): ReadonlyArray<JobTranscriptEntry> | undefined {
+   if (!Array.isArray(value) || value.length > HARBOR_JOB_MANIFEST_LIMITS.maxPersistedArrayLength) return undefined;
+   const entries: JobTranscriptEntry[] = [];
+   for (const item of value) {
+      if (!isRecord(item) || typeof item.type !== "string") return undefined;
+      const timestamp = parseOptionalTimestamp(item);
+      if ("timestamp" in item && timestamp === undefined) return undefined;
 
-   if (value.type === "user" || value.type === "thinking" || value.type === "assistant") {
-      if (!hasOnlyKeys(value, new Set(["type", "text", "timestamp"]))) return undefined;
-      if (!isPersistedString(value.text)) return undefined;
-      const timestamp = parseOptionalTimestamp(value);
-      if ("timestamp" in value && timestamp === undefined) return undefined;
-      return { type: value.type, text: value.text, timestamp };
-   }
-
-   if (value.type === "tool-call") {
-      if (!hasOnlyKeys(value, new Set(["type", "toolCallId", "toolName", "arguments", "timestamp"]))) return undefined;
-      if (!isPersistedString(value.toolCallId) || !isPersistedString(value.toolName)) return undefined;
-      if (!("arguments" in value)) return undefined;
-      const argumentsValue = parsePersistedJsonValue(value.arguments);
-      if (argumentsValue === undefined) return undefined;
-      const timestamp = parseOptionalTimestamp(value);
-      if ("timestamp" in value && timestamp === undefined) return undefined;
-      return {
-         type: "tool-call",
-         toolCallId: value.toolCallId,
-         toolName: value.toolName,
-         arguments: argumentsValue,
-         timestamp
-      };
-   }
-
-   if (value.type === "tool-result") {
-      if (!hasOnlyKeys(value, new Set(["type", "toolCallId", "toolName", "content", "isError", "timestamp"])))
-         return undefined;
-      if (!isPersistedString(value.toolCallId) || !isPersistedString(value.toolName)) return undefined;
-      if (
-         !Array.isArray(value.content) ||
-         value.content.length > HARBOR_JOB_MANIFEST_LIMITS.maxPersistedArrayLength ||
-         typeof value.isError !== "boolean"
-      )
-         return undefined;
-      const content: PersistedTranscriptContent[] = [];
-      for (const block of value.content) {
-         const parsed = parsePersistedTranscriptContent(block);
-         if (parsed === undefined) return undefined;
-         content.push(parsed);
+      if (item.type === "user" || item.type === "thinking" || item.type === "assistant") {
+         if (!hasOnlyKeys(item, new Set(["type", "text", "timestamp"])) || !isPersistedString(item.text)) {
+            return undefined;
+         }
+         entries.push({ type: item.type, text: item.text, timestamp } as JobTranscriptEntry);
+         continue;
       }
-      const timestamp = parseOptionalTimestamp(value);
-      if ("timestamp" in value && timestamp === undefined) return undefined;
-      return {
-         type: "tool-result",
-         toolCallId: value.toolCallId,
-         toolName: value.toolName,
-         content,
-         isError: value.isError,
-         timestamp
-      };
-   }
 
-   return undefined;
+      if (item.type === "tool-call") {
+         if (
+            !hasOnlyKeys(item, new Set(["type", "toolCallId", "toolName", "arguments", "raw", "timestamp"])) ||
+            !isPersistedString(item.toolCallId) ||
+            !isPersistedString(item.toolName)
+         )
+            return undefined;
+         const argumentsValue = parsePersistedJsonValue(item.arguments);
+         if (argumentsValue === undefined) return undefined;
+         const raw = item.raw === undefined ? undefined : parsePersistedJsonValue(item.raw);
+         if (item.raw !== undefined && raw === undefined) return undefined;
+         entries.push({
+            type: "tool-call",
+            toolCallId: item.toolCallId,
+            toolName: item.toolName,
+            arguments: argumentsValue,
+            raw,
+            timestamp
+         });
+         continue;
+      }
+
+      if (item.type === "tool-result") {
+         if (
+            !hasOnlyKeys(item, new Set(["type", "toolCallId", "toolName", "content", "isError", "raw", "timestamp"])) ||
+            !isPersistedString(item.toolCallId) ||
+            !isPersistedString(item.toolName) ||
+            typeof item.isError !== "boolean"
+         )
+            return undefined;
+         const content = parseTranscriptContent(item.content);
+         if (content === undefined) return undefined;
+         const raw = item.raw === undefined ? undefined : parsePersistedJsonValue(item.raw);
+         if (item.raw !== undefined && raw === undefined) return undefined;
+         entries.push({
+            type: "tool-result",
+            toolCallId: item.toolCallId,
+            toolName: item.toolName,
+            content,
+            isError: item.isError,
+            raw,
+            timestamp
+         });
+         continue;
+      }
+
+      return undefined;
+   }
+   return entries;
 }
 
 function parseManifestSummary(value: unknown): ManifestSummary | undefined {
    if (!isRecord(value)) return undefined;
-   const keys = new Set([
-      "totalJobs",
-      "truncatedJobs",
-      "droppedStringChars",
-      "droppedArrayItems",
-      "droppedTranscriptEntries",
-      "droppedJobs"
-   ]);
-   if (!hasOnlyKeys(value, keys)) return undefined;
+   const keys = new Set(["totalJobs", "truncatedJobs", "droppedStringChars", "droppedArrayItems", "droppedJobs"]);
+   const acceptedKeys = new Set([...keys, "droppedTranscriptEntries"]);
+   if (!hasOnlyKeys(value, acceptedKeys)) return undefined;
 
    const values: Record<string, number> = {};
    for (const key of keys) {
@@ -1035,12 +850,15 @@ function parseManifestSummary(value: unknown): ManifestSummary | undefined {
       if (number === undefined || number < 0 || !Number.isInteger(number)) return undefined;
       values[key] = number;
    }
+   if ("droppedTranscriptEntries" in value) {
+      const legacyCount = parseFiniteNumber(value.droppedTranscriptEntries);
+      if (legacyCount === undefined || legacyCount < 0 || !Number.isInteger(legacyCount)) return undefined;
+   }
    return {
       totalJobs: values.totalJobs,
       truncatedJobs: values.truncatedJobs,
       droppedStringChars: values.droppedStringChars,
       droppedArrayItems: values.droppedArrayItems,
-      droppedTranscriptEntries: values.droppedTranscriptEntries,
       droppedJobs: values.droppedJobs
    };
 }
@@ -1066,6 +884,7 @@ export function parsePersistedJobEntry(raw: unknown): Job | undefined {
       "cwd",
       "origin",
       "promptOrCommand",
+      "systemPrompt",
       "status",
       "createdAt",
       "startedAt",
@@ -1075,6 +894,7 @@ export function parsePersistedJobEntry(raw: unknown): Job | undefined {
       "signal",
       "resultData",
       "errorText",
+      // rawText remains accepted for manifests written before semantic trace persistence.
       "rawText",
       "transcript",
       "waitInterest",
@@ -1116,7 +936,7 @@ export function parsePersistedJobEntry(raw: unknown): Job | undefined {
    }
 
    if (record.harness !== undefined && !JOB_HARNESSES.has(record.harness as HarnessName)) return undefined;
-   if (record.origin !== undefined && !JOB_ORIGINS.has(record.origin as "standard" | "vibe" | "btw")) return undefined;
+   if (record.origin !== undefined && !JOB_ORIGINS.has(record.origin as "standard" | "btw")) return undefined;
 
    const startedAt = parseFiniteNumber(record.startedAt);
    if (record.startedAt !== undefined && startedAt === undefined) return undefined;
@@ -1137,30 +957,16 @@ export function parsePersistedJobEntry(raw: unknown): Job | undefined {
    if (record.cwd !== undefined && !isPersistedString(record.cwd)) return undefined;
    if (record.signal !== undefined && !isPersistedString(record.signal)) return undefined;
    if (record.errorText !== undefined && !isPersistedString(record.errorText)) return undefined;
-   if (record.rawText !== undefined && !isPersistedString(record.rawText)) return undefined;
+   if (record.systemPrompt !== undefined && !isPersistedString(record.systemPrompt)) return undefined;
    if (record.sessionFile !== undefined && !isPersistedString(record.sessionFile)) return undefined;
    if (record.sessionId !== undefined && !isPersistedString(record.sessionId)) return undefined;
    if (record.waitInterest !== undefined && parseFiniteNumber(record.waitInterest) === undefined) return undefined;
    if (record.killInterest !== undefined && parseFiniteNumber(record.killInterest) === undefined) return undefined;
 
-   let transcript: ReadonlyArray<JobTranscriptEntry> | undefined;
-   if (record.transcript !== undefined) {
-      if (
-         !Array.isArray(record.transcript) ||
-         record.transcript.length > HARBOR_JOB_MANIFEST_LIMITS.maxPersistedArrayLength
-      )
-         return undefined;
-      const parsedTranscript: JobTranscriptEntry[] = [];
-      for (const rawEntry of record.transcript) {
-         const parsedEntry = parsePersistedTranscriptEntry(rawEntry);
-         if (parsedEntry === undefined) return undefined;
-         parsedTranscript.push(parsedEntry as JobTranscriptEntry);
-      }
-      transcript = parsedTranscript;
-   }
-
    const resultData = record.resultData === undefined ? undefined : parsePersistedJsonValue(record.resultData);
    if (record.resultData !== undefined && resultData === undefined) return undefined;
+   const transcript = record.transcript === undefined ? undefined : parseTranscript(record.transcript);
+   if (record.transcript !== undefined && transcript === undefined) return undefined;
 
    return {
       id: record.id,
@@ -1173,8 +979,9 @@ export function parsePersistedJobEntry(raw: unknown): Job | undefined {
       model: parseOptionalString(record.model),
       thinking: parseOptionalString(record.thinking),
       cwd: parseOptionalString(record.cwd),
-      origin: (record.origin as "standard" | "vibe" | "btw") ?? undefined,
+      origin: (record.origin as "standard" | "btw") ?? undefined,
       promptOrCommand: record.promptOrCommand,
+      systemPrompt: parseOptionalString(record.systemPrompt),
       status: record.status as JobStatus,
       createdAt,
       startedAt,
@@ -1184,7 +991,6 @@ export function parsePersistedJobEntry(raw: unknown): Job | undefined {
       signal: parseOptionalString(record.signal),
       resultData,
       errorText: parseOptionalString(record.errorText),
-      rawText: parseOptionalString(record.rawText),
       transcript,
       waitInterest: 0,
       killInterest: 0,

@@ -3,13 +3,10 @@
  *
  * Single unified list (no section tabs):
  * - Regular agents with [built-in] / (override) tags.
- * - Vibe profiles (fast/good) mixed in with [vibe] tag.
- * - Vibe inherits parent system prompt when body is empty; no task/vibe_* tools.
  *
  * Detail & Edit Screen:
- * - Shared fields for agents and vibe: Name (locked for vibe), Enabled, Harness, Model,
- *   Thinking, Tools, Description, System Prompt.
- * - Vibe and regular agents both save to ~/.pi/agent/agents/<name>.md.
+ * - Name, Enabled, Harness, Model, Thinking, Tools, Description, and System Prompt.
+ * - Agents save to ~/.pi/agent/agents/<name>.md.
  */
 
 import type { ExtensionCommandContext, KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
@@ -20,15 +17,7 @@ import type { TextContent } from "@earendil-works/pi-ai";
 import type { AgentDefinition, HarnessName } from "../domain.js";
 import type { HarborRuntime } from "../extension.js";
 import { runTool } from "../runtime.js";
-import {
-   AgentsStore,
-   deleteAgentFromDisk,
-   loadAllAgentsFromDisk,
-   loadAgentsConfigFromDisk,
-   saveAgentToDisk,
-   saveAgentsConfigToDisk,
-   type VibeProfileConfig
-} from "../services/AgentsStore.js";
+import { AgentsStore, deleteAgentFromDisk, loadAllAgentsFromDisk, saveAgentToDisk } from "../services/AgentsStore.js";
 
 export type AgentsViewMode = "list" | "detail";
 export type AgentDetailField = "name" | "enabled" | "harness" | "model" | "thinking" | "tools" | "description" | "body";
@@ -57,23 +46,11 @@ export interface AgentsPanelOptions {
    getAllTools?: () => AgentToolInfo[];
 }
 
-export const WORKER_LOCKED_TOOLS = new Set(["submit", "hub"]);
-export const DISABLED_NESTED_TOOLS = new Set([
-   "task",
-   "vibe",
-   "vibe_spawn",
-   "vibe_send",
-   "vibe_wait",
-   "vibe_kill",
-   "vibe_list"
-]);
+export const WORKER_LOCKED_TOOLS = new Set(["submit"]);
+export const DISABLED_NESTED_TOOLS = new Set(["task"]);
 
 export interface AgentsPanelViewModel {
    agents: AgentDefinition[];
-   vibeProfiles: {
-      fast: VibeProfileConfig;
-      good: VibeProfileConfig;
-   };
 }
 
 export interface AgentsPanelState {
@@ -116,70 +93,11 @@ export const AGENT_DETAIL_FIELDS: AgentDetailField[] = [
 ];
 const AGENT_FIELDS = AGENT_DETAIL_FIELDS;
 
-const REASONING_EFFORTS = ["(inherit)", "low", "medium", "high", "xhigh"];
+const REASONING_EFFORTS = ["(inherit)", "low", "medium", "high", "xhigh", "max"];
 const DESC_PANEL_MAX_LINES = 100;
 
-/** Convert a vibe profile config into an AgentDefinition for the unified list. */
-export function vibeProfileToAgentDefinition(name: "fast" | "good", profile: VibeProfileConfig): AgentDefinition {
-   const active = profile.harness === "agy" ? profile.agy : profile.pi;
-   const tools = (active?.tools ?? profile.tools ?? []).filter((t) => !DISABLED_NESTED_TOOLS.has(t));
-   // Always lock worker tools for vibe workers.
-   for (const locked of WORKER_LOCKED_TOOLS) {
-      if (!tools.includes(locked)) tools.push(locked);
-   }
-   return {
-      name,
-      display_name: name,
-      description:
-         name === "fast"
-            ? "Vibe director profile for quick research and light edits. Inherits parent system prompt when body is empty."
-            : "Vibe director profile for complex implementation. Inherits parent system prompt when body is empty.",
-      tools,
-      harness: profile.harness,
-      enabled: true,
-      source: "builtin",
-      kind: "vibe",
-      body: active?.body ?? profile.body ?? "",
-      model: active?.model,
-      thinking: active?.reasoning_effort
-   };
-}
-
-/** Convert a Markdown-loaded vibe AgentDefinition to the runtime spawn profile shape. */
-export function agentDefinitionToVibeProfile(agent: AgentDefinition): VibeProfileConfig {
-   const tools = [...(agent.tools ?? [])].filter((t) => !DISABLED_NESTED_TOOLS.has(t));
-   const side = {
-      model: agent.model,
-      reasoning_effort: agent.thinking,
-      tools,
-      body: agent.body || undefined
-   };
-   return {
-      harness: agent.harness,
-      pi: agent.harness === "pi" ? side : undefined,
-      agy: agent.harness === "agy" ? side : undefined,
-      tools,
-      body: agent.body || undefined
-   };
-}
-
-export function buildAgentsPanelViewModel(params: {
-   agents: ReadonlyArray<AgentDefinition>;
-   vibeProfiles: { fast: VibeProfileConfig; good: VibeProfileConfig };
-}): AgentsPanelViewModel {
-   // Markdown-loaded vibe agents retain normal source/isOverride/filePath metadata.
-   // Synthesize defaults only for callers that provide no fast/good entries.
-   const agents = [...params.agents];
-   if (!agents.some((agent) => agent.name === "fast" && agent.kind === "vibe")) {
-      agents.push(vibeProfileToAgentDefinition("fast", params.vibeProfiles.fast));
-   }
-   if (!agents.some((agent) => agent.name === "good" && agent.kind === "vibe")) {
-      agents.push(vibeProfileToAgentDefinition("good", params.vibeProfiles.good));
-   }
-   return {
-      agents,
-      vibeProfiles: params.vibeProfiles
-   };
+export function buildAgentsPanelViewModel(params: { agents: ReadonlyArray<AgentDefinition> }): AgentsPanelViewModel {
+   return { agents: [...params.agents] };
 }
 
 export function createAgentsPanelState(initial?: Partial<AgentsPanelState>): AgentsPanelState {
@@ -194,12 +112,6 @@ export function createAgentsPanelState(initial?: Partial<AgentsPanelState>): Age
 
 export function detailFieldsFor(agent?: AgentDefinition, harness?: HarnessName): readonly DetailField[] {
    const effectiveHarness = harness ?? agent?.harness ?? "pi";
-   // Vibe profiles use the same fields as regular agents, minus rename (fixed fast/good keys).
-   if (agent?.kind === "vibe") {
-      return effectiveHarness === "agy"
-         ? ["enabled", "harness", "model", "description", "body"]
-         : ["enabled", "harness", "model", "thinking", "tools", "description", "body"];
-   }
    return effectiveHarness === "agy" ? ["name", "enabled", "harness", "model", "description", "body"] : AGENT_FIELDS;
 }
 
@@ -212,10 +124,9 @@ export function getSelectedDescription(state: AgentsPanelState, viewModel?: Agen
    return viewModel.agents[state.selectedIndex]?.description;
 }
 
-export function agentDisplayTags(agent: AgentDefinition): ReadonlyArray<"vibe" | "built-in" | "override"> {
-   const tags: Array<"vibe" | "built-in" | "override"> = [];
-   if (agent.kind === "vibe") tags.push("vibe");
-   else if (agent.source === "builtin") tags.push("built-in");
+export function agentDisplayTags(agent: AgentDefinition): ReadonlyArray<"built-in" | "override"> {
+   const tags: Array<"built-in" | "override"> = [];
+   if (agent.source === "builtin") tags.push("built-in");
    if (agent.isOverride) tags.push("override");
    return tags;
 }
@@ -557,13 +468,11 @@ export class FullScreenAgentsManager implements Component, Focusable {
          await this.generateAndOpenDraft();
       };
 
-      const cwd = this.ctx?.cwd;
-      const initialAgents = loadAllAgentsFromDisk(cwd);
-      const initialVibe = loadAgentsConfigFromDisk(cwd);
-      this.viewModel = buildAgentsPanelViewModel({
-         agents: initialAgents,
-         vibeProfiles: initialVibe
-      });
+      if (!this.viewModel) {
+         const cwd = this.ctx?.cwd;
+         const initialAgents = loadAllAgentsFromDisk(cwd);
+         this.viewModel = buildAgentsPanelViewModel({ agents: initialAgents });
+      }
 
       this.ticker = setInterval(() => {
          void this.refreshData();
@@ -638,23 +547,19 @@ export class FullScreenAgentsManager implements Component, Focusable {
 
    private async refreshData() {
       if (this.closed) return;
+      if (this.options?.initialViewModel && !this.ctx) return;
       try {
          const cwd = this.ctx?.cwd;
          const agents = await runTool(
             this.runtime,
             AgentsStore.use((s) => s.listAgents(cwd))
          );
-         const vibeProfiles = await runTool(
-            this.runtime,
-            AgentsStore.use((s) => s.getVibeProfiles(cwd))
-         );
-
          if (this.state.viewMode === "detail" && this.viewModel) {
             const editingIdx = this.state.selectedIndex;
             const currentEditAgent = this.viewModel.agents[editingIdx];
             if (currentEditAgent) {
-               const nextVm = buildAgentsPanelViewModel({ agents, vibeProfiles });
-               // Preserve in-progress edits for the selected row (agent or vibe).
+               const nextVm = buildAgentsPanelViewModel({ agents });
+               // Preserve in-progress edits for the selected row.
                const sameNameIdx = nextVm.agents.findIndex((a) => a.name === currentEditAgent.name);
                if (sameNameIdx >= 0) nextVm.agents[sameNameIdx] = currentEditAgent;
                this.viewModel = nextVm;
@@ -663,7 +568,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
             }
          }
 
-         this.viewModel = buildAgentsPanelViewModel({ agents, vibeProfiles });
+         this.viewModel = buildAgentsPanelViewModel({ agents });
          this.tui.requestRender();
       } catch {}
    }
@@ -687,35 +592,8 @@ export class FullScreenAgentsManager implements Component, Focusable {
       return this.viewModel?.agents[this.state.selectedIndex];
    }
 
-   private isCurrentVibe(): boolean {
-      return this.currentAgent()?.kind === "vibe";
-   }
-
    private currentHarness(): HarnessName {
       return this.currentAgent()?.harness ?? "pi";
-   }
-
-   /** Persist vibe edits through the same Markdown path as every other agent. */
-   private async persistVibeAgent(agent: AgentDefinition, cwd?: string): Promise<void> {
-      if (agent.kind !== "vibe" || (agent.name !== "fast" && agent.name !== "good")) return;
-      const agentToSave: AgentDefinition = {
-         ...agent,
-         source: "builtin",
-         kind: "vibe",
-         scope: "global",
-         scopes: ["global"],
-         isOverride: true
-      };
-      const filePath = saveAgentToDisk(agentToSave, cwd ?? this.ctx?.cwd);
-      const updated = { ...agentToSave, filePath };
-      if (this.viewModel) {
-         const idx = this.viewModel.agents.findIndex((item) => item.name === agent.name && item.kind === "vibe");
-         if (idx >= 0) this.viewModel.agents[idx] = updated;
-      }
-      await runTool(
-         this.runtime,
-         AgentsStore.use((store) => store.updateAgent(updated, cwd ?? this.ctx?.cwd))
-      ).catch(() => {});
    }
 
    private getAvailableTools(): AgentToolInfo[] {
@@ -877,7 +755,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
          },
          {
             name: "grep",
-            description: "Search file contents using fast ripgrep pattern matching.",
+            description: "Search file contents using quick ripgrep pattern matching.",
             promptSnippet: "Ripgrep search"
          },
          {
@@ -891,24 +769,39 @@ export class FullScreenAgentsManager implements Component, Focusable {
             promptSnippet: "Execute bash commands"
          },
          {
-            name: "hub",
-            description: "Search, install, and manage Harbor tools and skills.",
-            promptSnippet: "Harbor extension & skill registry"
+            name: "task_spawn",
+            description: "Spawn Harbor agent task jobs (flat or batch).",
+            promptSnippet: "Harbor task worker launcher"
+         },
+         {
+            name: "process_start",
+            description: "Start a long-running process job.",
+            promptSnippet: "Start process job"
+         },
+         {
+            name: "job_list",
+            description: "List Harbor task and process jobs.",
+            promptSnippet: "List Harbor jobs"
+         },
+         {
+            name: "process_snapshot",
+            description: "Read process status and recent logs.",
+            promptSnippet: "Read process snapshot"
+         },
+         {
+            name: "job_cancel",
+            description: "Cancel a task or stop a process job.",
+            promptSnippet: "Cancel Harbor job"
+         },
+         {
+            name: "process_restart",
+            description: "Restart a process job.",
+            promptSnippet: "Restart process job"
          },
          {
             name: "submit",
             description: "Submit final task execution result or error (worker sessions).",
             promptSnippet: "Submit job execution result"
-         },
-         {
-            name: "task",
-            description: "Spawn harbor worker jobs (flat or batch).",
-            promptSnippet: "Harbor task worker launcher"
-         },
-         {
-            name: "vibe",
-            description: "Control Vibe Director workers while Vibe mode is active.",
-            promptSnippet: "Spawn, control, wait for, cancel, or list Vibe workers"
          },
          {
             name: "web_search_exa",
@@ -1012,9 +905,6 @@ export class FullScreenAgentsManager implements Component, Focusable {
          return;
       }
 
-      // Vibe profiles keep fixed names (fast/good); name edit is agent-only.
-      if (field === "name" && agent?.kind === "vibe") return;
-
       const val = field === "name" ? (agent?.name ?? "") : (agent?.description ?? "");
       this.isEditingText = true;
       this.textInput.setValue(val);
@@ -1034,7 +924,6 @@ export class FullScreenAgentsManager implements Component, Focusable {
       let patch: Partial<AgentDefinition> = {};
 
       if (field === "name") {
-         if (agent.kind === "vibe") return;
          const cleanName = v.toLowerCase().replace(/[^a-z0-9_-]/g, "");
          if (cleanName && cleanName !== agent.name) {
             deleteAgentFromDisk(agent, cwd);
@@ -1057,20 +946,6 @@ export class FullScreenAgentsManager implements Component, Focusable {
       const cwd = this.ctx?.cwd;
       const agent = this.currentAgent();
       if (!agent) return;
-
-      if (agent.kind === "vibe") {
-         await this.persistVibeAgent(agent, cwd);
-         this.initialAgentSnapshot = JSON.stringify(agent);
-         this.pendingDetailEscConfirm = false;
-         this.statusMessage = `Saved vibe profile ${agent.name}`;
-         if (this.ctx?.hasUI) {
-            try {
-               this.ctx.ui.notify(`Saved vibe profile ${agent.name}`, "info");
-            } catch {}
-         }
-         this.tui.requestRender();
-         return;
-      }
 
       const agentToSave: AgentDefinition = {
          ...agent,
@@ -1095,10 +970,14 @@ export class FullScreenAgentsManager implements Component, Focusable {
       ).catch(() => {});
       this.initialAgentSnapshot = JSON.stringify(updatedAgent);
       this.pendingDetailEscConfirm = false;
-      this.statusMessage = `Saved ${updatedAgent.name} to ${filePath}`;
+      const saveMessage =
+         updatedAgent.harness === "agy"
+            ? `Saved ${updatedAgent.name} to ${filePath} and linked its Agy agent`
+            : `Saved ${updatedAgent.name} to ${filePath}`;
+      this.statusMessage = saveMessage;
       if (this.ctx?.hasUI) {
          try {
-            this.ctx.ui.notify(`Saved ${updatedAgent.name} to ${filePath}`, "info");
+            this.ctx.ui.notify(saveMessage, "info");
          } catch {}
       }
       this.tui.requestRender();
@@ -1113,22 +992,6 @@ export class FullScreenAgentsManager implements Component, Focusable {
 
       const agent = this.currentAgent();
       if (!agent) return;
-
-      if (agent.kind === "vibe") {
-         const nextAgent: AgentDefinition = { ...agent, body: v };
-         if (this.viewModel?.agents[this.state.selectedIndex]) {
-            this.viewModel.agents[this.state.selectedIndex] = nextAgent;
-         }
-         await this.persistVibeAgent(nextAgent, cwd);
-         this.statusMessage = `Saved vibe profile ${nextAgent.name}`;
-         if (this.ctx?.hasUI) {
-            try {
-               this.ctx.ui.notify(`Saved vibe profile ${nextAgent.name}`, "info");
-            } catch {}
-         }
-         this.tui.requestRender();
-         return;
-      }
 
       const nextAgent: AgentDefinition = {
          ...agent,
@@ -1147,10 +1010,14 @@ export class FullScreenAgentsManager implements Component, Focusable {
          this.runtime,
          AgentsStore.use((s) => s.updateAgent(updatedAgent, cwd))
       ).catch(() => {});
-      this.statusMessage = `Saved ${updatedAgent.name} to ${filePath}`;
+      const saveMessage =
+         updatedAgent.harness === "agy"
+            ? `Saved ${updatedAgent.name} to ${filePath} and linked its Agy agent`
+            : `Saved ${updatedAgent.name} to ${filePath}`;
+      this.statusMessage = saveMessage;
       if (this.ctx?.hasUI) {
          try {
-            this.ctx.ui.notify(`Saved ${updatedAgent.name} to ${filePath}`, "info");
+            this.ctx.ui.notify(saveMessage, "info");
          } catch {}
       }
       this.tui.requestRender();
@@ -1336,8 +1203,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
          }
          if (data === "d") {
             const agent = this.currentAgent();
-            // Vibe profiles are fixed (fast/good) and cannot be deleted from disk agents.
-            if (agent && agent.kind !== "vibe") {
+            if (agent) {
                deleteAgentFromDisk(agent, this.ctx?.cwd);
                void this.refreshData();
             }
@@ -1583,7 +1449,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
       const headerLeft = theme.fg("accent", theme.bold("Harbor Agents Manager"));
       const headerRight = theme.fg(
          "muted",
-         vm ? `${vm.agents.length} agent${vm.agents.length === 1 ? "" : "s"} · 2 vibe profiles` : "loading"
+         vm ? `${vm.agents.length} agent${vm.agents.length === 1 ? "" : "s"}` : "loading"
       );
       const headerPad = Math.max(1, width - visibleWidth(headerLeft) - visibleWidth(headerRight) - 4);
       lines.push(padLine(`  ${headerLeft}${" ".repeat(headerPad)}${headerRight}  `, width));
@@ -1929,11 +1795,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
          const title = isSelected ? theme.fg("accent", theme.bold(agent.name)) : theme.fg("text", agent.name);
 
          const tagStr = agentDisplayTags(agent)
-            .map((tag) => {
-               if (tag === "vibe") return theme.fg("warning", "[vibe]");
-               if (tag === "built-in") return theme.fg("dim", "[built-in]");
-               return theme.fg("warning", "(override)");
-            })
+            .map((tag) => (tag === "built-in" ? theme.fg("dim", "[built-in]") : theme.fg("warning", "(override)")))
             .join(" ");
 
          const harnessBadge = theme.fg("muted", `(${agent.harness})`);
@@ -1958,7 +1820,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
       const agent = this.currentAgent();
       const isDirtyDetail = Boolean(this.initialAgentSnapshot && JSON.stringify(agent) !== this.initialAgentSnapshot);
 
-      const titleBase = agent?.kind === "vibe" ? `Editing Vibe: ${agent.name}` : `Editing Agent: ${agent?.name ?? "?"}`;
+      const titleBase = `Editing Agent: ${agent?.name ?? "?"}`;
       const title = `${titleBase}${isDirtyDetail ? " (UNSAVED)" : ""}`;
 
       lines.push(padLine(`  ${theme.fg("accent", theme.bold(title))}`, width));
@@ -2059,11 +1921,8 @@ export class FullScreenAgentsManager implements Component, Focusable {
          { field: "description", label: "Description", val: agent.description || "(none)" }
       ];
 
-      // Vibe: name is fixed (fast/good). AGY: hide thinking + tools.
+      // Agy agents do not expose thinking or tools in this panel.
       let fieldDefs = allFieldDefs;
-      if (agent.kind === "vibe") {
-         fieldDefs = fieldDefs.filter((f) => f.field !== "name");
-      }
       if (agent.harness === "agy") {
          fieldDefs = fieldDefs.filter((f) => f.field !== "thinking" && f.field !== "tools");
       }
@@ -2097,8 +1956,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
          }
       }
 
-      const fileLoc =
-         agent.kind === "vibe" ? "(vibe Markdown profile)" : agent.filePath ? agent.filePath : "(built-in default)";
+      const fileLoc = agent.filePath ? agent.filePath : "(built-in default)";
       const fileLabelText = "File Path:".padEnd(LABEL_COL_WIDTH, " ");
       const fileLine = `  ${theme.fg("dim", fileLabelText)}${theme.fg("dim", fileLoc)}`;
       const wrappedFile = wrapTextWithAnsi(fileLine, width);
@@ -2125,12 +1983,9 @@ export class FullScreenAgentsManager implements Component, Focusable {
            ? theme.fg("warning", bodyText)
            : theme.fg("text", bodyText);
       out.push(`${bodyCursor}${bodyLabel}`);
-      if (agent.kind === "vibe" && !agent.body) {
-         out.push(theme.fg("dim", "  (empty = inherit parent system prompt)"));
-      }
       out.push("");
 
-      const rawBody = agent.body || (agent.kind === "vibe" ? "(inherit parent system prompt)" : "(no system prompt)");
+      const rawBody = agent.body || "(no system prompt)";
       const rawBodyLines = rawBody.split("\n");
       const wrappedLines: string[] = [];
       for (const rLine of rawBodyLines) {
@@ -2138,7 +1993,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
          wrappedLines.push(...(wrapped.length > 0 ? wrapped : [""]));
       }
 
-      const nonBodyCount = headerLines.length + 4 + (agent.kind === "vibe" && !agent.body ? 1 : 0);
+      const nonBodyCount = headerLines.length + 4;
       const bodyViewportHeight = Math.max(3, viewportBudget - nonBodyCount);
 
       let startIdx = Math.max(0, Math.min(this.bodyScrollOffset, Math.max(0, wrappedLines.length - 1)));

@@ -537,9 +537,9 @@ function makeHarborJobPersistenceShape(fileSystem: HarborFileSystem): HarborJobP
 /**
  * Create a coalescing writer for registry-change events.
  *
- * Most updates (live output, transcript previews) are debounced so rapid
- * changes do not hammer the filesystem. Newly registered jobs and terminal
- * transitions are persisted immediately so register/complete/fail/cancel
+ * Most metadata updates are debounced so rapid changes do not hammer the
+ * filesystem. Newly registered jobs and terminal transitions are persisted
+ * immediately so register/complete/fail/cancel
  * events survive a crash. Call {@link RegistryChangeWriter.flush} during
  * session shutdown to guarantee any pending debounced write lands on disk.
  */

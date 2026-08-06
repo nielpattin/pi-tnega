@@ -24,16 +24,26 @@ export function formatBtwResultEntry(job: {
    id: string;
    status: string;
    promptOrCommand?: string;
-   rawText?: string;
+   resultData?: unknown;
    errorText?: string;
 }) {
+   const resultValue =
+      job.resultData !== null && typeof job.resultData === "object" && "data" in job.resultData
+         ? (job.resultData as { data?: unknown }).data
+         : job.resultData;
+   const resultText =
+      typeof resultValue === "string"
+         ? resultValue
+         : resultValue === undefined
+           ? (job.errorText ?? "")
+           : JSON.stringify(resultValue);
    return {
       customType: "btw-result",
       data: {
          jobId: job.id,
          status: job.status,
          prompt: job.promptOrCommand ?? "",
-         text: job.rawText ?? job.errorText ?? ""
+         text: resultText
       }
    };
 }

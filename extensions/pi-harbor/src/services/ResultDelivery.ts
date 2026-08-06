@@ -15,6 +15,9 @@ export function createDeferredResultDelivery() {
             pending.delete(id);
          }
       },
+      pending(): Job[] {
+         return Array.from(pending.values());
+      },
       drain(): Job[] {
          const results = Array.from(pending.values());
          pending.clear();

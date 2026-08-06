@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { Type, type Static, type TSchema } from "typebox";
 import { Effect } from "effect";
 import { JobRegistry } from "../services/JobRegistry.js";
 import { SchemaValidator } from "../services/SchemaValidator.js";
@@ -8,6 +8,20 @@ export const SubmitToolParamsSchema = Type.Object({
 });
 
 export type SubmitToolParams = Static<typeof SubmitToolParamsSchema>;
+
+/** Build the worker-facing submit schema, preserving the caller's output schema for provider validation. */
+export function createSubmitToolParamsSchema(expectedSchema?: unknown): TSchema {
+   const dataSchema =
+      expectedSchema && typeof expectedSchema === "object" && !Array.isArray(expectedSchema)
+         ? Type.Unsafe(
+              // SAFETY: TaskManager converts task output schemas before creating the worker, and this preserves the validated JSON Schema verbatim for provider-side tool validation.
+              expectedSchema as TSchema
+           )
+         : Type.Unknown();
+   return Type.Object({
+      result: Type.Union([Type.Object({ data: dataSchema }), Type.Object({ error: Type.String() })])
+   });
+}
 
 export const submitToolDefinition = {
    name: "submit",

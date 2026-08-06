@@ -5,8 +5,6 @@ import { ProcessSupervisor } from "./services/ProcessSupervisor.js";
 import { TaskManager } from "./services/TaskManager.js";
 import { SchemaValidator } from "./services/SchemaValidator.js";
 import { AgentsStore } from "./services/AgentsStore.js";
-import { MailBus } from "./services/MailBus.js";
-import { VibeState } from "./services/VibeState.js";
 import { ParentSessionGate } from "./services/ParentSessionGate.js";
 import { AgyBackend } from "./backends/agy.js";
 import { PiBackend } from "./backends/pi.js";
@@ -23,8 +21,6 @@ const Base = Layer.mergeAll(
    ShellExecutor.layer,
    SchemaValidator.layer,
    AgentsStore.layer,
-   MailBus.layer,
-   VibeState.layer,
    ParentSessionGate.layer,
    HarborJobPersistence.layer
 );

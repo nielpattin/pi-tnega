@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option, Predicate } from "effect";
+import { Context, Effect, Layer, Option } from "effect";
 import {
    CapacityError,
    ConcurrencyLimitError,
@@ -8,11 +8,12 @@ import {
    DuplicateJobError,
    ParentSessionActivationError,
    formatJobId,
+   mapAgyEffort,
    resolveHarness,
    type Job,
+   type JobTranscriptEntry,
    type TaskSpec,
-   type ControlMode,
-   type JobTranscriptEntry
+   type ControlMode
 } from "../domain.js";
 import { JobRegistry } from "./JobRegistry.js";
 import { ParentSessionGate } from "./ParentSessionGate.js";
@@ -21,53 +22,17 @@ import { SchemaValidator } from "./SchemaValidator.js";
 import { AgyBackend, type AgyOneShotResult } from "../backends/agy.js";
 import { PiBackend } from "../backends/pi.js";
 import type { InheritedModelInfo, ModelRegistryLike } from "../backends/pi-model.js";
-import { readAgyTranscriptRecords, type AcpDecodedEvent } from "../utils/acp-decoder.js";
+import { acpEventToTranscriptEntry, readAgyTranscriptRecords, type AcpDecodedEvent } from "../utils/acp-decoder.js";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ensureAgyAgentLink } from "../utils/agy-agent-link.js";
 
 export const MAX_RUNNING_AGENTS = 4;
 
-function completePiResult(
-   submitted: unknown,
-   transcript: ReadonlyArray<JobTranscriptEntry> | undefined,
-   outputSchema: unknown
-): unknown {
-   if (outputSchema !== undefined) return submitted;
-   let detailed: Extract<JobTranscriptEntry, { readonly type: "assistant" }> | undefined;
-   if (transcript) {
-      for (let index = transcript.length - 1; index >= 0; index--) {
-         const entry = transcript[index];
-         if (entry?.type === "assistant" && entry.text.trim().length > 0) {
-            detailed = entry;
-            break;
-         }
-      }
-   }
-   if (!detailed) return submitted;
-   const fullText = detailed.text.trim();
-   if (typeof submitted === "string") {
-      const submittedText = submitted.trim();
-      const refersElsewhere =
-         /\b(above|previous (?:response|prose)|worker transcript|details? (?:above|earlier))\b/i.test(submittedText);
-      if (refersElsewhere || (submittedText.length < 500 && fullText.length > submittedText.length * 2))
-         return fullText;
-      return submitted;
-   }
-   if (submitted === undefined || submitted === null) return fullText;
-   if (Predicate.isObject(submitted) && !Array.isArray(submitted)) {
-      const serialized = JSON.stringify(submitted);
-      const hasDetail = "details" in submitted || "report" in submitted || "result" in submitted;
-      if (!hasDetail && serialized.length < 500 && fullText.length > serialized.length * 2) {
-         return { ...submitted, details: fullText };
-      }
-   }
-   return submitted;
-}
-
 export interface TaskManagerSpawnOptions {
    ownerSessionId?: string;
-   origin?: "standard" | "vibe" | "btw";
+   origin?: "standard" | "btw";
    skipAgentSlot?: boolean;
    modelRegistry?: ModelRegistryLike;
    inheritedModel?: InheritedModelInfo;
@@ -110,6 +75,7 @@ export interface TaskManagerShape {
    readonly controlJob: (id: string, text: string, mode: ControlMode) => Effect.Effect<void, ControlError>;
    readonly reserveTaskSeq: (maxRecoveredSeq: number) => Effect.Effect<void>;
    readonly disposeAll: Effect.Effect<void>;
+   readonly disposeAllSessions: Effect.Effect<void>;
 }
 
 export class TaskManager extends Context.Service<TaskManager, TaskManagerShape>()("harbor/TaskManager") {
@@ -126,69 +92,133 @@ export class TaskManager extends Context.Service<TaskManager, TaskManagerShape>(
          let reservedAgentSlots = 0;
          let taskSeq = 0;
          const activeSessions = new Map<string, ActiveBackendSession>();
+         const activeSessionOwners = new Map<string, string>();
+         const pendingStartup = new Map<string, AbortController>();
+         const clearActiveSession = (jobId: string, ownerSessionId?: string) => {
+            if (ownerSessionId !== undefined && activeSessionOwners.get(jobId) !== ownerSessionId) return;
+            activeSessions.delete(jobId);
+            activeSessionOwners.delete(jobId);
+         };
 
-         // Throttled live-output writer. Persists the child's accumulated output
-         // into Job.rawText while the job is still running so /tasks and the
-         // takeover view can show progress before settlement. The status check
-         // guards against a late chunk resurrecting an already-settled job.
-         const LIVE_OUTPUT_INTERVAL_MS = 250;
-         const liveOutputState = new Map<
-            string,
-            {
-               lastWrite: number;
-               timer?: ReturnType<typeof setTimeout>;
-               rawText?: string;
-               transcript?: ReadonlyArray<JobTranscriptEntry>;
-            }
-         >();
-         const writeLiveOutput = (
+         const isTerminalStatus = (status: Job["status"]) =>
+            status === "completed" || status === "failed" || status === "cancelled";
+         const updateRunningIfActive = (jobId: string, patch: Partial<Job>, ownerSessionId?: string) =>
+            Effect.gen(function* () {
+               const current = yield* registry.get(jobId);
+               if (
+                  !current ||
+                  (ownerSessionId !== undefined && current.ownerSessionId !== ownerSessionId) ||
+                  isTerminalStatus(current.status)
+               )
+                  return current;
+               return yield* registry.updateStatus(jobId, "running", patch);
+            });
+         const updateSettledIfActive = (
             jobId: string,
-            patch: { rawText?: string; transcript?: ReadonlyArray<JobTranscriptEntry> }
-         ) => {
-            Effect.runPromise(
-               Effect.gen(function* () {
-                  const job = yield* registry.get(jobId);
-                  if (job?.status === "running") {
-                     yield* registry.updateStatus(jobId, "running", patch);
-                  }
-               })
-            ).catch(() => {});
+            status: "completed" | "failed" | "cancelled",
+            patch?: Partial<Job>,
+            ownerSessionId?: string
+         ) =>
+            Effect.gen(function* () {
+               const current = yield* registry.get(jobId);
+               if (
+                  !current ||
+                  (ownerSessionId !== undefined && current.ownerSessionId !== ownerSessionId) ||
+                  (isTerminalStatus(current.status) && current.status !== status)
+               )
+                  return current;
+               return yield* registry.updateStatus(jobId, status, patch);
+            });
+
+         // Keep only transient live output. Pi takeover output comes directly
+         // from the worker's persisted JSONL session; Pi uses this only as a
+         // completion fallback when a submit refers to earlier output.
+         const liveOutputState = new Map<string, { text?: string }>();
+         const onLiveOutput = (jobId: string) => (text: string) => {
+            liveOutputState.set(jobId, { text });
          };
-         const scheduleLiveOutput = (
-            jobId: string,
-            patch: { rawText?: string; transcript?: ReadonlyArray<JobTranscriptEntry> }
-         ) => {
-            const now = Date.now();
-            let entry = liveOutputState.get(jobId);
-            if (!entry) {
-               entry = { lastWrite: 0 };
-               liveOutputState.set(jobId, entry);
-            }
-            Object.assign(entry, patch);
-            if (entry.timer !== undefined) clearTimeout(entry.timer);
-            const elapsed = now - entry.lastWrite;
-            const writeLatest = () => {
-               entry.lastWrite = Date.now();
-               entry.timer = undefined;
-               writeLiveOutput(jobId, { rawText: entry.rawText, transcript: entry.transcript });
-            };
-            if (elapsed >= LIVE_OUTPUT_INTERVAL_MS) {
-               writeLatest();
-            } else {
-               entry.timer = setTimeout(writeLatest, LIVE_OUTPUT_INTERVAL_MS - elapsed);
-            }
-         };
-         const onLiveOutput = (jobId: string) => (rawText: string) => scheduleLiveOutput(jobId, { rawText });
-         const onLiveTranscript = (jobId: string) => (transcript: ReadonlyArray<JobTranscriptEntry>) =>
-            scheduleLiveOutput(jobId, { transcript });
          const takeLiveOutput = (jobId: string) => {
             const entry = liveOutputState.get(jobId);
-            if (entry?.timer !== undefined) clearTimeout(entry.timer);
             liveOutputState.delete(jobId);
-            return { rawText: entry?.rawText, transcript: entry?.transcript };
+            return { text: entry?.text };
          };
          const clearLiveOutput = (jobId: string) => {
             takeLiveOutput(jobId);
+         };
+
+         const agyTranscripts = new Map<string, JobTranscriptEntry[]>();
+         const agyTranscriptWrites = new Map<string, Promise<void>>();
+         const MAX_AGY_TRANSCRIPT_ENTRIES = 512;
+
+         const mergeAgyTranscriptEntry = (
+            entries: ReadonlyArray<JobTranscriptEntry>,
+            entry: JobTranscriptEntry
+         ): ReadonlyArray<JobTranscriptEntry> => {
+            if (entry.type === "tool-call") {
+               if (
+                  entries.some(
+                     (candidate) => candidate.type === "tool-call" && candidate.toolCallId === entry.toolCallId
+                  )
+               ) {
+                  return entries;
+               }
+            }
+
+            if (entry.type === "tool-result") {
+               const existingIndex = entries.findIndex(
+                  (candidate) => candidate.type === "tool-result" && candidate.toolCallId === entry.toolCallId
+               );
+               if (existingIndex >= 0) {
+                  const replaced = [...entries];
+                  replaced[existingIndex] = entry;
+                  return replaced;
+               }
+            }
+
+            if (entry.type === "assistant") {
+               const previous = entries.at(-1);
+               if (previous?.type === "assistant") {
+                  return [...entries.slice(0, -1), { ...previous, text: `${previous.text}${entry.text}` }];
+               }
+            }
+
+            const next = [...entries, entry];
+            if (next.length <= MAX_AGY_TRANSCRIPT_ENTRIES) return next;
+            const first = next[0]?.type === "user" ? [next[0]] : [];
+            return [...first, ...next.slice(-(MAX_AGY_TRANSCRIPT_ENTRIES - first.length))];
+         };
+
+         const recordAgyEvent = (jobId: string, event: AcpDecodedEvent) => {
+            const previousWrite = agyTranscriptWrites.get(jobId) ?? Promise.resolve();
+            const nextWrite = previousWrite
+               .then(async () => {
+                  const entry = acpEventToTranscriptEntry(event);
+                  const liveJob = await Effect.runPromise(registry.get(jobId));
+                  if (
+                     !liveJob ||
+                     liveJob.status === "completed" ||
+                     liveJob.status === "failed" ||
+                     liveJob.status === "cancelled"
+                  )
+                     return;
+                  const current = agyTranscripts.get(jobId) ?? [];
+                  const next = mergeAgyTranscriptEntry(current, entry);
+                  if (next === current || JSON.stringify(next) === JSON.stringify(current)) return;
+                  agyTranscripts.set(jobId, [...next]);
+                  await Effect.runPromise(updateRunningIfActive(jobId, { transcript: next }, liveJob.ownerSessionId));
+               })
+               .catch(() => {});
+            agyTranscriptWrites.set(jobId, nextWrite);
+         };
+
+         const flushAgyTranscript = async (jobId: string) => {
+            await (agyTranscriptWrites.get(jobId) ?? Promise.resolve());
+            return agyTranscripts.get(jobId);
+         };
+
+         const clearAgyTranscript = (jobId: string) => {
+            agyTranscripts.delete(jobId);
+            agyTranscriptWrites.delete(jobId);
          };
 
          const spawnBatch = Effect.fn("TaskManager.spawnBatch")(function* (
@@ -203,6 +233,24 @@ export class TaskManager extends Context.Service<TaskManager, TaskManagerShape>(
             const incomingCount = specs.length;
             const skipSlot = options?.skipAgentSlot ?? false;
             const origin = options?.origin ?? "standard";
+            const ownerSessionId = options?.ownerSessionId ?? "parent";
+
+            // Validate the complete batch before reserving capacity, registering, or starting any job.
+            for (const spec of specs) {
+               if (Option.isSome(agentsStoreOpt)) {
+                  const targetAgent = spec.agent ?? "task";
+                  const agentDef = yield* agentsStoreOpt.value.getAgent(targetAgent);
+                  if (!agentDef) {
+                     return yield* new AgentNotFoundError({
+                        message: `Agent "${targetAgent}" was not found. Select an agent from /agents.`,
+                        agent: targetAgent
+                     });
+                  }
+               }
+               if (spec.outputSchema && Option.isSome(schemaValidatorOpt)) {
+                  yield* schemaValidatorOpt.value.convertSchema(spec.outputSchema);
+               }
+            }
 
             if (!skipSlot) {
                const runningJobs = yield* registry.list({ status: "running" });
@@ -218,181 +266,165 @@ export class TaskManager extends Context.Service<TaskManager, TaskManagerShape>(
                reservedAgentSlots += incomingCount;
             }
 
-            return yield* Effect.uninterruptible(
-               Effect.gen(function* () {
-                  const registeredJobs: Job[] = [];
-                  for (const spec of specs) {
-                     taskSeq++;
-                     const jobId = formatJobId(taskSeq);
+            return yield* Effect.gen(function* () {
+               const registeredJobs: Job[] = [];
+               for (const spec of specs) {
+                  taskSeq++;
+                  const jobId = formatJobId(taskSeq);
 
-                     let agentDef: any;
-                     if (Option.isSome(agentsStoreOpt)) {
-                        const targetAgent = spec.agent ?? "task";
-                        agentDef = yield* agentsStoreOpt.value.getAgent(targetAgent);
-                        if (!agentDef) {
-                           return yield* new AgentNotFoundError({
-                              message: `Agent "${targetAgent}" was not found. Select an agent from /agents.`,
-                              agent: targetAgent
-                           });
-                        }
+                  let agentDef: any;
+                  if (Option.isSome(agentsStoreOpt)) {
+                     const targetAgent = spec.agent ?? "task";
+                     agentDef = yield* agentsStoreOpt.value.getAgent(targetAgent);
+                     if (!agentDef) {
+                        return yield* new AgentNotFoundError({
+                           message: `Agent "${targetAgent}" was not found. Select an agent from /agents.`,
+                           agent: targetAgent
+                        });
                      }
+                  }
 
-                     const harness = resolveHarness(spec.harness, agentDef?.harness);
-                     if (spec.systemPrompt !== undefined) {
-                        agentDef = {
-                           ...agentDef,
-                           body: spec.systemPrompt,
-                           harness,
-                           model: spec.model ?? agentDef?.model,
-                           thinking: spec.thinking ?? agentDef?.thinking,
-                           tools: spec.tools ?? agentDef?.tools
-                        };
-                     }
-
-                     if (spec.outputSchema && Option.isSome(schemaValidatorOpt)) {
-                        yield* schemaValidatorOpt.value.convertSchema(spec.outputSchema);
-                     }
-
-                     const job = yield* registry.register({
-                        id: jobId,
-                        ownerSessionId: options?.ownerSessionId ?? "parent",
-                        name: spec.name ?? jobId,
-                        kind: "agent",
-                        agent: spec.agent ?? "task",
-                        async: spec.async === true,
+                  const harness = resolveHarness(spec.harness, agentDef?.harness);
+                  if (spec.systemPrompt !== undefined) {
+                     agentDef = {
+                        ...agentDef,
+                        body: spec.systemPrompt,
+                        harness,
                         model: spec.model ?? agentDef?.model,
                         thinking: spec.thinking ?? agentDef?.thinking,
+                        tools: spec.tools ?? agentDef?.tools
+                     };
+                  }
+
+                  if (spec.outputSchema && Option.isSome(schemaValidatorOpt)) {
+                     yield* schemaValidatorOpt.value.convertSchema(spec.outputSchema);
+                  }
+
+                  const resolvedModel = spec.model ?? agentDef?.model;
+                  const resolvedThinking = spec.thinking ?? agentDef?.thinking;
+                  const agyAgentName =
+                     harness === "agy" && typeof agentDef?.filePath === "string"
+                        ? ensureAgyAgentLink(agentDef.name, agentDef.filePath).agentName
+                        : undefined;
+                  const job = yield* registry.register({
+                     id: jobId,
+                     ownerSessionId,
+                     name: spec.name ?? jobId,
+                     kind: "agent",
+                     agent: spec.agent ?? "task",
+                     async: true,
+                     model: resolvedModel,
+                     thinking: resolvedThinking,
+                     cwd: spec.cwd ?? process.cwd(),
+                     origin,
+                     promptOrCommand: spec.task,
+                     harness,
+                     transcript: harness === "agy" ? [{ type: "user", text: spec.task }] : undefined
+                  });
+
+                  const runningJob = yield* registry.updateStatus(job.id, "running");
+                  registeredJobs.push(runningJob);
+
+                  // Spawn child backend run
+                  if (harness === "agy") {
+                     if (Option.isNone(agyBackendOpt)) {
+                        yield* registry.updateStatus(jobId, "failed", {
+                           errorText: "Agy backend is unavailable. The task was not started."
+                        });
+                        continue;
+                     }
+                     const agyBackend = agyBackendOpt.value;
+                     const logFilePath = join(tmpdir(), `harbor-agy-${process.pid}-${jobId}.log`);
+                     let logOffset = 0;
+                     const readLogChunk = async () => {
+                        const text = await readFile(logFilePath, "utf8").catch(() => "");
+                        const chunk = text.slice(logOffset);
+                        logOffset = text.length;
+                        return chunk;
+                     };
+                     const onAgyOutput = onLiveOutput(jobId);
+                     agyTranscripts.set(jobId, [{ type: "user", text: spec.task }]);
+                     const fsmSession = agyBackend.createFsmSession({
+                        prompt: spec.task,
+                        logFilePath,
+                        readLogChunk,
+                        readDb: readAgyTranscriptRecords,
+                        agent: agyAgentName,
+                        model: resolvedModel,
+                        effort: mapAgyEffort(resolvedThinking),
                         cwd: spec.cwd ?? process.cwd(),
-                        origin,
-                        promptOrCommand: spec.task,
-                        harness
+                        onOutput: onAgyOutput,
+                        onEvent: (event) => recordAgyEvent(jobId, event),
+                        onSettled: (res: AgyOneShotResult) => {
+                           void (async () => {
+                              const transcript = await flushAgyTranscript(jobId);
+                              takeLiveOutput(jobId);
+                              if (res.status === "completed") {
+                                 await Effect.runPromise(
+                                    updateSettledIfActive(
+                                       jobId,
+                                       "completed",
+                                       {
+                                          resultData: { data: res.finalText },
+                                          transcript
+                                       },
+                                       ownerSessionId
+                                    )
+                                 );
+                              } else if (res.status === "failed") {
+                                 clearActiveSession(jobId, ownerSessionId);
+                                 await Effect.runPromise(
+                                    updateSettledIfActive(
+                                       jobId,
+                                       "failed",
+                                       {
+                                          errorText: res.errorText,
+                                          transcript
+                                       },
+                                       ownerSessionId
+                                    )
+                                 );
+                              } else if (res.status === "cancelled") {
+                                 clearActiveSession(jobId, ownerSessionId);
+                                 await Effect.runPromise(
+                                    updateSettledIfActive(jobId, "cancelled", { transcript }, ownerSessionId)
+                                 );
+                              }
+                              clearAgyTranscript(jobId);
+                           })().catch(() => {});
+                        }
                      });
 
-                     const runningJob = yield* registry.updateStatus(job.id, "running");
-                     registeredJobs.push(runningJob);
+                     activeSessions.set(jobId, {
+                        abort: () => fsmSession.abort(),
+                        control: (text, mode) => fsmSession.control(text, mode)
+                     });
+                     activeSessionOwners.set(jobId, ownerSessionId);
 
-                     // Spawn child backend run
-                     if (harness === "agy") {
-                        if (Option.isNone(agyBackendOpt)) {
-                           yield* registry.updateStatus(jobId, "failed", {
-                              errorText: "Agy backend is unavailable. The task was not started."
-                           });
-                           continue;
-                        }
-                        const agyBackend = agyBackendOpt.value;
-                        const logFilePath = join(tmpdir(), `harbor-agy-${process.pid}-${jobId}.log`);
-                        let logOffset = 0;
-                        const readLogChunk = async () => {
-                           const text = await readFile(logFilePath, "utf8").catch(() => "");
-                           const chunk = text.slice(logOffset);
-                           logOffset = text.length;
-                           return chunk;
-                        };
-                        const agyTranscript: JobTranscriptEntry[] = [];
-                        let agyAssistantIndex: number | undefined;
-                        const emitAgyTranscript = () => onLiveTranscript(jobId)([...agyTranscript]);
-                        const onAgyOutput = (rawText: string) => {
-                           const assistant: JobTranscriptEntry = { type: "assistant", text: rawText };
-                           if (agyAssistantIndex === undefined) {
-                              agyAssistantIndex = agyTranscript.length;
-                              agyTranscript.push(assistant);
-                           } else {
-                              agyTranscript[agyAssistantIndex] = assistant;
-                           }
-                           scheduleLiveOutput(jobId, { rawText, transcript: [...agyTranscript] });
-                        };
-                        const appendAgyUserPrompt = (text: string) => {
-                           agyTranscript.push({ type: "user", text });
-                           agyAssistantIndex = undefined;
-                           emitAgyTranscript();
-                        };
-                        const parsePreview = (preview: string | undefined): unknown => {
-                           if (preview === undefined) return undefined;
-                           try {
-                              return JSON.parse(preview);
-                           } catch {
-                              return preview;
-                           }
-                        };
-                        const onAgyEvent = (event: AcpDecodedEvent) => {
-                           if (event._tag === "ToolStart") {
-                              agyTranscript.push({
-                                 type: "tool-call",
-                                 toolCallId: event.toolCallId,
-                                 toolName: event.toolName,
-                                 arguments: parsePreview(event.argsPreview),
-                                 timestamp: event.timestamp
-                              });
-                           } else if (event._tag === "ToolEnd") {
-                              agyTranscript.push({
-                                 type: "tool-result",
-                                 toolCallId: event.toolCallId,
-                                 toolName: event.toolName,
-                                 content:
-                                    event.resultPreview === undefined
-                                       ? []
-                                       : [{ type: "text", text: event.resultPreview }],
-                                 isError: event.isError === true,
-                                 timestamp: event.timestamp
-                              });
-                           } else {
-                              return;
-                           }
-                           emitAgyTranscript();
-                        };
-                        const fsmSession = agyBackend.createFsmSession({
-                           prompt: spec.task,
-                           logFilePath,
-                           readLogChunk,
-                           readDb: readAgyTranscriptRecords,
-                           onEvent: onAgyEvent,
-                           model: spec.model ?? agentDef?.model,
-                           effort: agentDef?.thinking,
-                           cwd: spec.cwd ?? process.cwd(),
-                           onOutput: onAgyOutput,
-                           onSettled: (res: AgyOneShotResult) => {
-                              const live = takeLiveOutput(jobId);
-                              if (res.status === "completed") {
-                                 Effect.runPromise(
-                                    registry.updateStatus(jobId, "completed", {
-                                       resultData: { data: res.finalText },
-                                       rawText: res.rawText,
-                                       transcript: live.transcript ?? [...agyTranscript]
-                                    })
-                                 ).catch(() => {});
-                              } else if (res.status === "failed") {
-                                 activeSessions.delete(jobId);
-                                 Effect.runPromise(
-                                    registry.updateStatus(jobId, "failed", {
-                                       errorText: res.errorText,
-                                       rawText: res.rawText,
-                                       transcript: live.transcript ?? [...agyTranscript]
-                                    })
-                                 ).catch(() => {});
-                              } else if (res.status === "cancelled") {
-                                 activeSessions.delete(jobId);
-                                 Effect.runPromise(registry.updateStatus(jobId, "cancelled")).catch(() => {});
-                              }
-                           }
+                     Effect.runPromise(fsmSession.start()).catch((error) => {
+                        clearActiveSession(jobId, ownerSessionId);
+                        Effect.runPromise(
+                           updateSettledIfActive(
+                              jobId,
+                              "failed",
+                              {
+                                 errorText: error instanceof Error ? error.message : String(error)
+                              },
+                              ownerSessionId
+                           )
+                        ).catch(() => {});
+                     });
+                  } else {
+                     if (Option.isNone(piBackendOpt)) {
+                        yield* registry.updateStatus(jobId, "failed", {
+                           errorText: "Pi backend is unavailable. The task was not started."
                         });
-
-                        activeSessions.set(jobId, {
-                           abort: () => fsmSession.abort(),
-                           control: (text, mode) => {
-                              appendAgyUserPrompt(text);
-                              return fsmSession.control(text, mode);
-                           }
-                        });
-
-                        Effect.runPromise(fsmSession.start()).catch(() => {});
-                     } else {
-                        if (Option.isNone(piBackendOpt)) {
-                           yield* registry.updateStatus(jobId, "failed", {
-                              errorText: "Pi backend is unavailable. The task was not started."
-                           });
-                           continue;
-                        }
-                        const piSession = yield* Effect.promise(() =>
+                        continue;
+                     }
+                     const startupController = new AbortController();
+                     pendingStartup.set(jobId, startupController);
+                     const piSession = yield* Effect.onInterrupt(
+                        Effect.promise(() =>
                            piBackendOpt.value
                               .spawnSession({
                                  jobId,
@@ -407,73 +439,103 @@ export class TaskManager extends Context.Service<TaskManager, TaskManagerShape>(
                                  modelRegistry: options?.modelRegistry,
                                  inheritedModel: options?.inheritedModel,
                                  outputSchema: spec.outputSchema,
+                                 signal: startupController.signal,
                                  runEffect: (eff) =>
                                     Effect.runPromise(Effect.provide(eff as Effect.Effect<any, any>, workerContext)),
                                  onOutput: onLiveOutput(jobId),
-                                 onTranscript: onLiveTranscript(jobId),
+                                 onSystemPrompt: (systemPrompt) =>
+                                    Effect.runPromise(
+                                       updateRunningIfActive(jobId, { systemPrompt }, ownerSessionId)
+                                    ).then(() => undefined),
                                  onSessionReady: (metadata) =>
                                     Effect.runPromise(
-                                       registry.updateStatus(jobId, "running", {
-                                          ...metadata,
-                                          sessionFile: metadata.sessionFile,
-                                          sessionId: metadata.sessionId
-                                       })
+                                       updateRunningIfActive(
+                                          jobId,
+                                          {
+                                             ...metadata,
+                                             sessionFile: metadata.sessionFile,
+                                             sessionId: metadata.sessionId
+                                          },
+                                          ownerSessionId
+                                       )
                                     ).then(() => undefined),
                                  onSettled: (resStatus, data, errorText) => {
-                                    activeSessions.delete(jobId);
-                                    const live = takeLiveOutput(jobId);
+                                    clearActiveSession(jobId, ownerSessionId);
+                                    takeLiveOutput(jobId);
                                     if (resStatus === "completed") {
                                        Effect.runPromise(
-                                          registry.updateStatus(jobId, "completed", {
-                                             resultData: completePiResult(data, live.transcript, spec.outputSchema),
-                                             rawText: live.rawText,
-                                             transcript: live.transcript
-                                          })
+                                          updateSettledIfActive(
+                                             jobId,
+                                             "completed",
+                                             { resultData: data },
+                                             ownerSessionId
+                                          )
                                        ).catch(() => {});
                                     } else if (resStatus === "failed") {
                                        Effect.runPromise(
-                                          registry.updateStatus(jobId, "failed", {
-                                             errorText: errorText ?? "Job failed",
-                                             rawText: live.rawText,
-                                             transcript: live.transcript
-                                          })
+                                          updateSettledIfActive(
+                                             jobId,
+                                             "failed",
+                                             { errorText: errorText ?? "Job failed" },
+                                             ownerSessionId
+                                          )
                                        ).catch(() => {});
                                     } else if (resStatus === "cancelled") {
-                                       Effect.runPromise(registry.updateStatus(jobId, "cancelled")).catch(() => {});
+                                       Effect.runPromise(
+                                          updateSettledIfActive(jobId, "cancelled", undefined, ownerSessionId)
+                                       ).catch(() => {});
                                     }
                                  }
                               })
                               .catch((err) => {
-                                 activeSessions.delete(jobId);
+                                 clearActiveSession(jobId, ownerSessionId);
                                  clearLiveOutput(jobId);
-                                 Effect.runPromise(
-                                    registry.updateStatus(jobId, "failed", {
-                                       errorText: err instanceof Error ? err.message : String(err)
-                                    })
-                                 ).catch(() => {});
+                                 if (!startupController.signal.aborted) {
+                                    Effect.runPromise(
+                                       updateSettledIfActive(
+                                          jobId,
+                                          "failed",
+                                          { errorText: err instanceof Error ? err.message : String(err) },
+                                          ownerSessionId
+                                       )
+                                    ).catch(() => {});
+                                 }
                                  return {
                                     abort: () => Effect.void,
                                     control: () =>
                                        Effect.fail(new ControlError({ message: "Session failed to initialize" }))
                                  };
                               })
-                        );
+                        ),
+                        () =>
+                           Effect.gen(function* () {
+                              startupController.abort();
+                              yield* updateSettledIfActive(jobId, "cancelled", undefined, ownerSessionId).pipe(
+                                 Effect.ignore
+                              );
+                           })
+                     ).pipe(Effect.ensuring(Effect.sync(() => pendingStartup.delete(jobId))));
 
-                        activeSessions.set(jobId, {
-                           abort: () => piSession.abort(),
-                           control: (text, mode) => piSession.control(text, mode)
-                        });
+                     if (startupController.signal.aborted) {
+                        yield* piSession.abort().pipe(Effect.ignore);
+                        continue;
                      }
+
+                     activeSessions.set(jobId, {
+                        abort: () => piSession.abort(),
+                        control: (text, mode) => piSession.control(text, mode)
+                     });
+                     activeSessionOwners.set(jobId, ownerSessionId);
                   }
-                  return registeredJobs;
-               }).pipe(
-                  Effect.ensuring(
-                     Effect.sync(() => {
-                        if (!skipSlot) {
-                           reservedAgentSlots = Math.max(0, reservedAgentSlots - incomingCount);
-                        }
-                     })
-                  )
+               }
+               return registeredJobs;
+            }).pipe(
+               Effect.ensuring(
+                  Effect.sync(() => {
+                     if (!skipSlot) {
+                        reservedAgentSlots = Math.max(0, reservedAgentSlots - incomingCount);
+                     }
+                  })
                )
             );
          });
@@ -490,7 +552,13 @@ export class TaskManager extends Context.Service<TaskManager, TaskManagerShape>(
             const active = activeSessions.get(id);
             if (active) {
                yield* active.abort().pipe(Effect.ignore);
-               activeSessions.delete(id);
+               clearActiveSession(id);
+            } else {
+               const startup = pendingStartup.get(id);
+               if (startup) {
+                  startup.abort();
+                  pendingStartup.delete(id);
+               }
             }
             clearLiveOutput(id);
             return yield* registry.updateStatus(id, "cancelled");
@@ -510,16 +578,14 @@ export class TaskManager extends Context.Service<TaskManager, TaskManagerShape>(
             if (job?.status === "completed") {
                yield* registry.updateStatus(id, "running", {
                   resultData: undefined,
-                  errorText: undefined,
-                  rawText: job.rawText
+                  errorText: undefined
                });
                return yield* active.control(text, mode).pipe(
                   Effect.catch((error) =>
                      registry
                         .updateStatus(id, "completed", {
                            resultData: job.resultData,
-                           errorText: job.errorText,
-                           rawText: job.rawText
+                           errorText: job.errorText
                         })
                         .pipe(Effect.flatMap(() => Effect.fail(error)))
                   )
@@ -537,14 +603,36 @@ export class TaskManager extends Context.Service<TaskManager, TaskManagerShape>(
             })
          );
 
-         const disposeAll = Effect.gen(function* () {
-            for (const [id, session] of Array.from(activeSessions.entries())) {
-               yield* session.abort().pipe(Effect.ignore);
-               yield* registry.updateStatus(id, "cancelled").pipe(Effect.ignore);
-               clearLiveOutput(id);
-            }
-            activeSessions.clear();
-         });
+         const disposeSessions = (preserveCompleted: boolean) =>
+            Effect.gen(function* () {
+               for (const [id, startup] of Array.from(pendingStartup.entries())) {
+                  startup.abort();
+                  pendingStartup.delete(id);
+                  yield* updateSettledIfActive(id, "cancelled").pipe(Effect.ignore);
+               }
+               for (const [id, session] of Array.from(activeSessions.entries())) {
+                  const job = yield* registry.get(id);
+                  if (
+                     preserveCompleted &&
+                     (job?.status === "completed" || job?.status === "failed" || job?.status === "cancelled")
+                  ) {
+                     clearActiveSession(id);
+                     clearLiveOutput(id);
+                     continue;
+                  }
+                  yield* session.abort().pipe(Effect.ignore);
+                  if (job?.status !== "completed" && job?.status !== "failed" && job?.status !== "cancelled") {
+                     yield* updateSettledIfActive(id, "cancelled").pipe(Effect.ignore);
+                  }
+                  clearActiveSession(id);
+                  clearLiveOutput(id);
+               }
+               activeSessions.clear();
+               activeSessionOwners.clear();
+            });
+
+         const disposeAll = disposeSessions(true);
+         const disposeAllSessions = disposeSessions(false);
 
          return TaskManager.of({
             spawnTask,
@@ -552,7 +640,8 @@ export class TaskManager extends Context.Service<TaskManager, TaskManagerShape>(
             cancelJob,
             controlJob,
             reserveTaskSeq,
-            disposeAll
+            disposeAll,
+            disposeAllSessions
          });
       })
    );

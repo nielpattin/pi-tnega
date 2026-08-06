@@ -1,7 +1,8 @@
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { deriveChildSessionDirectory } from "../utils/child-session-dir.js";
 import { JobRegistry } from "../services/JobRegistry.js";
 import { TaskManager } from "../services/TaskManager.js";
+import { ProcessSupervisor } from "../services/ProcessSupervisor.js";
 import { ParentSessionGate } from "../services/ParentSessionGate.js";
 import { ParentSessionActivationError } from "../domain.js";
 import {
@@ -32,10 +33,18 @@ export const activateParentSession = Effect.fn("activateParentSession")(function
    const persistence = yield* HarborJobPersistence;
    const registry = yield* JobRegistry;
    const taskManager = yield* TaskManager;
+   const processSupervisorOpt = yield* Effect.serviceOption(ProcessSupervisor);
    const gate = yield* ParentSessionGate;
 
    return yield* gate.runExclusive(
       Effect.gen(function* () {
+         const currentTarget = yield* persistence.currentTarget();
+         const currentState = yield* gate.stateFor(parentSessionFile);
+         const requestedTarget = parentSessionFile || undefined;
+         if (currentState === "ready" && currentTarget === requestedTarget) {
+            return;
+         }
+
          yield* gate.markBusy(parentSessionFile);
 
          // 1. Disable/unsubscribe previous persistence listener.
@@ -45,6 +54,9 @@ export const activateParentSession = Effect.fn("activateParentSession")(function
          }
 
          // 2. Flush any pending writes for the previous parent.
+         if (Option.isSome(processSupervisorOpt)) {
+            yield* processSupervisorOpt.value.disposeAll;
+         }
          const previousWriter = yield* persistence.takeChangeWriter();
          if (previousWriter) {
             yield* Effect.promise(() => previousWriter.flush());
@@ -54,7 +66,7 @@ export const activateParentSession = Effect.fn("activateParentSession")(function
          // Stop backend sessions and live-output state owned by the previous
          // parent before replacing the registry. Late callbacks must not update
          // the new or ephemeral parent registry.
-         yield* taskManager.disposeAll;
+         yield* taskManager.disposeAllSessions;
 
          // 3. Configure the new persistence target (explicitly clears when undefined).
          yield* persistence.configure(parentSessionFile);
@@ -65,12 +77,23 @@ export const activateParentSession = Effect.fn("activateParentSession")(function
          // 5. Build the replacement registry contents in memory.
          const restored: Job[] = [];
          for (const stored of index.jobs) {
+            // Older reloads could leave a completed Agy result marked cancelled:
+            // session disposal aborted its still-retained continuation handle after the
+            // result had already been persisted. A result without an error is the
+            // durable evidence needed to repair that historical transition once.
+            const repaired =
+               stored.status === "cancelled" &&
+               stored.harness === "agy" &&
+               stored.errorText === undefined &&
+               stored.resultData !== undefined
+                  ? { ...stored, status: "completed" as const }
+                  : stored;
             const isTerminal =
-               stored.status === "completed" || stored.status === "failed" || stored.status === "cancelled";
+               repaired.status === "completed" || repaired.status === "failed" || repaired.status === "cancelled";
 
             const job: Job = isTerminal
-               ? { ...stored, waitInterest: 0, killInterest: 0 }
-               : convertInterruptedJob(stored);
+               ? { ...repaired, waitInterest: 0, killInterest: 0 }
+               : convertInterruptedJob(repaired);
 
             restored.push(job);
          }
@@ -104,7 +127,7 @@ export const activateParentSession = Effect.fn("activateParentSession")(function
                   // Disable any partially-configured target so a later retry starts clean
                   // rather than continuing to use the failed parent's jobs or persistence.
                   yield* Effect.ignore(persistence.configure(undefined));
-                  yield* Effect.ignore(taskManager.disposeAll);
+                  yield* Effect.ignore(taskManager.disposeAllSessions);
                   yield* Effect.ignore(registry.clear());
                   yield* Effect.ignore(persistence.takeChangeListener());
                   yield* Effect.ignore(persistence.takeChangeWriter());
@@ -153,7 +176,7 @@ export const ensureParentSessionRecovery = Effect.fn("ensureParentSessionRecover
 
    // Invalid and lazy parent paths intentionally use an ephemeral parent. Once
    // activation has established that disabled state, keep readiness stable so
-   // task, vibe, and btw can all spawn without reactivating and clearing each
+   // task and btw can both spawn without reactivating and clearing each
    // other's in-memory jobs. A transition from a valid target still activates
    // because stateFor will report idle for the new parent.
    const disabledParent = deriveChildSessionDirectory(parentSessionFile) === undefined;

@@ -2,6 +2,7 @@ import { Effect, Schedule } from "effect";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { JobTranscriptEntry } from "../domain.js";
 
 export interface AcpRecord {
    readonly id?: string;
@@ -9,6 +10,7 @@ export interface AcpRecord {
    readonly status?: string;
    readonly toolCallId?: string;
    readonly toolName?: string;
+   readonly stepIndex?: number;
    readonly args?: unknown;
    readonly result?: unknown;
    readonly isError?: boolean;
@@ -22,6 +24,7 @@ export type AcpDecodedEvent =
         readonly toolCallId: string;
         readonly toolName: string;
         readonly argsPreview?: string;
+        readonly stepIndex?: number;
         readonly timestamp?: number;
      }
    | {
@@ -30,6 +33,7 @@ export type AcpDecodedEvent =
         readonly toolName: string;
         readonly resultPreview?: string;
         readonly isError?: boolean;
+        readonly stepIndex?: number;
         readonly timestamp?: number;
      }
    | {
@@ -83,7 +87,14 @@ export async function readAgyTranscriptRecords(
             if (typeof call.name !== "string") return [];
             const step = typeof row.step_index === "number" ? row.step_index : records.length;
             const id = `agy-${step}-${index}`;
-            records.push({ id, toolCallId: id, toolName: call.name, status: "in_progress", args: call.args });
+            records.push({
+               id,
+               toolCallId: id,
+               toolName: call.name,
+               status: "in_progress",
+               args: call.args,
+               stepIndex: step
+            });
             return [{ id, name: call.name }];
          });
          continue;
@@ -98,12 +109,55 @@ export async function readAgyTranscriptRecords(
                toolName: call.name,
                status: "completed",
                result: row.content,
-               isError: row.status !== "DONE"
+               isError: row.status !== "DONE",
+               stepIndex: typeof row.step_index === "number" ? row.step_index : undefined
             });
          }
       }
    }
    return records.slice(lastProcessedIndex);
+}
+
+function parsePreview(value: string | undefined): unknown {
+   if (value === undefined) return undefined;
+   try {
+      return JSON.parse(value);
+   } catch {
+      return value;
+   }
+}
+
+/** Convert one decoded Agy event into the transcript shape consumed by takeover. */
+export function acpEventToTranscriptEntry(event: AcpDecodedEvent): JobTranscriptEntry {
+   const raw = "stepIndex" in event && event.stepIndex !== undefined ? { stepIndex: event.stepIndex } : undefined;
+   if (event._tag === "ToolStart") {
+      return {
+         type: "tool-call",
+         toolCallId: event.toolCallId,
+         toolName: event.toolName,
+         arguments: parsePreview(event.argsPreview) ?? {},
+         ...(raw === undefined ? {} : { raw }),
+         timestamp: event.timestamp
+      };
+   }
+
+   if (event._tag === "ToolEnd") {
+      return {
+         type: "tool-result",
+         toolCallId: event.toolCallId,
+         toolName: event.toolName,
+         content: event.resultPreview === undefined ? [] : [{ type: "text", text: event.resultPreview }],
+         isError: event.isError === true,
+         ...(raw === undefined ? {} : { raw }),
+         timestamp: event.timestamp
+      };
+   }
+
+   return {
+      type: "assistant",
+      text: event.delta,
+      timestamp: event.timestamp
+   };
 }
 
 export function decodeAcpRecord(record: AcpRecord): AcpDecodedEvent | null {
@@ -126,6 +180,7 @@ export function decodeAcpRecord(record: AcpRecord): AcpDecodedEvent | null {
                : record.args != null
                  ? JSON.stringify(record.args)
                  : undefined,
+         ...(record.stepIndex === undefined ? {} : { stepIndex: record.stepIndex }),
          timestamp: record.timestamp
       };
    }
@@ -142,6 +197,7 @@ export function decodeAcpRecord(record: AcpRecord): AcpDecodedEvent | null {
                  ? JSON.stringify(record.result)
                  : undefined,
          isError: record.isError ?? false,
+         ...(record.stepIndex === undefined ? {} : { stepIndex: record.stepIndex }),
          timestamp: record.timestamp
       };
    }

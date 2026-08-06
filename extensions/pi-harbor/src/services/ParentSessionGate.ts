@@ -25,6 +25,7 @@ export class ParentSessionGate extends Context.Service<ParentSessionGate, Parent
       ParentSessionGate,
       Effect.sync(() => {
          let currentParent: string | undefined;
+         let hasActivated = false;
          let state:
             | { readonly status: "ready" }
             | {
@@ -65,6 +66,7 @@ export class ParentSessionGate extends Context.Service<ParentSessionGate, Parent
             if (state.status === "activating") {
                yield* Deferred.succeed(state.deferred, undefined);
             }
+            hasActivated = true;
             state = { status: "ready" };
          });
 
@@ -95,7 +97,7 @@ export class ParentSessionGate extends Context.Service<ParentSessionGate, Parent
          const stateFor = Effect.fn("ParentSessionGate.stateFor")((parentSessionFile) =>
             Effect.sync(() => {
                const target = normalize(parentSessionFile);
-               if (target !== currentParent) return "idle" as const;
+               if (target !== currentParent || !hasActivated) return "idle" as const;
                return state.status;
             })
          );

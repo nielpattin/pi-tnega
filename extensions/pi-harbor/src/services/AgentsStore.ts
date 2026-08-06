@@ -3,73 +3,86 @@ import * as path from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Context, Effect, Layer, Ref } from "effect";
 import type { AgentDefinition, HarnessName } from "../domain.js";
-
-export interface VibeProfileConfig {
-   harness: HarnessName;
-   pi?: {
-      model?: string;
-      reasoning_effort?: string;
-      tools?: string[];
-      body?: string;
-   };
-   agy?: {
-      model?: string;
-      reasoning_effort?: string;
-      tools?: string[];
-      body?: string;
-   };
-   tools?: string[];
-   body?: string;
-}
+import { ensureAgyAgentLink } from "../utils/agy-agent-link.js";
 
 export interface AgentsStoreShape {
    readonly getAgent: (name: string, cwd?: string) => Effect.Effect<AgentDefinition | undefined>;
    readonly listAgents: (cwd?: string) => Effect.Effect<ReadonlyArray<AgentDefinition>>;
-   readonly getVibeProfiles: (cwd?: string) => Effect.Effect<{ fast: VibeProfileConfig; good: VibeProfileConfig }>;
    readonly updateAgent: (agent: AgentDefinition, cwd?: string) => Effect.Effect<AgentDefinition>;
    readonly deleteAgent: (name: string, cwd?: string) => Effect.Effect<{ success: boolean; error?: string }>;
-   readonly updateVibeProfile: (
-      name: "fast" | "good",
-      profile: VibeProfileConfig,
-      cwd?: string
-   ) => Effect.Effect<VibeProfileConfig>;
 }
 
-export const BUILTIN_AGENTS: Record<string, AgentDefinition> = {
-   fast: {
-      name: "fast",
-      display_name: "fast",
-      description: "Vibe director profile for quick research and light edits.",
-      tools: ["read", "write", "edit", "grep", "find", "submit", "hub"],
-      guidance: "Use for quick research and light edits.",
-      harness: "pi",
-      enabled: true,
-      source: "builtin",
-      kind: "vibe",
-      body: ""
-   },
-   good: {
-      name: "good",
-      display_name: "good",
-      description: "Vibe director profile for complex implementation.",
-      tools: ["read", "grep", "find", "ls", "submit", "hub"],
-      guidance: "Use for complex implementation work.",
-      harness: "pi",
-      enabled: true,
-      source: "builtin",
-      kind: "vibe",
-      body: ""
-   },
-   scout: {
-      name: "scout",
-      display_name: "scout",
-      description: "Read-only codebase research agent for rapid exploration and analysis.",
-      tools: ["read", "grep", "find", "web_search_exa", "web_fetch_exa"],
-      guidance: "Read-only research scout returning compressed context.",
-      harness: "pi",
-      enabled: true,
-      source: "builtin",
-      body: `# SCOUT AGENT
+export const FAST_AGENT_BODY = `# FAST AGENT
+
+You are a worker agent for delegated tasks.
+
+You have full access to the configured worker tools and must use them as needed to complete the task.
+
+Maintain focus on the assigned task. Do not deviate from it.
+
+## Directives
+
+- Complete only the assigned work.
+- Make file edits, run commands, and create files when the task requires it.
+- Prefer narrow lookups, then read only the required ranges.
+- Avoid full-file reads unless necessary.
+- Prefer edits to existing files over creating new files.
+- Never create documentation files unless explicitly requested.
+- Follow the assignment and all supplied constraints.
+
+## Result
+
+Return the complete, self-contained result through the \`submit\` tool. The submitted data must contain every detail the parent needs. Never refer to text above, prior assistant prose, or the worker transcript.`;
+
+export const GOOD_AGENT_BODY = `# GOOD AGENT
+
+You are a specialized general-purpose subagent built for hard delegated implementation work. You handle tasks that are too complex, broad, or failure-prone for a normal task agent. You have full tool access and are expected to plan carefully, explore thoroughly, execute multi-step changes, recover from errors, and deliver correct, maintainable results.
+
+## Role
+
+You excel at difficult implementation challenges: multi-file features, deep root-cause debugging, non-trivial refactors, cross-cutting fixes, performance-sensitive changes, and work that requires understanding large context and many moving parts. You act as the high-capability worker when the parent agent needs reliable execution on hard tasks rather than lightweight edits.
+
+## Capabilities / Tools
+
+- Full access to available tools (filesystem, search, shell, editors, tests, web, etc.)
+- Deep codebase exploration and dependency tracing before writing code
+- Multi-phase planning and ordered execution of complex changes
+- Iterative validation, test runs, and self-correction when approaches fail
+- Reasoning across correctness, maintainability, performance, and project conventions
+- Handling ambiguity by gathering evidence with tools instead of guessing
+
+## Workflow
+
+1. Parse the delegated request: restate goals, constraints, success criteria, and risk areas.
+2. Explore the environment and relevant code with tools; map files, APIs, tests, and conventions.
+3. Build a concrete plan that breaks the hard problem into ordered, verifiable steps.
+4. Execute changes carefully; prefer small validated increments over large untested leaps.
+5. After each major step, verify with tests, typechecks, manual checks, or targeted reads.
+6. When blocked or failing, diagnose with tools, revise the plan, and continue. Do not stop at the first obstacle.
+7. Before finishing, re-check the original requirements and clean up loose ends.
+
+## Constraints
+
+- Stay scoped to the delegated hard task; do not expand into unrelated work.
+- Prefer proven, maintainable solutions over clever hacks when complexity is high.
+- Do not invent APIs, files, or behaviors. Verify with tools and existing code.
+- Follow project conventions, existing patterns, and safety boundaries.
+- Avoid destructive or irreversible actions unless clearly required and justified.
+- If critical information is missing, gather it with tools or state assumptions explicitly.
+
+## Output
+
+- Start with a brief summary of the problem and the approach taken.
+- List key decisions, files changed, and commands or checks run.
+- Call out remaining risks, incomplete items, or recommended follow-ups.
+- End with a clear status suitable for the parent agent, including the next step when needed.
+- Keep the report structured and actionable so orchestration can continue cleanly.
+
+## Result
+
+Return the complete, self-contained result through the \`submit\` tool. Include every detail the parent needs directly inside result data. Never refer to text above, previous prose, or the worker transcript.`;
+
+export const SCOUT_AGENT_BODY = `# SCOUT AGENT
 
 Investigate the codebase rapidly. Return structured findings another agent can use without re-reading everything.
 
@@ -98,18 +111,9 @@ You MUST keep going until complete.
 Return:
 - Summary of findings
 - Files examined with path references
-- Brief architecture notes on how pieces connect`
-   },
-   task: {
-      name: "task",
-      display_name: "task",
-      description: "General-purpose worker for delegated implementation tasks with full tool access.",
-      tools: ["read", "write", "edit", "bash", "grep", "find", "hub", "web_search_exa", "web_fetch_exa"],
-      guidance: "Use for delegated implementation work that needs full tools.",
-      harness: "pi",
-      enabled: true,
-      source: "builtin",
-      body: `# TASK AGENT
+- Brief architecture notes on how pieces connect`;
+
+export const TASK_AGENT_BODY = `# TASK AGENT
 
 You are a worker agent for delegated tasks.
 
@@ -128,39 +132,71 @@ You MUST maintain hyperfocus on the assigned task. NEVER deviate from it.
 - Follow the assignment and instructions given to you.
 
 ## Output
-Return a short completion note: what changed, which paths, anything the parent must know next.`
-   },
-   reviewer: {
-      name: "reviewer",
-      display_name: "reviewer",
-      description: "Code review agent that evaluates git changes and PR diffs.",
-      tools: ["read", "grep", "find", "hub"],
-      guidance: "Review agent evaluating code diffs and safety boundaries.",
-      harness: "pi",
-      enabled: true,
-      source: "builtin",
-      body: `# REVIEWER AGENT
+Return a short completion note: what changed, which paths, anything the parent must know next.`;
+
+export const REVIEWER_AGENT_BODY = `# REVIEWER AGENT
 
 Evaluate code changes and pull request diffs.
 
 ## Directives
 - Check for regression risks, missing null checks, edge cases, and architectural consistency.
-- Provide clear actionable review feedback.`
-   }
-};
+- Provide clear actionable review feedback.`;
 
-export const DEFAULT_VIBE_PROFILES: { fast: VibeProfileConfig; good: VibeProfileConfig } = {
+export const BUILTIN_AGENTS: Record<string, AgentDefinition> = {
    fast: {
+      name: "fast",
+      display_name: "fast",
+      description: "Lightweight worker for quick research and small implementation tasks.",
+      tools: ["read", "write", "edit", "grep", "find", "submit"],
+      guidance: "Use for quick research and light implementation work.",
       harness: "pi",
-      pi: {
-         tools: ["read", "write", "edit", "grep", "find"]
-      }
+      enabled: true,
+      source: "builtin",
+      body: FAST_AGENT_BODY
    },
    good: {
+      name: "good",
+      display_name: "good",
+      description: "Full-capability worker for complex implementation tasks.",
+      tools: ["read", "write", "edit", "grep", "find", "ls", "submit"],
+      guidance: "Use for complex implementation work and edge-case verification.",
       harness: "pi",
-      pi: {
-         tools: ["read", "write", "edit", "grep", "find", "hub"]
-      }
+      enabled: true,
+      source: "builtin",
+      body: GOOD_AGENT_BODY
+   },
+   scout: {
+      name: "scout",
+      display_name: "scout",
+      description: "Read-only codebase research agent for rapid exploration and analysis.",
+      tools: ["read", "grep", "find", "web_search_exa", "web_fetch_exa"],
+      guidance: "Read-only research scout returning compressed context.",
+      harness: "pi",
+      enabled: true,
+      source: "builtin",
+      body: SCOUT_AGENT_BODY
+   },
+   task: {
+      name: "task",
+      display_name: "task",
+      description: "General-purpose worker for delegated implementation tasks with full tool access.",
+      tools: ["read", "write", "edit", "bash", "grep", "find", "web_search_exa", "web_fetch_exa"],
+      guidance: "Use for delegated implementation work that needs full tools.",
+      harness: "pi",
+      enabled: true,
+      source: "builtin",
+      body: TASK_AGENT_BODY
+   },
+   reviewer: {
+      name: "reviewer",
+      display_name: "reviewer",
+      description: "Code review agent that evaluates git changes and PR diffs.",
+      tools: ["read", "grep", "find"],
+      guidance: "Review agent evaluating code diffs and safety boundaries.",
+      harness: "pi",
+      enabled: true,
+      source: "builtin",
+      body: REVIEWER_AGENT_BODY
    }
 };
 
@@ -195,9 +231,7 @@ export function parseAgentMarkdown(name: string, content: string, filePath?: str
 
    const body = bodyText.trim();
    const kv = parseYamlFrontmatter(fmText);
-   const kind = kv.kind === "vibe" || BUILTIN_AGENTS[name]?.kind === "vibe" ? "vibe" : "agent";
-   // Empty vibe body means inherit the parent session's effective system prompt.
-   if (!body && kind !== "vibe") return null;
+   if (!body) return null;
 
    const description = kv.description ?? "";
    const display_name = kv.display_name || undefined;
@@ -226,7 +260,6 @@ export function parseAgentMarkdown(name: string, content: string, filePath?: str
       harness,
       enabled,
       source: isBuiltin ? "builtin" : filePath?.includes(".pi/agents") ? "project" : "global",
-      kind,
       body,
       filePath
    };
@@ -234,6 +267,7 @@ export function parseAgentMarkdown(name: string, content: string, filePath?: str
 
 export function serializeAgentMarkdown(def: AgentDefinition): string {
    const lines: string[] = ["---"];
+   lines.push(`name: ${def.name}`);
    lines.push(`description: ${def.description || ""}`);
    if (def.display_name) lines.push(`display_name: ${def.display_name}`);
    if (def.tools && def.tools.length > 0) {
@@ -242,14 +276,11 @@ export function serializeAgentMarkdown(def: AgentDefinition): string {
    if (def.model) lines.push(`model: ${def.model}`);
    if (def.thinking) lines.push(`thinking: ${def.thinking}`);
    if (def.guidance) lines.push(`guidance: ${def.guidance}`);
-   if (def.kind === "vibe") lines.push("kind: vibe");
    lines.push(`harness: ${def.harness || "pi"}`);
    lines.push(`enabled: ${def.enabled ? "true" : "false"}`);
    lines.push("---");
    lines.push("");
-   lines.push(
-      def.kind === "vibe" ? def.body : def.body || `# ${def.name.toUpperCase()} AGENT\n\nDefault agent instructions.`
-   );
+   lines.push(def.body || `# ${def.name.toUpperCase()} AGENT\n\nDefault agent instructions.`);
    lines.push("");
    return lines.join("\n");
 }
@@ -329,6 +360,7 @@ export function saveAgentToDisk(agent: AgentDefinition, cwd?: string): string {
    if (!fs.existsSync(globalDir)) fs.mkdirSync(globalDir, { recursive: true });
    const globalPath = path.join(globalDir, `${agent.name}.md`);
    fs.writeFileSync(globalPath, serializeAgentMarkdown({ ...agent, scope: "global", scopes: ["global"] }), "utf-8");
+   if (agent.harness === "agy") ensureAgyAgentLink(agent.name, globalPath);
 
    // Clean up any stale project-local file if it exists (only if different from globalPath)
    if (cwd) {
@@ -406,87 +438,12 @@ export function deleteAgentFromDisk(
    return deleted ? { success: true } : { success: false, error: `Agent file for "${agentName}" not found.` };
 }
 
-function vibeProfileToDefinition(name: "fast" | "good", profile: VibeProfileConfig): AgentDefinition {
-   const active = profile.harness === "agy" ? profile.agy : profile.pi;
-   const builtin = BUILTIN_AGENTS[name];
-   return {
-      ...builtin,
-      name,
-      display_name: name,
-      description: builtin.description,
-      tools: active?.tools ?? profile.tools ?? builtin.tools,
-      harness: profile.harness,
-      enabled: true,
-      source: "builtin",
-      kind: "vibe",
-      model: active?.model ?? builtin.model,
-      thinking: active?.reasoning_effort ?? builtin.thinking,
-      body: active?.body ?? profile.body ?? ""
-   };
-}
-
-function definitionToVibeProfile(definition: AgentDefinition): VibeProfileConfig {
-   const active = {
-      model: definition.model,
-      reasoning_effort: definition.thinking,
-      tools: [...definition.tools],
-      body: definition.body || undefined
-   };
-   return definition.harness === "agy"
-      ? { harness: "agy", agy: active, tools: [...definition.tools], body: definition.body || undefined }
-      : { harness: "pi", pi: active, tools: [...definition.tools], body: definition.body || undefined };
-}
-
-/** One-time migration. Markdown becomes the only persistent format, then agents.json is removed. */
-export function migrateAgentsJsonToMarkdown(cwd?: string): void {
-   const paths = [path.join(getAgentDir(), "agents.json")];
-   if (cwd) paths.push(path.join(cwd, "agents.json"));
-
-   for (const configPath of new Set(paths)) {
-      if (!fs.existsSync(configPath)) continue;
-      try {
-         const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-         for (const name of ["fast", "good"] as const) {
-            const profile = raw?.profiles?.[name] as VibeProfileConfig | undefined;
-            if (profile) saveAgentToDisk(vibeProfileToDefinition(name, profile), cwd);
-         }
-         fs.unlinkSync(configPath);
-      } catch {
-         // Keep an unreadable file intact so migration never destroys recoverable user data.
-      }
-   }
-}
-
-/** Compatibility read API. Values now come exclusively from fast.md / good.md. */
-export function loadAgentsConfigFromDisk(cwd?: string): { fast: VibeProfileConfig; good: VibeProfileConfig } {
-   migrateAgentsJsonToMarkdown(cwd);
-   const agents = loadAllAgentsFromDisk(cwd);
-   const fast = agents.find((agent) => agent.name === "fast") ?? BUILTIN_AGENTS.fast;
-   const good = agents.find((agent) => agent.name === "good") ?? BUILTIN_AGENTS.good;
-   return {
-      fast: definitionToVibeProfile(fast),
-      good: definitionToVibeProfile(good)
-   };
-}
-
-/** Compatibility write API. Writes normal Markdown agent overrides, never agents.json. */
-export function saveAgentsConfigToDisk(vibe: { fast: VibeProfileConfig; good: VibeProfileConfig }, cwd?: string): void {
-   saveAgentToDisk(vibeProfileToDefinition("fast", vibe.fast), cwd);
-   saveAgentToDisk(vibeProfileToDefinition("good", vibe.good), cwd);
-}
-
 export class AgentsStore extends Context.Service<AgentsStore, AgentsStoreShape>()("harbor/AgentsStore") {
    static readonly layer = Layer.effect(
       AgentsStore,
       Effect.gen(function* () {
          const agentsRef = yield* Ref.make({ ...BUILTIN_AGENTS } as Record<string, AgentDefinition>);
-         const vibeRef = yield* Ref.make({
-            fast: { ...DEFAULT_VIBE_PROFILES.fast },
-            good: { ...DEFAULT_VIBE_PROFILES.good }
-         });
-
          const getAgent = Effect.fn("AgentsStore.getAgent")(function* (name: string, cwd?: string) {
-            migrateAgentsJsonToMarkdown(cwd);
             const list = loadAllAgentsFromDisk(cwd);
             const found = list.find((a) => a.name === name);
             if (found) return found;
@@ -495,7 +452,6 @@ export class AgentsStore extends Context.Service<AgentsStore, AgentsStoreShape>(
          });
 
          const listAgents = Effect.fn("AgentsStore.listAgents")(function* (cwd?: string) {
-            migrateAgentsJsonToMarkdown(cwd);
             // Disk wins over in-memory. loadAllAgentsFromDisk already seeds
             // builtins, then overlays global/project files (with isOverride).
             // In-memory only fills names not present on disk so session-local
@@ -508,12 +464,6 @@ export class AgentsStore extends Context.Service<AgentsStore, AgentsStoreShape>(
             }
             for (const a of diskAgents) map.set(a.name, a);
             return Array.from(map.values());
-         });
-
-         const getVibeProfiles = Effect.fn("AgentsStore.getVibeProfiles")(function* (cwd?: string) {
-            yield* Effect.void;
-            const diskVibe = loadAgentsConfigFromDisk(cwd);
-            return diskVibe;
          });
 
          const updateAgent = Effect.fn("AgentsStore.updateAgent")(function* (agent: AgentDefinition, cwd?: string) {
@@ -534,24 +484,11 @@ export class AgentsStore extends Context.Service<AgentsStore, AgentsStoreShape>(
             return res;
          });
 
-         const updateVibeProfile = Effect.fn("AgentsStore.updateVibeProfile")(function* (
-            name: "fast" | "good",
-            profile: VibeProfileConfig,
-            cwd?: string
-         ) {
-            const definition = vibeProfileToDefinition(name, profile);
-            saveAgentToDisk(definition, cwd);
-            yield* Ref.update(agentsRef, (previous) => ({ ...previous, [name]: definition }));
-            return profile;
-         });
-
          return AgentsStore.of({
             getAgent,
             listAgents,
-            getVibeProfiles,
             updateAgent,
-            deleteAgent,
-            updateVibeProfile
+            deleteAgent
          });
       })
    );

@@ -2,7 +2,7 @@ import { Type, type Static } from "typebox";
 import { Effect } from "effect";
 import { TaskManager } from "../services/TaskManager.js";
 import { JobRegistry } from "../services/JobRegistry.js";
-import { normalizeTaskSpecs, prependContext, type AgentDefinition, type Job, type TaskSpec } from "../domain.js";
+import { normalizeTaskSpecs, prependContext, type AgentDefinition, type Job } from "../domain.js";
 import type { InheritedModelInfo, ModelRegistryLike } from "../backends/pi-model.js";
 
 export const TaskSpecSchema = Type.Object({
@@ -17,7 +17,7 @@ export const TaskSpecSchema = Type.Object({
    agent: Type.Optional(
       Type.String({
          description:
-            'Agent profile name resolved through /agents, for example "high-task". Use this when the user names an agent. Omitting agent selects the default "task" profile.'
+            'Agent profile name resolved through /agents, for example "good". Use this when the user names an agent. Omitting agent selects the default "task" profile.'
       })
    ),
    model: Type.Optional(
@@ -28,53 +28,124 @@ export const TaskSpecSchema = Type.Object({
    ),
    outputSchema: Type.Optional(
       Type.Unknown({ description: "Raw JSON Schema document used to validate structured result data." })
-   ),
-   background: Type.Optional(
-      Type.Boolean({
-         default: false,
-         description:
-            "False or omitted blocks until settlement so the result appears in this task call. True starts the task in the background, returns only a job acknowledgement immediately, and delivers the completed result automatically. Do not call hub wait or describe unless manual inspection or recovery is needed."
-      })
    )
 });
 
-export const TaskToolParamsSchema = Type.Union(
-   [
-      Type.Object({
-         context: Type.Optional(
-            Type.String({ description: "Batch-only shared background context prepended to every task prompt." })
-         ),
-         tasks: Type.Array(TaskSpecSchema, {
+/**
+ * Flat task parameters shared by both single and batch spawns. `tasks` selects
+ * a batch, `task` selects a single job, `context` applies to batches only. A
+ * single flat object is reliably serializable by small tool-calling models that
+ * struggle with discriminated-union schemas; normalizeTaskSpecs resolves the
+ * form at runtime.
+ */
+export const TaskToolParamsSchema = Type.Object(
+   {
+      context: Type.Optional(
+         Type.String({ description: "Batch-only shared background context prepended to every task prompt." })
+      ),
+      tasks: Type.Optional(
+         Type.Array(TaskSpecSchema, {
             minItems: 1,
             maxItems: 4,
-            description:
-               "Batch of 1 to 4 task specifications. When starting 2 to 4 independent background assignments at once, use one batch call with background: true on each item instead of repeated flat calls."
+            description: "Batch of 1 to 4 task specifications."
          })
-      }),
-      TaskSpecSchema
-   ],
-   { type: "object" }
+      ),
+      task: Type.Optional(Type.String({ description: "Detailed instruction prompt for the subagent." })),
+      name: Type.Optional(
+         Type.String({ description: "Short human-readable task name, for example investigate-copy-all." })
+      ),
+      agent: Type.Optional(
+         Type.String({
+            description:
+               'Agent profile name resolved through /agents, for example "good". Use this when the user names an agent. Omitting agent selects the default "task" profile.'
+         })
+      ),
+      model: Type.Optional(
+         Type.String({
+            description:
+               "Optional model override for the selected agent. This does not select an agent. Omit it to inherit the selected agent or parent model."
+         })
+      ),
+      outputSchema: Type.Optional(
+         Type.Unknown({ description: "Raw JSON Schema document used to validate structured result data." })
+      )
+   },
+   {
+      description:
+         "Task tool parameters. Provide either a single flat job (task, name, ...) or a batch (tasks array, optional context)."
+   }
 );
 
 export type TaskToolParams = Static<typeof TaskToolParamsSchema>;
 
+export interface TaskToolSchemaOptions {
+   readonly requireAgent?: boolean;
+}
+
+function createAgentSchema(agentNames: readonly string[]) {
+   const literals = agentNames.map((name) => Type.Literal(name));
+   if (literals.length === 0) return Type.Never({ description: "No agent profiles are available." });
+   if (literals.length === 1) return literals[0];
+   return Type.Union(literals, {
+      description: `Agent profile. Allowed values: ${agentNames.join(", ")}.`
+   });
+}
+
+/** Build a task schema whose agent field is limited to the supplied profiles. */
+export function createTaskToolParamsSchema(agentNames: readonly string[], options?: TaskToolSchemaOptions) {
+   const baseProperties = TaskSpecSchema.properties;
+   const taskSpecSchema = Type.Object({
+      ...baseProperties,
+      agent: options?.requireAgent ? createAgentSchema(agentNames) : Type.Optional(createAgentSchema(agentNames))
+   });
+   const flatAgent = options?.requireAgent
+      ? createAgentSchema(agentNames)
+      : Type.Optional(createAgentSchema(agentNames));
+   return Type.Object(
+      {
+         context: Type.Optional(
+            Type.String({ description: "Batch-only shared background context prepended to every task prompt." })
+         ),
+         tasks: Type.Optional(
+            Type.Array(taskSpecSchema, {
+               minItems: 1,
+               maxItems: 4,
+               description: "Batch of task specifications using only the supplied agent profiles."
+            })
+         ),
+         task: Type.Optional(Type.String({ description: "Detailed instruction prompt for the subagent." })),
+         name: Type.Optional(Type.String({ description: "Short human-readable task name." })),
+         agent: flatAgent,
+         model: Type.Optional(Type.String({ description: "Optional model override for the selected agent." })),
+         outputSchema: Type.Optional(
+            Type.Unknown({ description: "Raw JSON Schema document used to validate structured result data." })
+         )
+      },
+      {
+         description:
+            "Task tool parameters. Provide either a single flat job (task, name, ...) or a batch (tasks array, optional context)."
+      }
+   );
+}
+
 export const TASK_TOOL_BASE_DESCRIPTION =
-   'Spawn one or more subagent jobs. Flat: { task: "prompt", name: "short-title", agent?, model?, background? } for a single job. Batch: { tasks: [{ task: "prompt", name: "short-title", ... }], context? } for 1 to 4 concurrent jobs. When starting 2 to 4 independent background assignments at once, prefer one batch call with background: true on each item instead of repeated flat calls, e.g. { tasks: [{ task: "investigate A", name: "investigate-a", background: true }, { task: "investigate B", name: "investigate-b", background: true }] }. The parent AI must generate name from the work; name is separate from agent and the returned task-N job ID. The agent field selects an /agents profile; model only overrides the selected agent model.';
+   'Spawn one or more subagent jobs. Flat: { task: "prompt", name: "short-title", agent?, model? } for a single job. Batch: { tasks: [{ task: "prompt", name: "short-title", ... }], context? } for 1 to 4 concurrent jobs. All tasks run in the background: they return a start acknowledgement immediately and deliver their completed result to the parent automatically. The parent is never blocked. The parent AI must generate name from the work; name is separate from agent and the returned task-N job ID. The agent field selects an /agents profile; model only overrides the selected agent model.';
 
 export const TASK_TOOL_BASE_PROMPT_SNIPPET =
-   "Spawn subagents with { task, name, agent?, background? } or a batch { tasks: [{ task, name, background? }] }. Prefer one batch with background: true per item when starting 2 to 4 independent background tasks at once.";
+   "Spawn subagents with { task, name, agent? } or a batch { tasks: [{ task, name, ... }] }. All tasks are background tasks: they return immediately and deliver results automatically.";
 
 export const TASK_TOOL_BASE_PROMPT_GUIDELINES = [
-   'Use task agent: "high-task" when the user names the high-task agent. task model is only a model override and never selects an agent.',
+   'Use task_spawn agent: "fast" for quick research and focused implementation. task_spawn model is only a model override and never selects an agent.',
+   'Use task_spawn agent: "good" for complex implementation and edge-case verification. task_spawn model is only a model override and never selects an agent.',
    "Always generate task name as a short human-readable description of the work. Never copy the agent name into task name. The returned task-N value is the separate job ID.",
    "Omit task model unless the user explicitly requests a model override; otherwise inherit the selected agent or parent model.",
-   "A background task returns only a start acknowledgement and steers the result to the parent session immediately when it settles. Do not call hub wait or describe after starting it unless automatic delivery fails or the user asks for manual inspection.",
-   "When the user explicitly asks to delegate to an agent, call task before reading, searching, or investigating the target yourself. Put the requested investigation in the task prompt instead.",
-   'Use task with a flat { task: "prompt", ... } payload for one job or { tasks: [{ task: "prompt", ... }], context? } for 1 to 4 concurrent jobs. When starting 2 to 4 independent background assignments at once, set background: true on each item in a single batch instead of making repeated flat calls, e.g. { tasks: [{ task: "investigate A", name: "investigate-a", background: true }, { task: "investigate B", name: "investigate-b", background: true }] }.'
+   "Every task runs in the background and returns a start acknowledgement immediately; its result is steered to the parent when it settles. Do not call job_list after starting a task unless automatic delivery fails or the user asks for manual status.",
+   "When the user explicitly asks to delegate to an agent, call task_spawn before reading, searching, or investigating the target yourself. Put the requested investigation in the task prompt instead.",
+   'Use task_spawn with a flat { task: "prompt", ... } payload for one job or { tasks: [{ task, name, ... }], context? } for 1 to 4 concurrent jobs.'
 ];
 
-export const taskToolDefinition = {
-   name: "task",
+export const taskSpawnToolDefinition = {
+   name: "task_spawn",
    description: TASK_TOOL_BASE_DESCRIPTION,
    parameters: TaskToolParamsSchema
 };
@@ -102,9 +173,20 @@ function truncateMetadata(str: string, max: number): string {
  * Limits the number of agents and length of each description to avoid bloating
  * the provider tool definition / system prompt.
  */
-export function augmentTaskToolMetadata(agents: ReadonlyArray<AgentDefinition>): TaskToolMetadataAugmentation {
+export interface TaskToolMetadataOptions {
+   readonly allowedAgentNames?: ReadonlyArray<string>;
+}
+
+export function augmentTaskToolMetadata(
+   agents: ReadonlyArray<AgentDefinition>,
+   options?: TaskToolMetadataOptions
+): TaskToolMetadataAugmentation {
+   const allowed = options?.allowedAgentNames ? new Set(options.allowedAgentNames) : undefined;
    const enabled = agents
-      .filter((a) => a.enabled)
+      .filter((agent) => {
+         if (allowed) return allowed.has(agent.name) && agent.enabled;
+         return agent.enabled;
+      })
       .toSorted((a, b) => a.name.localeCompare(b.name))
       .slice(0, MAX_TASK_METADATA_AGENT_COUNT);
    if (enabled.length === 0) {
@@ -119,70 +201,52 @@ export function augmentTaskToolMetadata(agents: ReadonlyArray<AgentDefinition>):
    ].join("\n");
    const additionalGuidelines = enabled.map(
       (a) =>
-         `Use task agent: "${a.name}" when the work matches: ${truncateMetadata(a.description ?? "", MAX_TASK_METADATA_DESCRIPTION_LEN) || "this profile"}.`
+         `Use task_spawn agent: "${a.name}" when the work matches: ${truncateMetadata(a.description ?? "", MAX_TASK_METADATA_DESCRIPTION_LEN) || "this profile"}.`
    );
    return { descriptionAppendix, additionalGuidelines };
 }
 
 export interface HandleTaskOptions {
    ownerSessionId?: string;
-   timeoutMs?: number;
    modelRegistry?: ModelRegistryLike;
    inheritedModel?: InheritedModelInfo;
    cwd?: string;
    parentSessionFile?: string;
-   /** Called with a fresh summary each time a foreground job settles while others are still running. */
-   onUpdate?: (summary: unknown) => void;
 }
 
-function buildJobSummary(job: Job, spec: Readonly<TaskSpec>): Record<string, unknown> {
+function buildJobSummary(job: Job): Record<string, unknown> {
    const summary: Record<string, unknown> = {
       id: job.id,
       name: job.name ?? job.id,
       agent: job.agent ?? "task",
-      status: job.status,
-      background: spec.async === true
+      // The task tool returns an acknowledgement, not a live lifecycle snapshot.
+      // Keep the internal Job status unchanged while naming the acknowledgement explicitly.
+      status: job.status === "pending" || job.status === "running" ? "spawned" : job.status
    };
-   if (spec.async !== true) {
-      if (job.resultData !== undefined) summary.result = job.resultData;
-      if (job.errorText) summary.error = job.errorText;
-   }
+   if (job.transcript && job.transcript.length > 0) summary.transcript = job.transcript;
    return summary;
 }
 
-function buildResultSummary(
-   jobs: ReadonlyArray<Job>,
-   specs: ReadonlyArray<Readonly<TaskSpec>>,
-   isBatch: boolean
-): unknown {
-   const jobSummaries = jobs.map((job, index) => buildJobSummary(job, specs[index]));
+function buildResultSummary(jobs: ReadonlyArray<Job>, isBatch: boolean): unknown {
+   const jobSummaries = jobs.map((job) => buildJobSummary(job));
 
    if (!isBatch && jobSummaries.length === 1) {
       const summary = jobSummaries[0];
-      if (summary.background === true) {
-         return {
-            ok: true,
-            id: summary.id,
-            name: summary.name,
-            agent: summary.agent,
-            status: summary.status,
-            background: true,
-            message: `Task ${String(summary.name)} (${String(summary.id)}) started in the background. Its result will be delivered automatically when it completes.`
-         };
-      }
-      return { ok: true, ...summary };
+      return {
+         ok: true,
+         id: summary.id,
+         name: summary.name,
+         agent: summary.agent,
+         status: summary.status,
+         message: `Task ${String(summary.name)} (${String(summary.id)}) spawned. Its result will be delivered automatically when it completes.`
+      };
    }
 
-   const backgroundCount = jobSummaries.filter((job) => job.background === true).length;
    return {
       ok: true,
       count: jobSummaries.length,
       jobs: jobSummaries,
-      ...(backgroundCount > 0
-         ? {
-              message: `${backgroundCount} background task${backgroundCount === 1 ? "" : "s"} started. Results will be delivered automatically.`
-           }
-         : {})
+      message: `${jobSummaries.length} task${jobSummaries.length === 1 ? "" : "s"} spawned. Results will be delivered automatically.`
    };
 }
 
@@ -191,6 +255,9 @@ export const handleTask = Effect.fn("task.handleTask")(function* (params: TaskTo
    const registry = yield* JobRegistry;
 
    const rawSpecs = normalizeTaskSpecs(params);
+   if (rawSpecs.length === 0) {
+      return { ok: false, error: 'task_spawn requires either a single "task" or a non-empty "tasks" array.' };
+   }
    const contextStr = (params as any)?.context;
    const prependedSpecs = prependContext(rawSpecs, contextStr).map((spec) => ({
       ...spec,
@@ -204,36 +271,9 @@ export const handleTask = Effect.fn("task.handleTask")(function* (params: TaskTo
       parentSessionFile: options?.parentSessionFile
    });
 
+   // Harbor tasks are always async: return immediately with start acknowledgements.
+   // Worker results arrive automatically via the settled-job delivery path.
    const isBatch = Array.isArray((params as { readonly tasks?: unknown }).tasks);
-   const syncJobs: string[] = [];
-   for (let i = 0; i < prependedSpecs.length; i++) {
-      const spec = prependedSpecs[i];
-      const job = jobs[i];
-      if (spec.async !== true) {
-         syncJobs.push(job.id);
-      }
-   }
-
-   if (syncJobs.length > 0) {
-      const onUpdate = options?.onUpdate;
-      if (onUpdate) {
-         const syncJobIds = new Set(syncJobs);
-         const latestJobs = Array.from(jobs);
-
-         yield* Effect.acquireUseRelease(
-            registry.onSettled((settledJob) => {
-               if (!syncJobIds.has(settledJob.id)) return;
-               const index = latestJobs.findIndex((job) => job.id === settledJob.id);
-               if (index >= 0) latestJobs[index] = settledJob;
-               onUpdate(buildResultSummary(latestJobs, prependedSpecs, isBatch));
-            }),
-            (unsubscribe) => registry.awaitSettlement(syncJobs, options?.timeoutMs),
-            (unsubscribe) => Effect.sync(() => unsubscribe())
-         );
-      } else {
-         yield* registry.awaitSettlement(syncJobs, options?.timeoutMs);
-      }
-   }
 
    const finalJobs = [];
    for (const origJob of jobs) {
@@ -241,5 +281,5 @@ export const handleTask = Effect.fn("task.handleTask")(function* (params: TaskTo
       finalJobs.push(latest ?? origJob);
    }
 
-   return buildResultSummary(finalJobs, prependedSpecs, isBatch);
+   return buildResultSummary(finalJobs, isBatch);
 });

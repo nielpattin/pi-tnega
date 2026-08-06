@@ -1,13 +1,6 @@
 import { isContextOverflow } from "@earendil-works/pi-ai";
 import { Context, Effect, Layer } from "effect";
-import {
-   ControlError,
-   CancelError,
-   type ControlMode,
-   type BackendCapabilities,
-   type JobTranscriptContent,
-   type JobTranscriptEntry
-} from "../domain.js";
+import { ControlError, CancelError, type ControlMode, type BackendCapabilities } from "../domain.js";
 
 export type { ControlMode };
 
@@ -104,7 +97,7 @@ export function createChildInitOptions(params: CreateChildInitOptionsParams) {
          cwd: params.cwd,
          agentDir: params.agentDir,
          settingsManager: params.settingsManager,
-         systemPrompt: params.agentDef.body
+         appendSystemPromptOverride: (base: string[]) => [...base, buildWorkerInstructions(params.agentDef.body)]
       },
       createSessionOptions: {}
    };
@@ -139,7 +132,10 @@ export function configureChildTools(
    allowedTools: readonly string[]
 ) {
    const available = new Set(childSession.getAllTools().map((t) => t.name));
-   const requested = [...allowedTools, "submit", "hub"];
+   if (!available.has("submit")) {
+      throw new Error("Harbor worker submit tool is unavailable");
+   }
+   const requested = [...allowedTools, "submit", "bash"];
    const filtered = [...new Set(requested)].filter((tool) => available.has(tool));
    childSession.setActiveToolsByName(filtered);
 }
@@ -193,6 +189,9 @@ export class PiSessionRunner {
       }
 
       if (event?.type === "tool_execution_end" && event?.toolName === "submit") {
+         if (event.isError === true || event.result?.isError === true) {
+            return;
+         }
          const details = event.result?.details ?? event.result;
          if (details?.ok === false) {
             if (this.isSchemaRejection(details)) {
@@ -201,7 +200,11 @@ export class PiSessionRunner {
             return;
          }
          if (details?.status === "failed") {
-            this.settle("failed", undefined, String(details.errorText ?? details.error ?? "Task submission failed"));
+            this.settle(
+               "failed",
+               undefined,
+               String(details.result?.error ?? details.errorText ?? details.error ?? "Task submission failed")
+            );
             return;
          }
          const result = event.args?.result ?? details?.result;
@@ -232,6 +235,10 @@ export class PiSessionRunner {
             this.settle("cancelled");
             return;
          }
+         if (lastAssistant?.stopReason === "stop" && this.hasFinalProse(lastAssistant)) {
+            this.tryRemind();
+            return;
+         }
          if (lastAssistant?.stopReason === "error") {
             const errorText =
                typeof lastAssistant.errorMessage === "string" && lastAssistant.errorMessage.length > 0
@@ -245,6 +252,13 @@ export class PiSessionRunner {
          }
          this.tryRemind();
       }
+   }
+
+   private hasFinalProse(message: any): boolean {
+      const content = Array.isArray(message?.content) ? message.content : [];
+      return content.some(
+         (part: any) => part?.type === "text" && typeof part.text === "string" && part.text.trim().length > 0
+      );
    }
 
    private isSchemaRejection(details: any): boolean {
@@ -307,8 +321,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { deriveChildSessionDirectory } from "../utils/child-session-dir.js";
 import { resolvePiModel, mapThinkingLevel } from "./pi-model.js";
-import { handleSubmit, SubmitToolParamsSchema } from "../tools/submit.js";
-import { handleHub, HubToolParamsSchema } from "../tools/hub.js";
+import { createSubmitToolParamsSchema, handleSubmit } from "../tools/submit.js";
 
 export function createWorkerSubmitTool(
    runEffect: <A, E>(effect: Effect.Effect<A, E, any>) => Promise<A>,
@@ -319,56 +332,28 @@ export function createWorkerSubmitTool(
       name: "submit",
       label: "Submit",
       description:
-         "Submit the complete self-contained task result or error. result.data must contain every detail the parent needs and must never refer to text above or the private worker transcript. This is the only valid way to complete a Harbor worker task. If submit returns validation errors, correct the result data and call submit again through the same tool.",
+         "Submit the complete self-contained task result or error. result.data must contain every detail the parent needs, match the schema shown in this tool's parameters when one is provided, and never refer to text above or the private worker transcript. This is the only valid way to complete a Harbor worker task. If submit returns validation errors, correct the result data and call submit again through the same tool.",
       promptSnippet: "Use submit as the final action to complete the Harbor worker task",
       promptGuidelines: [
          "Use submit exactly once as the final action after completing the worker task.",
          "Use submit with { result: { data: ... } } for success or { result: { error: ... } } for failure.",
-         "Use submit result.data for the full self-contained answer, not a short summary or a reference to previous assistant prose.",
+         "Use submit result.data for the full self-contained answer matching the tool schema, not a short summary or a reference to previous assistant prose.",
          "Do not emit a final assistant answer before or after calling submit.",
          "If submit returns schema validation errors, correct the result data and call submit again through the same tool."
       ],
-      parameters: SubmitToolParamsSchema,
+      parameters: createSubmitToolParamsSchema(expectedSchema),
       async execute(_toolCallId: string, params: any) {
-         try {
-            const res = await runEffect(handleSubmit(params, { jobId, expectedSchema, settleJob: false }));
-            return {
-               content: [{ type: "text" as const, text: JSON.stringify(res) }],
-               details: { ...res, result: params.result },
-               terminate: res && typeof res === "object" && "ok" in res && res.ok === true ? (true as const) : undefined
-            };
-         } catch (err) {
-            const errorMsg = err instanceof Error ? err.message : String(err);
-            return {
-               content: [{ type: "text" as const, text: errorMsg }],
-               details: { ok: false, error: errorMsg },
-               terminate: undefined
-            };
+         const res = await runEffect(handleSubmit(params, { jobId, expectedSchema, settleJob: false }));
+         if (!res || typeof res !== "object" || !("ok" in res) || res.ok !== true) {
+            const errorMessage =
+               res && typeof res === "object" && "error" in res ? String(res.error) : "Submission rejected";
+            throw new Error(errorMessage);
          }
-      }
-   };
-}
-
-export function createWorkerHubTool(runEffect: <A, E>(effect: Effect.Effect<A, E, any>) => Promise<A>) {
-   return {
-      name: "hub",
-      label: "Hub",
-      description: "Worker messaging and sync shell exec.",
-      parameters: HubToolParamsSchema,
-      async execute(_toolCallId: string, params: any) {
-         try {
-            const res = await runEffect(handleHub(params, { isWorker: true, harness: "pi" }));
-            return {
-               content: [{ type: "text" as const, text: JSON.stringify(res) }],
-               details: res
-            };
-         } catch (err) {
-            const errorMsg = err instanceof Error ? err.message : String(err);
-            return {
-               content: [{ type: "text" as const, text: errorMsg }],
-               details: { ok: false, error: errorMsg }
-            };
-         }
+         return {
+            content: [{ type: "text" as const, text: JSON.stringify(res) }],
+            details: { ...res, result: params.result },
+            terminate: true as const
+         };
       }
    };
 }
@@ -378,6 +363,7 @@ export interface SpawnPiSessionOptions {
    sessionName?: string;
    prompt: string;
    cwd?: string;
+   signal?: AbortSignal;
    parentSessionFile?: string;
    agentDef?: {
       body: string;
@@ -394,8 +380,7 @@ export interface SpawnPiSessionOptions {
    inheritedModel?: { provider: string; id: string };
    runEffect: <A, E>(effect: Effect.Effect<A, E, any>) => Promise<A>;
    onSettled?: (status: "completed" | "failed" | "cancelled", data?: unknown, errorText?: string) => void;
-   onOutput?: (rawText: string) => void;
-   onTranscript?: (entries: ReadonlyArray<JobTranscriptEntry>) => void;
+   onOutput?: (text: string) => void;
    onSessionReady?: (metadata: {
       model?: string;
       thinking?: string;
@@ -403,23 +388,110 @@ export interface SpawnPiSessionOptions {
       sessionFile?: string;
       sessionId?: string;
    }) => Promise<void> | void;
+   onSystemPrompt?: (systemPrompt: string) => Promise<void> | void;
    createSessionFn?: typeof createAgentSession;
    resourceLoader?: DefaultResourceLoader;
 }
 
-const PI_WORKER_TOOL_GUIDANCE = `## Harbor worker tool guidance
+/** Strong worker-only completion contract, shared by the Pi backend and extension prompt assembly. */
+export const PI_WORKER_SUBMIT_MANDATE = `## MANDATORY COMPLETION CONTRACT
 
-Use the built-in find tool with { "path": "extensions/copy-all", "pattern": "*" } when listing a directory. Put the directory in find.path and a filename glob in find.pattern. Do not put directory paths inside find.pattern.
+YOU ARE A HARBOR WORKER. YOUR TURN MUST END WITH A CALL TO THE submit TOOL.
 
-## Mandatory Harbor completion contract
+THERE IS NO VALID FINAL TEXT RESPONSE, MESSAGE, SUMMARY, OR EXPLANATION.
 
-Complete the task only by calling submit exactly once as your final action. Use { "result": { "data": ... } } for success or { "result": { "error": "..." } } for failure. Do not write a final assistant answer before or after submit. A task is not complete until submit succeeds.
+DO NOT WRITE A FINAL ASSISTANT ANSWER. DO NOT SAY "DONE". DO NOT EXPLAIN OR SUMMARIZE IN PROSE.
 
-Submit a complete, self-contained result with every detail the parent needs. Put the detailed findings, decisions, paths, changes, verification, risks, and next steps directly inside result.data as applicable. Never refer to text above, previous prose, or the worker transcript because the parent receives the submitted data, not your private session narrative. Do not submit a summary that omits the detailed answer.
+THE ONLY VALID COMPLETION IS:
 
-If the task specifies an outputSchema, submit.result.data must validate against it before the task can complete. If submit returns validation errors, correct the data and call submit again through the same tool.
+- submit { "result": { "data": <complete answer> } } for success
+- submit { "result": { "error": "<message>" } } for failure
 
-MANDATORY: You must end every task by calling submit. Never finish with a normal assistant response.`;
+WHEN THE WORK IS COMPLETE, IMMEDIATELY CALL submit. YOUR TEXT IS DISCARDED; ONLY SUBMITTED DATA REACHES THE PARENT.
+
+Submit a complete, self-contained result with every detail the parent needs. Include detailed findings, decisions, paths, changes, verification, risks, and next steps directly inside result.data as applicable. Never refer to text above, previous prose, or the worker transcript. Do not submit a short summary that omits the detailed answer. If the task specifies an outputSchema, submit.result.data must validate against it before the task can complete. If submit returns validation errors, correct the result data and call submit again through the same tool.`;
+
+/** Internal delimiters removed after Harbor reorders a worker prompt around Pi's native sections. */
+export const PI_WORKER_PROMPT_PREFIX_START = "<!-- pi-harbor-worker-prompt-prefix -->";
+export const PI_WORKER_AGENT_BODY_START = "<!-- pi-harbor-worker-agent-body -->";
+export const PI_WORKER_AGENT_BODY_END = "<!-- /pi-harbor-worker-agent-body -->";
+export const PI_WORKER_PROMPT_PREFIX_END = "<!-- /pi-harbor-worker-prompt-prefix -->";
+
+const PI_DEFAULT_ROLE_PROMPT =
+   "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.";
+
+function stripPiDefaultRolePrompt(systemPrompt: string): string {
+   if (!systemPrompt.startsWith(PI_DEFAULT_ROLE_PROMPT)) return systemPrompt;
+   return systemPrompt.slice(PI_DEFAULT_ROLE_PROMPT.length).trimStart();
+}
+
+/** Move the selected worker body and contract ahead of Pi's native prompt sections. */
+export function buildWorkerSystemPrompt(systemPrompt: string): string {
+   const prefixStart = systemPrompt.indexOf(PI_WORKER_PROMPT_PREFIX_START);
+   const bodyStart = prefixStart < 0 ? -1 : systemPrompt.indexOf(PI_WORKER_AGENT_BODY_START, prefixStart);
+   const bodyEnd = bodyStart < 0 ? -1 : systemPrompt.indexOf(PI_WORKER_AGENT_BODY_END, bodyStart);
+   const prefixEnd =
+      bodyEnd < 0 ? -1 : systemPrompt.indexOf(PI_WORKER_PROMPT_PREFIX_END, bodyEnd + PI_WORKER_AGENT_BODY_END.length);
+
+   if (prefixStart < 0 || prefixEnd < 0 || bodyStart < 0 || bodyEnd < 0) {
+      return `${PI_WORKER_SUBMIT_MANDATE}\n\n${stripPiDefaultRolePrompt(systemPrompt).trim()}`;
+   }
+
+   const workerBody = systemPrompt.slice(bodyStart + PI_WORKER_AGENT_BODY_START.length, bodyEnd).trim();
+   const nativePrompt = stripPiDefaultRolePrompt(
+      `${systemPrompt.slice(0, prefixStart)}${systemPrompt.slice(prefixEnd + PI_WORKER_PROMPT_PREFIX_END.length)}`
+   ).trim();
+   const workerPrefix = workerBody ? `${workerBody}\n\n${PI_WORKER_SUBMIT_MANDATE}` : PI_WORKER_SUBMIT_MANDATE;
+   return `${workerPrefix}\n\n${nativePrompt}`;
+}
+
+function buildWorkerInstructions(body: string | undefined): string {
+   const workerPromptPrefix = [
+      PI_WORKER_PROMPT_PREFIX_START,
+      PI_WORKER_AGENT_BODY_START,
+      body?.trim(),
+      PI_WORKER_AGENT_BODY_END,
+      PI_WORKER_SUBMIT_MANDATE,
+      PI_WORKER_PROMPT_PREFIX_END
+   ]
+      .filter((part): part is string => typeof part === "string" && part.length > 0)
+      .join("\n\n");
+   return workerPromptPrefix;
+}
+
+async function awaitWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+   if (!signal) return promise;
+   if (signal.aborted) {
+      promise.catch(() => {});
+      throw new Error("Pi worker startup aborted");
+   }
+
+   return new Promise<T>((resolve, reject) => {
+      let settled = false;
+      const cleanup = () => signal.removeEventListener("abort", onAbort);
+      const onAbort = () => {
+         if (settled) return;
+         settled = true;
+         cleanup();
+         reject(new Error("Pi worker startup aborted"));
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      promise.then(
+         (value) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            resolve(value);
+         },
+         (error) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(error);
+         }
+      );
+   });
+}
 
 export async function spawnPiSession(options: SpawnPiSessionOptions) {
    const cwd = options.cwd ?? process.cwd();
@@ -434,15 +506,16 @@ export async function spawnPiSession(options: SpawnPiSessionOptions) {
    const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: true });
    ensureAutoCompactionEnabled(settingsManager);
 
+   const workerInstructions = buildWorkerInstructions(options.agentDef?.body);
    const loader =
       options.resourceLoader ??
       new DefaultResourceLoader({
          cwd,
          agentDir,
          settingsManager,
-         systemPrompt: `${options.agentDef?.body ?? ""}\n\n${PI_WORKER_TOOL_GUIDANCE}`
+         appendSystemPromptOverride: (base) => [...base, workerInstructions]
       });
-   if (!options.resourceLoader) await loader.reload();
+   if (!options.resourceLoader) await awaitWithAbort(loader.reload(), options.signal);
 
    const modelHint = options.specModel ?? options.agentDef?.model;
    const model = options.modelRegistry
@@ -453,7 +526,6 @@ export async function spawnPiSession(options: SpawnPiSessionOptions) {
    const thinkingLevel = thinkingHint ? mapThinkingLevel(thinkingHint) : undefined;
 
    const submitTool = createWorkerSubmitTool(options.runEffect, options.jobId, options.outputSchema);
-   const hubTool = createWorkerHubTool(options.runEffect);
 
    const createSessionOptions: any = {
       cwd,
@@ -461,8 +533,8 @@ export async function spawnPiSession(options: SpawnPiSessionOptions) {
       sessionManager,
       settingsManager,
       resourceLoader: loader,
-      customTools: [submitTool, hubTool],
-      excludeTools: ["task", "bash"]
+      customTools: [submitTool],
+      excludeTools: ["task_spawn"]
    };
 
    if (model) {
@@ -476,7 +548,13 @@ export async function spawnPiSession(options: SpawnPiSessionOptions) {
    }
 
    const createSession = options.createSessionFn ?? createAgentSession;
-   const { session: childSession } = await createSession(createSessionOptions);
+   const createSessionPromise = createSession(createSessionOptions).then((result) => {
+      if (options.signal?.aborted) {
+         Effect.runPromise(cancelSession(result.session, 5000)).catch(() => {});
+      }
+      return result;
+   });
+   const { session: childSession } = await awaitWithAbort(createSessionPromise, options.signal);
 
    if (options.sessionName && typeof childSession.setSessionName === "function") {
       childSession.setSessionName(options.sessionName);
@@ -524,106 +602,66 @@ export async function spawnPiSession(options: SpawnPiSessionOptions) {
       await options.onSessionReady?.(metadata);
    };
 
-   await notifySessionReady();
-   await childSession.bindExtensions({ mode: "print" });
+   await awaitWithAbort(notifySessionReady(), options.signal);
+   const bindPromise = childSession.bindExtensions({ mode: "print" }).then(async () => {
+      if (options.signal?.aborted) {
+         await Effect.runPromise(cancelSession(childSession, 5000));
+      }
+   });
+   await awaitWithAbort(bindPromise, options.signal);
 
    const allowedTools = options.specTools ?? options.agentDef?.tools ?? ["read", "write", "edit", "grep", "find"];
    configureChildTools(childSession, allowedTools);
 
+   const workerSystemPrompt = childSession.agent?.state?.systemPrompt;
+   if (typeof workerSystemPrompt === "string") {
+      const orderedSystemPrompt = workerSystemPrompt.includes(PI_WORKER_PROMPT_PREFIX_START)
+         ? buildWorkerSystemPrompt(workerSystemPrompt)
+         : workerSystemPrompt;
+      await awaitWithAbort(Promise.resolve(options.onSystemPrompt?.(orderedSystemPrompt)), options.signal);
+   }
+
+   let unsubscribe: (() => void) | undefined;
+   const cleanupSubscription = () => {
+      unsubscribe?.();
+      unsubscribe = undefined;
+   };
+   let sessionSettled = false;
+   const settleOnce = (status: "completed" | "failed" | "cancelled", data?: unknown, errorText?: string) => {
+      if (sessionSettled) return;
+      sessionSettled = true;
+      cleanupSubscription();
+      Promise.resolve(notifySessionReady())
+         .then(() => options.onSettled?.(status, data, errorText))
+         .catch(() => options.onSettled?.(status, data, errorText));
+   };
+
    const runner = new PiSessionRunner({
-      session: childSession,
+      session: {
+         prompt: (text) => childSession.prompt(text),
+         followUp: typeof childSession.followUp === "function" ? (text) => childSession.followUp(text) : undefined,
+         clearQueue: typeof childSession.clearQueue === "function" ? () => childSession.clearQueue() : undefined,
+         abort: () => childSession.abort()
+      },
       modelContextWindow: childSession.model?.contextWindow,
-      onSettle: (status, data, errorText) => {
-         Promise.resolve(notifySessionReady())
-            .then(() => {
-               options.onSettled?.(status, data, errorText);
-            })
-            .catch(() => {
-               options.onSettled?.(status, data, errorText);
-            });
-      }
+      onSettle: settleOnce
    });
 
    let liveText = "";
-   const transcript: JobTranscriptEntry[] = [];
-   const emitTranscript = () => options.onTranscript?.([...transcript]);
    const appendAssistantDelta = (delta: string) => {
       liveText += delta;
-      const previous = transcript.at(-1);
-      if (previous?.type === "assistant") {
-         transcript[transcript.length - 1] = { ...previous, text: previous.text + delta };
-      } else {
-         transcript.push({ type: "assistant", text: delta });
-      }
       options.onOutput?.(liveText);
-      emitTranscript();
-   };
-   const appendThinkingDelta = (delta: string) => {
-      const previous = transcript.at(-1);
-      if (previous?.type === "thinking") {
-         transcript[transcript.length - 1] = { ...previous, text: previous.text + delta };
-      } else {
-         transcript.push({ type: "thinking", text: delta });
-      }
-      emitTranscript();
-   };
-   const normalizeToolResultContent = (result: unknown): ReadonlyArray<JobTranscriptContent> => {
-      const content =
-         result && typeof result === "object" && "content" in result && Array.isArray(result.content)
-            ? result.content
-            : [{ type: "text", text: typeof result === "string" ? result : JSON.stringify(result) }];
-      return content.flatMap((item: any): JobTranscriptContent[] => {
-         if (item?.type === "text" && typeof item.text === "string") {
-            return [{ type: "text", text: item.text }];
-         }
-         if (item?.type === "image" && typeof item.mimeType === "string") {
-            return [{ type: "image", mimeType: item.mimeType }];
-         }
-         return [];
-      });
    };
    const handleLiveEvent = (event: any) => {
       if (event?.type === "message_update") {
          const streamEvent = event.assistantMessageEvent;
          if (streamEvent?.type === "text_delta" && typeof streamEvent.delta === "string") {
             appendAssistantDelta(streamEvent.delta);
-         } else if (streamEvent?.type === "thinking_delta" && typeof streamEvent.delta === "string") {
-            appendThinkingDelta(streamEvent.delta);
          }
-      } else if (event?.type === "tool_execution_start") {
-         transcript.push({
-            type: "tool-call",
-            toolCallId: String(event.toolCallId ?? ""),
-            toolName: String(event.toolName ?? "unknown"),
-            arguments: event.args,
-            raw: {
-               type: "tool_execution_start",
-               toolCallId: event.toolCallId,
-               toolName: event.toolName,
-               args: event.args
-            }
-         });
-         emitTranscript();
-      } else if (event?.type === "tool_execution_end") {
-         transcript.push({
-            type: "tool-result",
-            toolCallId: String(event.toolCallId ?? ""),
-            toolName: String(event.toolName ?? "unknown"),
-            content: normalizeToolResultContent(event.result),
-            isError: event.isError === true,
-            raw: {
-               type: "tool_execution_end",
-               toolCallId: event.toolCallId,
-               toolName: event.toolName,
-               result: event.result,
-               isError: event.isError === true
-            }
-         });
-         emitTranscript();
       }
    };
 
-   const unsubscribe = childSession.subscribe
+   unsubscribe = childSession.subscribe
       ? childSession.subscribe((event) => {
            handleLiveEvent(event);
            runner.handleEvent(event);
@@ -631,17 +669,24 @@ export async function spawnPiSession(options: SpawnPiSessionOptions) {
         })
       : undefined;
 
-   Promise.resolve(childSession.prompt(options.prompt)).catch(() => {});
+   Promise.resolve()
+      .then(() => childSession.prompt(options.prompt))
+      .catch((error) => {
+         const status = options.signal?.aborted ? "cancelled" : "failed";
+         const errorText = error instanceof Error ? error.message : String(error);
+         settleOnce(status, undefined, errorText);
+         return Effect.runPromise(cancelSession(childSession, 5000)).catch(() => {});
+      });
 
    return {
       session: childSession,
-      unsubscribe,
-      abort: () => cancelSession(childSession, 5000),
-      control: (text: string, mode: ControlMode) => {
-         transcript.push({ type: "user", text });
-         emitTranscript();
-         return routeControl(childSession, text, mode);
-      }
+      unsubscribe: cleanupSubscription,
+      abort: () =>
+         Effect.gen(function* () {
+            cleanupSubscription();
+            yield* cancelSession(childSession, 5000);
+         }),
+      control: (text: string, mode: ControlMode) => routeControl(childSession, text, mode)
    };
 }
 

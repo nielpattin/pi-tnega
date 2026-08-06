@@ -2,16 +2,22 @@
  * Interactive Takeover Overlay for Harbor Jobs (ported to real pi-tui overlay pattern).
  */
 
-import type { ExtensionCommandContext, KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
-import type { Component, Focusable, TUI } from "@earendil-works/pi-tui";
-import { Input, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import type { Job, JobTranscriptEntry } from "../domain.js";
+import {
+   CustomEditor,
+   type ExtensionCommandContext,
+   type KeybindingsManager,
+   type Theme
+} from "@earendil-works/pi-coding-agent";
+import type { Component, EditorTheme, Focusable, TUI } from "@earendil-works/pi-tui";
+import { matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { mapAgyEffort, type Job, type JobTranscriptEntry } from "../domain.js";
 import type { HarborRuntime } from "../extension.js";
 import { enterAlternateScreen } from "./alternate-screen.js";
 import { runTool } from "../runtime.js";
 import { JobRegistry } from "../services/JobRegistry.js";
 import { TaskManager } from "../services/TaskManager.js";
 import { formatDuration } from "./formatters.js";
+import { readPiSessionTranscript } from "./session-transcript.js";
 
 function configuredKeys(keybindings: KeybindingsManager, binding: Parameters<KeybindingsManager["getKeys"]>[0]) {
    return keybindings.getKeys(binding).join("/") || "unbound";
@@ -58,11 +64,19 @@ export function buildJobHeaderLines(job: Job, width: number, theme: Theme, now: 
       `${statusGlyph(job, theme)} ` +
       theme.fg("accent", theme.bold(`${job.id} · ${title}`)) +
       ` · ${statusWord(job, theme)} · ${theme.fg("muted", elapsed)}`;
+   const reasoningMetadata =
+      job.harness === "agy"
+         ? job.model
+            ? undefined
+            : `effort ${mapAgyEffort(job.thinking)}`
+         : job.thinking
+           ? `thinking ${job.thinking}`
+           : "thinking (inherit)";
    const metadata = [
       job.agent ? `agent ${job.agent}` : undefined,
       job.harness ? `via ${job.harness}` : undefined,
       job.model ? `model ${job.model}` : "model (inherit)",
-      job.thinking ? `thinking ${job.thinking}` : "thinking (inherit)",
+      reasoningMetadata,
       job.cwd ? `cwd ${job.cwd}` : undefined
    ].filter((value): value is string => value !== undefined);
    return [truncateToWidth(primary, width), ...wrapTextWithAnsi(theme.fg("muted", metadata.join(" · ")), width)];
@@ -86,10 +100,7 @@ function compactPreview(value: unknown, limit = 100): string {
    return compact.length > limit ? `${compact.slice(0, limit - 1)}…` : compact;
 }
 
-function compactToolCall(
-   entry: Extract<JobTranscriptEntry, { type: "tool-call" }>,
-   result?: Extract<JobTranscriptEntry, { type: "tool-result" }>
-): string {
+function compactToolCall(entry: Extract<JobTranscriptEntry, { type: "tool-call" }>): string {
    const args = entry.arguments;
    if (!args || typeof args !== "object") return `→ ${entry.toolName}`;
 
@@ -107,13 +118,14 @@ function compactToolCall(
          case "edit":
          case "ls":
             return [text("path")];
-         case "hub": {
-            const op = text("op");
-            const ids = Array.isArray(record.ids)
-               ? record.ids.filter((id): id is string => typeof id === "string")
-               : [];
-            return [op, text("target"), ...ids, text("id"), text("name"), text("command")];
-         }
+         case "task_spawn":
+         case "process_start":
+            return [text("name"), text("command"), text("agent")];
+         case "process_snapshot":
+         case "process_restart":
+         case "job_cancel":
+            return [text("id")];
+         case "job_list":
          case "bash":
             return [text("command")];
          case "describe_image":
@@ -123,26 +135,18 @@ function compactToolCall(
       }
    })().filter((value): value is string => Boolean(value));
 
-   const separator = entry.toolName === "hub" ? " " : " · ";
-   const base = details.length > 0 ? `→ ${entry.toolName} ${details.join(separator)}` : `→ ${entry.toolName}`;
-   const countable = ["find", "grep", "ffgrep", "ls"].includes(entry.toolName);
-   if (countable && result && !result.isError) {
-      const count = resultLineCount(result);
-      return `${base} (found ${count} ${count === 1 ? "result" : "results"})`;
-   }
-   return base;
+   const separator = entry.toolName === "job_list" ? " " : " · ";
+   return details.length > 0 ? `→ ${entry.toolName} ${details.join(separator)}` : `→ ${entry.toolName}`;
 }
 
-function compactHubResult(entry: Extract<JobTranscriptEntry, { type: "tool-result" }>): string | undefined {
+const JOB_TOOL_NAMES = new Set(["job_list", "job_cancel", "process_start", "process_snapshot", "process_restart"]);
+
+function compactJobToolResult(entry: Extract<JobTranscriptEntry, { type: "tool-result" }>): string | undefined {
    const text = entry.content.find((content) => content.type === "text")?.text;
    if (!text) return undefined;
    try {
       const value = JSON.parse(text) as Record<string, unknown>;
-      if (value.ok === false) return `✗ hub ${compactPreview(value.error)}`;
-      if (typeof value.exitCode === "number") {
-         const output = compactPreview(value.stdout || value.stderr);
-         return `${value.exitCode === 0 ? "✓" : "✗"} hub exit ${value.exitCode}${output ? ` · ${output}` : ""}`;
-      }
+      if (value.ok === false) return `✗ job ${compactPreview(value.error)}`;
       const jobs = Array.isArray(value.jobs) ? value.jobs : value.job ? [value.job] : [];
       if (jobs.length > 0) {
          return jobs
@@ -156,17 +160,50 @@ function compactHubResult(entry: Extract<JobTranscriptEntry, { type: "tool-resul
             })
             .join("\n");
       }
-      for (const key of ["processes", "messages", "peers", "lines"] as const) {
-         if (Array.isArray(value[key])) return `hub ${key} · ${value[key].length} items`;
+      for (const key of ["jobs", "processes", "lines"] as const) {
+         if (Array.isArray(value[key])) return `job ${key} · ${value[key].length} items`;
       }
-      return "✓ hub completed";
+      if (value.process && typeof value.process === "object") return "✓ process completed";
+      return "✓ job completed";
    } catch {
       return compactPreview(text);
    }
 }
 
+function compactToolResult(entry: Extract<JobTranscriptEntry, { type: "tool-result" }>): string {
+   const mark = entry.isError ? "✗" : "✓";
+   if (JOB_TOOL_NAMES.has(entry.toolName)) {
+      const summary = compactJobToolResult(entry);
+      if (summary)
+         return summary.startsWith("✓") || summary.startsWith("✗") ? summary : `${mark} ${entry.toolName} · ${summary}`;
+      return `${mark} ${entry.toolName}`;
+   }
+
+   const text = entry.content.flatMap((content) => (content.type === "text" ? [content.text] : [])).join("\n");
+   const output = compactPreview(text);
+   if (!entry.isError && ["find", "grep", "ffgrep", "ls"].includes(entry.toolName)) {
+      const count = resultLineCount(entry);
+      return `${mark} ${entry.toolName} · ${count} ${count === 1 ? "result" : "results"}`;
+   }
+   if (!entry.isError && entry.toolName === "read") {
+      const count = resultLineCount(entry);
+      return `${mark} read · ${count} ${count === 1 ? "line" : "lines"}${output ? ` · ${output}` : ""}`;
+   }
+   if (output) return `${mark} ${entry.toolName} · ${output}`;
+
+   const imageCount = entry.content.filter((content) => content.type === "image").length;
+   return `${mark} ${entry.toolName}${imageCount > 0 ? ` · ${imageCount} image${imageCount === 1 ? "" : "s"}` : ""}`;
+}
+
 export interface JobTranscriptRenderOptions {
    readonly showThinking?: boolean;
+   readonly showSystemPrompt?: boolean;
+}
+
+const SYSTEM_PROMPT_TRUNCATION_SUFFIX = /\n?… \[truncated \d+ characters\]$/;
+
+function systemPromptForDisplay(systemPrompt: string): string {
+   return systemPrompt.replace(SYSTEM_PROMPT_TRUNCATION_SUFFIX, "");
 }
 
 export interface TakeoverScrollState {
@@ -185,9 +222,18 @@ export function computeTakeoverViewportHeight(
    inputLineCount: number,
    footerLineCount = 1
 ): number {
-   const borderLineCount = 4;
+   const borderLineCount = 2;
    const fixedLineCount = borderLineCount + footerLineCount + headerLineCount + inputLineCount;
    return Math.max(1, terminalRows - fixedLineCount);
+}
+
+export function wrapTakeoverHelp(text: string, width: number, theme: Theme): string[] {
+   return wrapTextWithAnsi(theme.fg("dim", text), Math.max(1, width));
+}
+
+function getTakeoverHelpText(showThinking: boolean, unseenLines: number): string {
+   const scrollHint = unseenLines > 0 ? ` · ${unseenLines} new lines · End latest` : " · End latest";
+   return `Enter steer · Alt+Enter followUp · t ${showThinking ? "collapse" : "expand"} thinking · ↑/↓ scroll · PageUp/PageDown${scrollHint} · Esc back`;
 }
 
 export function applyTranscriptUpdate(
@@ -235,7 +281,8 @@ export function buildJobTranscriptLines(
    job: Job,
    width: number,
    theme: Theme,
-   options: JobTranscriptRenderOptions = {}
+   options: JobTranscriptRenderOptions = {},
+   transcript: ReadonlyArray<JobTranscriptEntry> = job.transcript ?? []
 ): string[] {
    const lines: string[] = [];
    const contentWidth = Math.max(1, width);
@@ -246,41 +293,34 @@ export function buildJobTranscriptLines(
       }
    };
 
-   const promptText = job.promptOrCommand || "(empty prompt)";
-   lines.push(theme.fg("accent", theme.bold(`Task Prompt:`)));
-   pushWrapped(promptText, "text");
-   lines.push(theme.fg("border", "─".repeat(contentWidth)));
+   if (job.systemPrompt) {
+      const systemPromptLabel = options.showSystemPrompt
+         ? "[SYSTEM_PROMPT] (Ctrl+S to collapse)"
+         : "[SYSTEM_PROMPT] (Ctrl+S to expand)";
+      lines.push(theme.fg("accent", theme.bold(systemPromptLabel)));
+      if (options.showSystemPrompt) pushWrapped(systemPromptForDisplay(job.systemPrompt), "dim");
+      lines.push(theme.fg("border", "─".repeat(contentWidth)));
+   }
 
-   if (job.transcript && job.transcript.length > 0) {
+   if (transcript.length > 0) {
       const renderedResults = new Set<JobTranscriptEntry>();
       const renderToolResult = (entry: Extract<JobTranscriptEntry, { type: "tool-result" }>) => {
-         if (entry.toolName === "read") return;
-         if (["find", "grep", "ffgrep", "ls"].includes(entry.toolName) && !entry.isError) return;
-         if (entry.toolName === "hub") {
-            const summary = compactHubResult(entry);
-            if (summary) pushWrapped(summary, entry.isError ? "error" : "dim");
-            return;
-         }
-         if (entry.isError) pushWrapped(`error · ${entry.toolName}`, "error");
-         for (const content of entry.content) {
-            if (content.type === "text") pushWrapped(content.text, entry.isError ? "error" : "text");
-            else pushWrapped(`[image ${content.mimeType}]`, "dim");
-         }
+         pushWrapped(compactToolResult(entry), entry.isError ? "error" : "dim");
       };
 
-      for (const entry of job.transcript) {
+      for (const entry of transcript) {
          if (entry.type === "user") {
             pushWrapped(`You: ${entry.text}`, "accent");
          } else if (entry.type === "assistant") {
             pushWrapped(entry.text, "text");
          } else if (entry.type === "tool-call") {
             const result = entry.toolCallId
-               ? job.transcript.find(
+               ? transcript.find(
                     (candidate): candidate is Extract<JobTranscriptEntry, { type: "tool-result" }> =>
                        candidate.type === "tool-result" && candidate.toolCallId === entry.toolCallId
                  )
                : undefined;
-            pushWrapped(compactToolCall(entry, result), "accent");
+            pushWrapped(compactToolCall(entry), "accent");
             if (result) {
                renderToolResult(result);
                renderedResults.add(result);
@@ -291,8 +331,6 @@ export function buildJobTranscriptLines(
             renderToolResult(entry);
          }
       }
-   } else if (job.rawText) {
-      pushWrapped(job.rawText, "text");
    }
 
    if (job.resultData !== undefined) {
@@ -306,27 +344,39 @@ export function buildJobTranscriptLines(
       pushWrapped(job.errorText, "error");
    }
 
-   if (
-      (!job.transcript || job.transcript.length === 0) &&
-      !job.rawText &&
-      job.resultData === undefined &&
-      !job.errorText
-   ) {
+   if (transcript.length === 0 && job.resultData === undefined && !job.errorText) {
       lines.push(theme.fg("dim", "(no output recorded yet)"));
    }
 
    return lines;
 }
 
+export function createTakeoverEditor(tui: TUI, theme: Theme, keybindings: KeybindingsManager): CustomEditor {
+   const editorTheme: EditorTheme = {
+      borderColor: (text) => theme.fg("borderAccent", text),
+      selectList: {
+         selectedPrefix: (text) => theme.fg("accent", text),
+         selectedText: (text) => theme.fg("accent", text),
+         description: (text) => theme.fg("muted", text),
+         scrollInfo: (text) => theme.fg("dim", text),
+         noMatch: (text) => theme.fg("warning", text)
+      }
+   };
+   return new CustomEditor(tui, editorTheme, keybindings);
+}
+
 export class TakeoverView implements Component, Focusable {
-   private input = new Input();
+   private input: CustomEditor;
    private scrollState = createTakeoverScrollState();
    private lastTranscriptLineCount = 0;
    private lastRenderedJob?: Job;
    private closed = false;
    private showThinking = true;
+   private showSystemPrompt = false;
    private ticker: ReturnType<typeof setInterval>;
    private currentJob?: Job;
+   private currentSystemPrompt?: string;
+   private currentTranscript: ReadonlyArray<JobTranscriptEntry> = [];
 
    private _focused = false;
    get focused(): boolean {
@@ -345,6 +395,9 @@ export class TakeoverView implements Component, Focusable {
       private jobId: string,
       private done: (value: null) => void
    ) {
+      this.input = createTakeoverEditor(tui, theme, keybindings);
+      this.input.onEscape = () => this.close();
+      this.input.onCtrlD = () => this.close();
       this.ticker = setInterval(() => {
          void this.refreshData();
       }, 500);
@@ -353,7 +406,7 @@ export class TakeoverView implements Component, Focusable {
       this.input.onSubmit = (value: string) => {
          const text = value.trim();
          if (!text) return;
-         this.input.setValue("");
+         this.input.setText("");
          void runTool(
             this.runtime,
             TaskManager.use((s) => s.controlJob(this.jobId, text, "steer"))
@@ -376,6 +429,8 @@ export class TakeoverView implements Component, Focusable {
             JobRegistry.use((r) => r.get(this.jobId))
          );
          this.currentJob = job;
+         this.currentSystemPrompt = job?.systemPrompt;
+         this.currentTranscript = job?.transcript ?? (job?.sessionFile ? readPiSessionTranscript(job.sessionFile) : []);
          this.tui.requestRender();
       } catch {
          // ignore fetch errors
@@ -400,21 +455,36 @@ export class TakeoverView implements Component, Focusable {
    handleInput(data: string): void {
       const isAltEnter = data === "\u001b\r" || data === "\u001b\n";
 
+      if (data === "\u0003") {
+         this.input.setText("");
+         this.tui.requestRender();
+         return;
+      }
+
       if (this.keybindings.matches(data, "tui.select.cancel") || data === "\u001b") {
          this.close();
          return;
       }
 
-      if (data === "t" && this.input.getValue().length === 0) {
+      if (data === "t" && this.input.getText().length === 0) {
          this.showThinking = !this.showThinking;
          this.tui.requestRender();
          return;
       }
 
+      if (data === "\u0013" && this.input.getText().length === 0) {
+         this.showSystemPrompt = !this.showSystemPrompt;
+         if (this.showSystemPrompt) {
+            this.scrollState = { scrollTop: 0, followTail: false, unseenLines: 0 };
+         }
+         this.tui.requestRender();
+         return;
+      }
+
       if (isAltEnter) {
-         const val = this.input.getValue().trim();
+         const val = this.input.getText().trim();
          if (val) {
-            this.input.setValue("");
+            this.input.setText("");
             void runTool(
                this.runtime,
                TaskManager.use((s) => s.controlJob(this.jobId, val, "followUp"))
@@ -430,7 +500,10 @@ export class TakeoverView implements Component, Focusable {
          return;
       }
 
-      if (this.keybindings.matches(data, "tui.editor.cursorUp") || data === "\u001b[A") {
+      if (
+         this.input.getText().length === 0 &&
+         (this.keybindings.matches(data, "tui.editor.cursorUp") || data === "\u001b[A")
+      ) {
          this.scrollState = moveTakeoverScroll(
             this.scrollState,
             "up",
@@ -440,7 +513,10 @@ export class TakeoverView implements Component, Focusable {
          this.tui.requestRender();
          return;
       }
-      if (this.keybindings.matches(data, "tui.editor.cursorDown") || data === "\u001b[B") {
+      if (
+         this.input.getText().length === 0 &&
+         (this.keybindings.matches(data, "tui.editor.cursorDown") || data === "\u001b[B")
+      ) {
          this.scrollState = moveTakeoverScroll(
             this.scrollState,
             "down",
@@ -450,7 +526,7 @@ export class TakeoverView implements Component, Focusable {
          this.tui.requestRender();
          return;
       }
-      if (this.keybindings.matches(data, "tui.editor.pageUp")) {
+      if (this.input.getText().length === 0 && this.keybindings.matches(data, "tui.editor.pageUp")) {
          this.scrollState = moveTakeoverScroll(
             this.scrollState,
             "pageUp",
@@ -460,7 +536,7 @@ export class TakeoverView implements Component, Focusable {
          this.tui.requestRender();
          return;
       }
-      if (this.keybindings.matches(data, "tui.editor.pageDown")) {
+      if (this.input.getText().length === 0 && this.keybindings.matches(data, "tui.editor.pageDown")) {
          this.scrollState = moveTakeoverScroll(
             this.scrollState,
             "pageDown",
@@ -470,7 +546,10 @@ export class TakeoverView implements Component, Focusable {
          this.tui.requestRender();
          return;
       }
-      if (this.keybindings.matches(data, "tui.editor.cursorLineEnd") || data === "\u001b[F") {
+      if (
+         this.input.getText().length === 0 &&
+         (this.keybindings.matches(data, "tui.editor.cursorLineEnd") || data === "\u001b[F")
+      ) {
          this.scrollState = moveTakeoverScroll(
             this.scrollState,
             "latest",
@@ -490,7 +569,12 @@ export class TakeoverView implements Component, Focusable {
       const width = this.tui.terminal.columns || 80;
       const headerLineCount = this.currentJob ? buildJobHeaderLines(this.currentJob, width, this.theme).length : 2;
       const inputLineCount = this.input.render(width).length;
-      return computeTakeoverViewportHeight(rows, headerLineCount, inputLineCount);
+      const helpLineCount = wrapTakeoverHelp(
+         getTakeoverHelpText(this.showThinking, this.scrollState.unseenLines),
+         width,
+         this.theme
+      ).length;
+      return computeTakeoverViewportHeight(rows, headerLineCount, inputLineCount, helpLineCount);
    }
 
    render(width: number): string[] {
@@ -508,12 +592,32 @@ export class TakeoverView implements Component, Focusable {
 
       const header = buildJobHeaderLines(job, width, theme);
       const inputLines = this.input.render(width);
+      const helpLines = wrapTakeoverHelp(
+         getTakeoverHelpText(this.showThinking, this.scrollState.unseenLines),
+         width,
+         theme
+      );
       lines.push(border);
       lines.push(...header);
       lines.push(border);
 
-      const transcript = buildJobTranscriptLines(job, width, theme, { showThinking: this.showThinking });
-      const viewport = computeTakeoverViewportHeight(this.tui.terminal.rows || 30, header.length, inputLines.length);
+      const transcriptJob =
+         this.currentSystemPrompt !== undefined && this.currentSystemPrompt !== job.systemPrompt
+            ? { ...job, systemPrompt: this.currentSystemPrompt }
+            : job;
+      const transcript = buildJobTranscriptLines(
+         transcriptJob,
+         width,
+         theme,
+         { showThinking: this.showThinking, showSystemPrompt: this.showSystemPrompt },
+         this.currentTranscript
+      );
+      const viewport = computeTakeoverViewportHeight(
+         this.tui.terminal.rows || 30,
+         header.length,
+         inputLines.length,
+         helpLines.length
+      );
       if (this.currentJob !== this.lastRenderedJob) {
          this.scrollState = applyTranscriptUpdate(
             this.scrollState,
@@ -538,23 +642,8 @@ export class TakeoverView implements Component, Focusable {
 
       while (body.length < viewport) body.push("");
       lines.push(...body.slice(0, viewport));
-
-      lines.push(border);
       lines.push(...inputLines);
-      const scrollHint =
-         this.scrollState.unseenLines > 0
-            ? ` · ${this.scrollState.unseenLines} new lines · End latest`
-            : " · End latest";
-      lines.push(
-         truncateToWidth(
-            theme.fg(
-               "dim",
-               `Enter steer · Alt+Enter followUp · t ${this.showThinking ? "collapse" : "expand"} thinking · ↑/↓ scroll · PageUp/PageDown${scrollHint} · Esc back`
-            ),
-            width
-         )
-      );
-      lines.push(border);
+      lines.push(...helpLines);
       return lines;
    }
 

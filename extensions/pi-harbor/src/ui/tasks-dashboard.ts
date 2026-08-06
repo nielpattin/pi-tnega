@@ -4,7 +4,7 @@
 
 import type { ExtensionCommandContext, KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
 import type { Component, Focusable, TUI } from "@earendil-works/pi-tui";
-import { Input, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Input, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { Job, ProcessEntry } from "../domain.js";
 import type { HarborRuntime } from "../extension.js";
 import { runTool } from "../runtime.js";
@@ -60,9 +60,21 @@ export function createTasksDashboardState(initial?: Partial<TasksDashboardState>
    };
 }
 
-export function computeTasksDashboardBodyHeight(terminalRows: number): number {
-   const fixedLineCount = 4;
+export function computeTasksDashboardBodyHeight(terminalRows: number, helpLineCount = 1): number {
+   const fixedLineCount = 4 + Math.max(1, helpLineCount);
    return Math.max(1, terminalRows - fixedLineCount);
+}
+
+export function computeTasksDashboardPaneHeights(bodyHeight: number): { jobs: number; processes: number } {
+   const total = Math.max(1, bodyHeight);
+   return {
+      jobs: Math.ceil(total / 2),
+      processes: Math.floor(total / 2)
+   };
+}
+
+export function wrapDashboardHelp(text: string, width: number, theme: Theme): string[] {
+   return wrapTextWithAnsi(theme.fg("dim", text), Math.max(1, width));
 }
 
 export function requestControl(id: string, text: string, mode: "steer" | "followUp") {
@@ -84,17 +96,11 @@ export function reduceTasksDashboardKey(
    }
 
    if (key === "tab") {
-      const idx = DASHBOARD_TABS.indexOf(state.activeTab);
-      let nextIdx: number;
-      if (input.shift) {
-         nextIdx = (idx - 1 + DASHBOARD_TABS.length) % DASHBOARD_TABS.length;
-      } else {
-         nextIdx = (idx + 1) % DASHBOARD_TABS.length;
-      }
+      const jobsFocused = state.activeTab === "jobs" || state.activeTab === "takeover";
       return {
          state: {
             ...state,
-            activeTab: DASHBOARD_TABS[nextIdx],
+            activeTab: jobsFocused ? "processes" : "jobs",
             selectedIndex: 0
          }
       };
@@ -103,9 +109,12 @@ export function reduceTasksDashboardKey(
    if (key === "down" || key === "j") {
       let maxCount = context?.itemCount;
       if (maxCount === undefined) {
-         if (state.activeTab === "jobs" && context?.jobs) {
+         if ((state.activeTab === "jobs" || state.activeTab === "takeover") && context?.jobs) {
             maxCount = context.jobs.length;
-         } else if ((state.activeTab === "processes" || state.activeTab === "bash") && context?.processes) {
+         } else if (
+            (state.activeTab === "processes" || state.activeTab === "bash" || state.activeTab === "logs") &&
+            context?.processes
+         ) {
             maxCount = context.processes.length;
          }
       }
@@ -342,19 +351,6 @@ export class TasksDashboardScreen implements Component, Focusable {
          ctrl: false
       };
 
-      if (key === "right") {
-         this.state.activeTab = this.state.activeTab === "jobs" ? "processes" : "jobs";
-         this.state.selectedIndex = 0;
-         this.tui.requestRender();
-         return;
-      }
-      if (key === "left") {
-         this.state.activeTab = this.state.activeTab === "jobs" ? "processes" : "jobs";
-         this.state.selectedIndex = 0;
-         this.tui.requestRender();
-         return;
-      }
-
       const context: DashboardContext = {
          jobs: this.jobs,
          processes: this.processes
@@ -441,8 +437,11 @@ export class TasksDashboardScreen implements Component, Focusable {
    render(width: number): string[] {
       const theme = this.theme;
       const rows = this.tui.terminal.rows || 30;
-      const bodyHeight = computeTasksDashboardBodyHeight(rows);
       const innerWidth = width - 2;
+      const helpText = `  ${configuredKeys(this.keybindings, "tui.select.up")}/${configuredKeys(this.keybindings, "tui.select.down")}/jk: select · Tab: focus pane · Enter: inspect · x: cancel/stop · r: restart · Esc: close`;
+      const helpLines = wrapDashboardHelp(helpText, width, theme);
+      const bodyHeight = computeTasksDashboardBodyHeight(rows, helpLines.length);
+      const paneHeights = computeTasksDashboardPaneHeights(bodyHeight);
 
       const lines: string[] = [];
 
@@ -457,53 +456,48 @@ export class TasksDashboardScreen implements Component, Focusable {
       const headerPad = Math.max(1, width - visibleWidth(headerLeft) - visibleWidth(headerRight) - 4);
       lines.push(truncateToWidth(`  ${headerLeft}${" ".repeat(headerPad)}${headerRight}  `, width));
 
-      const isJobsTab = this.state.activeTab === "jobs" || this.state.activeTab === "takeover";
-      const tabTitle = isJobsTab
-         ? `[Jobs (${activeJobs}/${this.jobs.length})]  Processes (${activeProcs}/${this.processes.length})`
-         : `Jobs (${activeJobs}/${this.jobs.length})  [Processes (${activeProcs}/${this.processes.length})]`;
-
-      lines.push(theme.fg("border", "╭") + this.borderSegment(innerWidth, tabTitle) + theme.fg("border", "╮"));
-
+      const jobsFocused = this.state.activeTab === "jobs" || this.state.activeTab === "takeover";
       const divider = theme.fg("border", "│");
-      const rowLines = isJobsTab
-         ? this.renderJobRows(innerWidth, bodyHeight)
-         : this.renderProcessRows(innerWidth, bodyHeight);
+      const jobsTitle = `Jobs (${activeJobs}/${this.jobs.length})`;
+      const processesTitle = `Processes (${activeProcs}/${this.processes.length})`;
 
-      for (let i = 0; i < bodyHeight; i++) {
-         lines.push(divider + this.pad(rowLines[i] ?? "", innerWidth) + divider);
+      lines.push(theme.fg("border", "╭") + this.borderSegment(innerWidth, jobsTitle) + theme.fg("border", "╮"));
+      const jobRows = this.renderJobRows(innerWidth, paneHeights.jobs, jobsFocused);
+      for (let i = 0; i < paneHeights.jobs; i++) {
+         lines.push(divider + this.pad(jobRows[i] ?? "", innerWidth) + divider);
+      }
+
+      lines.push(theme.fg("border", "├") + this.borderSegment(innerWidth, processesTitle) + theme.fg("border", "┤"));
+      const processRows = this.renderProcessRows(innerWidth, paneHeights.processes, !jobsFocused);
+      for (let i = 0; i < paneHeights.processes; i++) {
+         lines.push(divider + this.pad(processRows[i] ?? "", innerWidth) + divider);
       }
 
       lines.push(
          theme.fg("border", "╰") + theme.fg("border", "─".repeat(Math.max(0, innerWidth))) + theme.fg("border", "╯")
       );
 
-      lines.push(
-         truncateToWidth(
-            theme.fg(
-               "dim",
-               `  ${configuredKeys(this.keybindings, "tui.select.up")}/${configuredKeys(this.keybindings, "tui.select.down")}/jk select · Tab/Arrows switch tab · Enter inspect · x cancel/stop · r restart · Esc close`
-            ),
-            width
-         )
-      );
+      lines.push(...helpLines);
 
       return lines;
    }
 
-   private renderJobRows(width: number, height: number): string[] {
+   private renderJobRows(width: number, height: number, focused = true): string[] {
       const theme = this.theme;
       const out: string[] = [];
 
+      if (height <= 0) return out;
       if (this.jobs.length === 0) {
          out.push(theme.fg("dim", "  (no active or historical jobs)"));
          return out;
       }
 
-      this.state.selectedIndex = Math.max(0, Math.min(this.state.selectedIndex, this.jobs.length - 1));
+      const selectedIndex = Math.max(0, Math.min(this.state.selectedIndex, this.jobs.length - 1));
+      if (focused) this.state.selectedIndex = selectedIndex;
 
       let start = 0;
       if (this.jobs.length > height) {
-         start = Math.min(Math.max(0, this.state.selectedIndex - Math.floor(height / 2)), this.jobs.length - height);
+         start = Math.min(Math.max(0, selectedIndex - Math.floor(height / 2)), this.jobs.length - height);
       }
       const visible = this.jobs.slice(start, start + height);
       const now = Date.now();
@@ -511,7 +505,7 @@ export class TasksDashboardScreen implements Component, Focusable {
       for (let i = 0; i < visible.length; i++) {
          const job = visible[i];
          const index = start + i;
-         const isSelected = index === this.state.selectedIndex;
+         const isSelected = focused && index === selectedIndex;
 
          const marker = isSelected ? theme.fg("accent", "❯") : " ";
          const titleText = job.name ?? job.promptOrCommand.slice(0, 35);
@@ -542,23 +536,22 @@ export class TasksDashboardScreen implements Component, Focusable {
       return out;
    }
 
-   private renderProcessRows(width: number, height: number): string[] {
+   private renderProcessRows(width: number, height: number, focused = true): string[] {
       const theme = this.theme;
       const out: string[] = [];
 
+      if (height <= 0) return out;
       if (this.processes.length === 0) {
          out.push(theme.fg("dim", "  (no background processes)"));
          return out;
       }
 
-      this.state.selectedIndex = Math.max(0, Math.min(this.state.selectedIndex, this.processes.length - 1));
+      const selectedIndex = Math.max(0, Math.min(this.state.selectedIndex, this.processes.length - 1));
+      if (focused) this.state.selectedIndex = selectedIndex;
 
       let start = 0;
       if (this.processes.length > height) {
-         start = Math.min(
-            Math.max(0, this.state.selectedIndex - Math.floor(height / 2)),
-            this.processes.length - height
-         );
+         start = Math.min(Math.max(0, selectedIndex - Math.floor(height / 2)), this.processes.length - height);
       }
       const visible = this.processes.slice(start, start + height);
       const now = Date.now();
@@ -566,7 +559,7 @@ export class TasksDashboardScreen implements Component, Focusable {
       for (let i = 0; i < visible.length; i++) {
          const proc = visible[i];
          const index = start + i;
-         const isSelected = index === this.state.selectedIndex;
+         const isSelected = focused && index === selectedIndex;
 
          const marker = isSelected ? theme.fg("accent", "❯") : " ";
          const titleText = proc.name ?? proc.id;
