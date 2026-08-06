@@ -1,7 +1,7 @@
 import { defineConfig } from "oxlint";
 
 export default defineConfig({
-   plugins: ["typescript", "unicorn", "import", "vitest", "eslint"],
+   plugins: ["typescript", "unicorn", "import", "eslint"],
    categories: {
       correctness: "error",
       perf: "warn",
@@ -40,11 +40,7 @@ export default defineConfig({
       "typescript/no-unnecessary-boolean-literal-compare": "off",
       "typescript/no-unnecessary-type-assertion": "off",
       "typescript/no-unnecessary-type-conversion": "off",
-      "typescript/no-base-to-string": "error",
-      "vitest/require-hook": "off",
-      "vitest/prefer-expect-assertions": "off",
-      "vitest/require-mock-type-parameters": "off",
-      "vitest/require-top-level-describe": "off"
+      "typescript/no-base-to-string": "error"
    },
    env: {
       builtin: true
