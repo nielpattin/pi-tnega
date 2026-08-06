@@ -15,6 +15,7 @@ This document provides the full contributor workflow for developing and publishi
     - [`pi-station`](./extensions/pi-station): Status bar, layout manager, bash mode, hashline editor with in-chat diff preview.
     - [`pi-harbor`](./extensions/pi-harbor): Agent jobs, Agy/Pi harnesses, process supervision, inter-agent messaging, Vibe mode, and the `/tasks` dashboard.
 - **Workflow & Automation Tools**:
+    - `.githooks/`: Versioned Git hooks (`pre-commit` runs `lint-staged`); `prepare` points Git at them via `core.hooksPath`.
     - `.github/workflows/publish.yml`: GitHub Actions manual tag-based package publish workflow.
     - `scripts/`:
         - `release.mjs`: Legacy single-package release orchestrator.
@@ -26,6 +27,8 @@ This document provides the full contributor workflow for developing and publishi
 agent-root/
 ├── .github/workflows/
 │   └── publish.yml               # exact manual npm publish
+├── .githooks/
+│   └── pre-commit                # pnpm lint-staged
 ├── .nvmrc                        # Node 24
 ├── openspec/                     # change proposals and specs
 ├── extensions/
@@ -57,11 +60,7 @@ pnpm install
 
 ### Git Hooks
 
-Git runs the pre-commit hook from its default location `.git/hooks/` (no config needed). The hook runs `pnpm lint-staged`; because hooks are not versioned, recreate it on a fresh clone:
-
-```bash
-printf '#!/usr/bin/env sh\n\npnpm lint-staged --concurrent false --relative\n' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
-```
+The pre-commit hook lives in versioned `.githooks/pre-commit` and runs `pnpm lint-staged`. The `prepare` script (`git config core.hooksPath .githooks`) runs on `pnpm install`, so fresh clones get hooks automatically with no manual setup.
 
 ---
 

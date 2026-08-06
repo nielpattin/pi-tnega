@@ -45,6 +45,8 @@ See **[DEVELOPMENT.md](./DEVELOPMENT.md)** for detailed contributor instructions
 agent-root/
 ├── .github/workflows/
 │   └── publish.yml               # exact manual npm publish
+├── .githooks/
+│   └── pre-commit                # pnpm lint-staged
 ├── extensions/
 │   ├── pi-permission-system      # permission system extension
 │   ├── pi-reference              # project references extension
@@ -63,7 +65,7 @@ agent-root/
 | oxlint     | `oxlint.config.ts`    | Linting                        |
 | oxfmt      | `oxfmt.config.ts`     | Formatting                     |
 | TypeScript | `tsconfig.json`       | Type checking                  |
-| Git hooks  | `.git/hooks/pre-commit` | Pre-commit lint-staged         |
+| Git hooks  | `.githooks/`            | Pre-commit lint-staged         |
 | pnpm       | `pnpm-workspace.yaml` | Package manager and workspaces |
 
 ## License

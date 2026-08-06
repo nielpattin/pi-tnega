@@ -5,7 +5,8 @@
       "typecheck": "node scripts/typecheck.mjs",
       "lint": "oxlint -c oxlint.config.ts --no-error-on-unmatched-pattern",
       "lint:fix": "oxlint -c oxlint.config.ts --fix --no-error-on-unmatched-pattern",
-      "fmt": "oxfmt -c oxfmt.config.ts --no-error-on-unmatched-pattern"
+      "fmt": "oxfmt -c oxfmt.config.ts --no-error-on-unmatched-pattern",
+      "prepare": "git config core.hooksPath .githooks"
    },
    "dependencies": {
       "@earendil-works/pi-agent-core": "^0.83.0",
