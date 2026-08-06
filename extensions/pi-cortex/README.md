@@ -174,18 +174,6 @@ The index for a project lives in that cwd's pi session folder, named exactly the
 
 ---
 
-## Testing
-
-```bash
-cd extensions/pi-cortex
-cargo build --release
-pnpx vitest run --config vitest.config.ts
-```
-
-Tests create fixtures in `.test-tmp/` — they never touch files outside the extension directory.
-
----
-
 ## Benchmark suite
 
 ```bash

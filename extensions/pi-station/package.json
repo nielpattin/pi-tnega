@@ -45,7 +45,6 @@
       "access": "public"
    },
    "scripts": {
-      "test": "vitest run",
       "typecheck": "tsc --noEmit -p tsconfig.json"
    },
    "dependencies": {

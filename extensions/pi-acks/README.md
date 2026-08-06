@@ -144,14 +144,9 @@ extensions/pi-acks/
 │   ├── oauth.ts
 │   ├── runtime-auth.ts
 │   └── storage.ts
-├── test/
-│   ├── accounts-storage.test.ts
-│   ├── accounts.test.ts
-│   └── support.ts
 ├── README.md
 ├── LICENSE
 ├── tsconfig.json
-├── vitest.config.ts
 └── package.json
 ```
 

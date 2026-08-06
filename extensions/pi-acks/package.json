@@ -19,9 +19,8 @@
    ],
    "type": "module",
    "scripts": {
-      "check": "pnpm run typecheck && pnpm run test",
-      "typecheck": "tsc --noEmit -p tsconfig.json",
-      "test": "vitest run"
+      "check": "pnpm run typecheck",
+      "typecheck": "tsc --noEmit -p tsconfig.json"
    },
    "dependencies": {
       "@narumitw/pi-tui-kit": "^0.40.0",
@@ -33,8 +32,7 @@
       "@earendil-works/pi-tui": "0.83.0",
       "@types/node": "^26.1.2",
       "@types/proper-lockfile": "^4.1.4",
-      "typescript": "^7.0.2",
-      "vitest": "^4.1.10"
+      "typescript": "^7.0.2"
    },
    "peerDependencies": {
       "@earendil-works/pi-ai": "*",

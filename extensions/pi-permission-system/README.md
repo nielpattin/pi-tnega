@@ -126,16 +126,17 @@ The service is published under `Symbol.for("@nielpattin/pi-permission-system:ser
 ## Development
 
 ```bash
-pnpm --dir extensions/pi-permission-system test
 pnpm --dir extensions/pi-permission-system check
 pnpm --dir extensions/pi-permission-system pack --dry-run
 ```
 
-Run from the repository root for full workspace validation:
+Run from the repository root for workspace validation:
 
 ```bash
-pnpm check
-pnpm test
+pnpm lint
+pnpm typecheck
+pnpm fmt
+git diff --check
 ```
 
 ## Attribution

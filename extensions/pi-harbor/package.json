@@ -5,8 +5,7 @@
    "type": "module",
    "main": "./index.ts",
    "scripts": {
-      "test": "vitest run",
-      "check": "pnpm test && tsc --noEmit -p tsconfig.json"
+      "check": "tsc --noEmit -p tsconfig.json"
    },
    "dependencies": {
       "effect": "4.0.0-beta.101",

@@ -2,10 +2,9 @@
    "extends": "../../tsconfig.base.json",
    "compilerOptions": {
       "paths": {
-         "#src/*": ["./src/*"],
-         "#tests/*": ["./tests/*"]
+         "#src/*": ["./src/*"]
       }
    },
-   "include": ["index.ts", "src/**/*.ts", "tests/**/*.ts", "package.json"],
+   "include": ["index.ts", "src/**/*.ts", "package.json"],
    "exclude": ["node_modules"]
 }

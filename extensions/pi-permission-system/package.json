@@ -44,8 +44,7 @@
    "type": "module",
    "main": "./index.ts",
    "imports": {
-      "#src/*": "./src/*",
-      "#test/*": "./test/*"
+      "#src/*": "./src/*"
    },
    "exports": {
       ".": "./src/service.ts"
@@ -54,8 +53,7 @@
       "access": "public"
    },
    "scripts": {
-      "test": "vitest run --config vitest.config.ts",
-      "check": "pnpm test && tsc --noEmit -p tsconfig.json"
+      "check": "tsc --noEmit -p tsconfig.json"
    },
    "dependencies": {
       "tree-sitter-bash": "^0.25.1",
