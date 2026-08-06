@@ -16,7 +16,7 @@ This document provides the full contributor workflow for developing and publishi
     - [`pi-harbor`](./extensions/pi-harbor): Agent jobs, Agy/Pi harnesses, process supervision, inter-agent messaging, Vibe mode, and the `/tasks` dashboard.
 - **Workflow & Automation Tools**:
     - `.github/workflows/publish.yml`: GitHub Actions manual tag-based package publish workflow.
-    - `.husky/`: Local Git hooks (`pre-commit` runs `lint-staged`).
+    - `hooks/`: Plain Git hooks (`pre-commit` runs `lint-staged`), enabled via `core.hooksPath`.
     - `scripts/`:
         - `release.mjs`: Legacy single-package release orchestrator.
     - `publish.sh`: Helper script to trigger GitHub workflow dispatch for package releases.
@@ -27,7 +27,7 @@ This document provides the full contributor workflow for developing and publishi
 agent-root/
 ├── .github/workflows/
 │   └── publish.yml               # exact manual npm publish
-├── .husky/
+├── hooks/
 │   └── pre-commit                # pnpm lint-staged
 ├── .nvmrc                        # Node 24
 ├── openspec/                     # change proposals and specs

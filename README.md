@@ -45,7 +45,7 @@ See **[DEVELOPMENT.md](./DEVELOPMENT.md)** for detailed contributor instructions
 agent-root/
 ├── .github/workflows/
 │   └── publish.yml               # exact manual npm publish
-├── .husky/
+├── hooks/
 │   └── pre-commit                # pnpm lint-staged
 ├── extensions/
 │   ├── pi-permission-system      # permission system extension
@@ -65,7 +65,7 @@ agent-root/
 | oxlint     | `oxlint.config.ts`    | Linting                        |
 | oxfmt      | `oxfmt.config.ts`     | Formatting                     |
 | TypeScript | `tsconfig.json`       | Type checking                  |
-| Husky      | `.husky/*`            | Git hooks                      |
+| Git hooks  | `hooks/*`             | Pre-commit lint-staged         |
 | pnpm       | `pnpm-workspace.yaml` | Package manager and workspaces |
 
 ## License
