@@ -132,8 +132,7 @@ const combiner: Combiner.Combiner<any> = Struct.makeCombiner({
   noInfinity: or,
   noNaN: or,
   patterns: concat,
-  unique: or,
-  valid: or
+  unique: or
 }, {
   omitKeyWhen: Predicate.isUndefined
 })
@@ -718,7 +717,9 @@ function base(ast: SchemaAST.AST, path: ReadonlyArray<PropertyKey>): LazyArbitra
               : out.map(Option.some)
           }
         )
-        let out = fc.tuple(...elementArbitraries).map(Array.getSomes)
+        let out = fc.tuple(...elementArbitraries).map((elements) =>
+          Array.getSomes(Array.takeWhile(elements, Option.isSome))
+        )
         // ---------------------------------------------
         // handle rest element
         // ---------------------------------------------

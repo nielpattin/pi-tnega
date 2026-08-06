@@ -11,7 +11,7 @@ import * as Array from "effect/Array"
 import type * as Config from "effect/Config"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
-import { identity, pipe } from "effect/Function"
+import { identity } from "effect/Function"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
@@ -34,7 +34,7 @@ import { OpenAiConfig } from "./OpenAiConfig.ts"
  * completions, streaming chat completions, and embeddings. Transport and
  * schema decoding failures are mapped to `AiError`.
  *
- * @category models
+ * @category services
  * @since 4.0.0
  */
 export interface Service {
@@ -99,9 +99,14 @@ export type Options = {
 }
 
 const RedactedOpenAiHeaders = {
-  OpenAiOrganization: "OpenAI-Organization",
-  OpenAiProject: "OpenAI-Project"
+  OpenAiOrganization: "openai-organization",
+  OpenAiProject: "openai-project"
 }
+
+const withRedactedHeaders = Effect.updateService(
+  Headers.CurrentRedactedNames,
+  Array.appendAll(Object.values(RedactedOpenAiHeaders))
+)
 
 /**
  * Constructs an OpenAI-compatible client service from explicit options.
@@ -175,24 +180,27 @@ export const make = Effect.fnUntraced(
       [body: CreateResponse200, response: HttpClientResponse.HttpClientResponse],
       AiError.AiError
     > =>
-      Effect.flatMap(resolveHttpClient, (client) =>
-        pipe(
-          HttpClientRequest.post("/chat/completions"),
-          HttpClientRequest.bodyJsonUnsafe(payload),
-          HttpClient.filterStatusOk(client).execute,
-          Effect.flatMap((response) =>
-            Effect.map(decodeResponse(response), (
-              body
-            ): [CreateResponse200, HttpClientResponse.HttpClientResponse] => [
-              body,
-              response
-            ])
-          ),
-          Effect.catchTags({
-            HttpClientError: (error) => Errors.mapHttpClientError(error, "createResponse"),
-            SchemaError: (error) => Effect.fail(Errors.mapSchemaError(error, "createResponse"))
-          })
-        ))
+      resolveHttpClient.pipe(
+        Effect.flatMap((client) =>
+          HttpClientRequest.post("/chat/completions").pipe(
+            HttpClientRequest.bodyJsonUnsafe(payload),
+            HttpClient.filterStatusOk(client).execute,
+            Effect.flatMap((response) =>
+              Effect.map(decodeResponse(response), (
+                body
+              ): [CreateResponse200, HttpClientResponse.HttpClientResponse] => [
+                body,
+                response
+              ])
+            ),
+            Effect.catchTags({
+              HttpClientError: (error) => Errors.mapHttpClientError(error, "createResponse"),
+              SchemaError: (error) => Effect.fail(Errors.mapSchemaError(error, "createResponse"))
+            })
+          )
+        ),
+        withRedactedHeaders
+      )
 
     const buildResponseStream = (
       response: HttpClientResponse.HttpClientResponse
@@ -210,6 +218,7 @@ export const make = Effect.fnUntraced(
         Stream.takeUntil((event) => event === "[DONE]"),
         Stream.catchTags({
           Retry: (error) => Stream.die(error),
+          SseError: (error) => Stream.fail(Errors.mapSseError(error, "createResponseStream")),
           HttpClientError: (error) => Stream.fromEffect(Errors.mapHttpClientError(error, "createResponseStream"))
         })
       ) as any
@@ -217,40 +226,46 @@ export const make = Effect.fnUntraced(
     }
 
     const createResponseStream: Service["createResponseStream"] = (payload) =>
-      Effect.flatMap(resolveHttpClient, (client) =>
-        pipe(
-          HttpClientRequest.post("/chat/completions"),
-          HttpClientRequest.bodyJsonUnsafe({
-            ...payload,
-            stream: true,
-            stream_options: {
-              include_usage: true
-            }
-          }),
-          HttpClient.filterStatusOk(client).execute,
-          Effect.map(buildResponseStream),
-          Effect.catchTag(
-            "HttpClientError",
-            (error) => Errors.mapHttpClientError(error, "createResponseStream")
+      resolveHttpClient.pipe(
+        Effect.flatMap((client) =>
+          HttpClientRequest.post("/chat/completions").pipe(
+            HttpClientRequest.bodyJsonUnsafe({
+              ...payload,
+              stream: true,
+              stream_options: {
+                include_usage: true
+              }
+            }),
+            HttpClient.filterStatusOk(client).execute,
+            Effect.map(buildResponseStream),
+            Effect.catchTag(
+              "HttpClientError",
+              (error) => Errors.mapHttpClientError(error, "createResponseStream")
+            )
           )
-        ))
+        ),
+        withRedactedHeaders
+      )
 
     const decodeEmbedding = HttpClientResponse.schemaBodyJson(CreateEmbeddingResponseSchema)
 
     const createEmbedding = (
       payload: CreateEmbeddingRequestJson
     ): Effect.Effect<CreateEmbedding200, AiError.AiError> =>
-      Effect.flatMap(resolveHttpClient, (client) =>
-        pipe(
-          HttpClientRequest.post("/embeddings"),
-          HttpClientRequest.bodyJsonUnsafe(payload),
-          HttpClient.filterStatusOk(client).execute,
-          Effect.flatMap(decodeEmbedding),
-          Effect.catchTags({
-            HttpClientError: (error) => Errors.mapHttpClientError(error, "createEmbedding"),
-            SchemaError: (error) => Effect.fail(Errors.mapSchemaError(error, "createEmbedding"))
-          })
-        ))
+      resolveHttpClient.pipe(
+        Effect.flatMap((client) =>
+          HttpClientRequest.post("/embeddings").pipe(
+            HttpClientRequest.bodyJsonUnsafe(payload),
+            HttpClient.filterStatusOk(client).execute,
+            Effect.flatMap(decodeEmbedding),
+            Effect.catchTags({
+              HttpClientError: (error) => Errors.mapHttpClientError(error, "createEmbedding"),
+              SchemaError: (error) => Effect.fail(Errors.mapSchemaError(error, "createEmbedding"))
+            })
+          )
+        ),
+        withRedactedHeaders
+      )
 
     return OpenAiClient.of({
       client: httpClient,
@@ -259,10 +274,7 @@ export const make = Effect.fnUntraced(
       createEmbedding
     })
   },
-  Effect.updateService(
-    Headers.CurrentRedactedNames,
-    Array.appendAll(Object.values(RedactedOpenAiHeaders))
-  )
+  withRedactedHeaders
 )
 
 /**
@@ -340,7 +352,7 @@ type JsonObject = { readonly [x: string]: Schema.Json }
 /**
  * Optional response fields that can be requested with the `include` parameter.
  *
- * @category response
+ * @category models
  * @since 4.0.0
  */
 export type IncludeEnum =
@@ -379,7 +391,7 @@ type InputFileContent = {
 /**
  * Content blocks accepted in input messages.
  *
- * @category request
+ * @category models
  * @since 4.0.0
  */
 export type InputContent = InputTextContent | InputImageContent | InputFileContent
@@ -387,7 +399,7 @@ export type InputContent = InputTextContent | InputImageContent | InputFileConte
 /**
  * Text content block used for model-provided reasoning summaries.
  *
- * @category response
+ * @category models
  * @since 4.0.0
  */
 export type SummaryTextContent = {
@@ -449,7 +461,7 @@ type FilePathAnnotation = {
 /**
  * Citation and file-path annotations attached to output text content.
  *
- * @category response
+ * @category models
  * @since 4.0.0
  */
 export type Annotation =
@@ -488,7 +500,7 @@ type OutputMessage = {
  * Reasoning output item containing encrypted reasoning content, summaries, and
  * optional reasoning text.
  *
- * @category response
+ * @category models
  * @since 4.0.0
  */
 export type ReasoningItem = {
@@ -545,7 +557,7 @@ type ItemReference = {
  * Supports input messages, output messages, tool calls, tool outputs, reasoning
  * items, custom tool interactions, and item references.
  *
- * @category request
+ * @category models
  * @since 4.0.0
  */
 export type InputItem =
@@ -586,7 +598,7 @@ type CustomToolParam = {
 /**
  * Tool definitions that can be supplied to a Responses-style request.
  *
- * @category request
+ * @category models
  * @since 4.0.0
  */
 export type Tool =
@@ -637,7 +649,7 @@ export type TextResponseFormatConfiguration =
  * Request options for creating a Responses-style response with an
  * OpenAI-compatible provider.
  *
- * @category request
+ * @category models
  * @since 4.0.0
  */
 export type CreateResponse = {
@@ -677,7 +689,7 @@ export type CreateResponse = {
 /**
  * Token accounting reported on Responses-style response objects.
  *
- * @category response
+ * @category models
  * @since 4.0.0
  */
 export type ResponseUsage = {
@@ -698,7 +710,7 @@ type OutputItem =
  * Responses-style response object returned by compatible providers or embedded
  * in response stream lifecycle events.
  *
- * @category response
+ * @category models
  * @since 4.0.0
  */
 export type Response = {
@@ -855,7 +867,7 @@ export type ResponseStreamEvent =
  * string. The `index` field identifies the input item that produced this
  * embedding.
  *
- * @category response
+ * @category models
  * @since 4.0.0
  */
 export type Embedding = {
@@ -867,7 +879,7 @@ export type Embedding = {
 /**
  * Request payload for the embeddings endpoint.
  *
- * @category request
+ * @category models
  * @since 4.0.0
  */
 export type CreateEmbeddingRequest = {
@@ -881,7 +893,7 @@ export type CreateEmbeddingRequest = {
 /**
  * Successful response payload returned by the embeddings endpoint.
  *
- * @category response
+ * @category models
  * @since 4.0.0
  */
 export type CreateEmbeddingResponse = {
@@ -897,21 +909,21 @@ export type CreateEmbeddingResponse = {
 /**
  * JSON request body accepted by the embeddings endpoint.
  *
- * @category request
+ * @category models
  * @since 4.0.0
  */
 export type CreateEmbeddingRequestJson = CreateEmbeddingRequest
 /**
  * Decoded successful embeddings response body.
  *
- * @category response
+ * @category models
  * @since 4.0.0
  */
 export type CreateEmbedding200 = CreateEmbeddingResponse
 /**
  * Structured content parts accepted in chat completion messages.
  *
- * @category request
+ * @category models
  * @since 4.0.0
  */
 export type ChatCompletionContentPart =
@@ -929,7 +941,7 @@ export type ChatCompletionContentPart =
 /**
  * Tool call data attached to an assistant chat completion message.
  *
- * @category request
+ * @category models
  * @since 4.0.0
  */
 export type ChatCompletionRequestToolCall = {
@@ -943,7 +955,7 @@ export type ChatCompletionRequestToolCall = {
 /**
  * Message shapes accepted by the chat completions endpoint.
  *
- * @category request
+ * @category models
  * @since 4.0.0
  */
 export type ChatCompletionRequestMessage =
@@ -960,7 +972,7 @@ export type ChatCompletionRequestMessage =
 /**
  * Function tool definition accepted by the chat completions endpoint.
  *
- * @category request
+ * @category models
  * @since 4.0.0
  */
 export type ChatCompletionTool = {
@@ -1010,7 +1022,7 @@ export type ChatCompletionResponseFormat =
 /**
  * Request payload for the OpenAI-compatible chat completions endpoint.
  *
- * @category request
+ * @category models
  * @since 4.0.0
  */
 export type ChatCompletionRequest = {
@@ -1036,14 +1048,14 @@ export type ChatCompletionRequest = {
 /**
  * JSON request body used by this client when creating a chat completion response.
  *
- * @category request
+ * @category models
  * @since 4.0.0
  */
 export type CreateResponseRequestJson = ChatCompletionRequest
 /**
  * Decoded successful chat completion response body returned by `createResponse`.
  *
- * @category response
+ * @category models
  * @since 4.0.0
  */
 export type CreateResponse200 = ChatCompletionResponse
@@ -1150,35 +1162,35 @@ const ChatCompletionChunk = Schema.Struct({
 /**
  * Decoded tool-call object from a chat completion response or streaming chunk.
  *
- * @category response
+ * @category models
  * @since 4.0.0
  */
 export type ChatCompletionToolCall = typeof ChatCompletionToolCall.Type
 /**
  * Decoded message object from a non-streaming chat completion choice.
  *
- * @category response
+ * @category models
  * @since 4.0.0
  */
 export type ChatCompletionMessage = typeof ChatCompletionMessage.Type
 /**
  * Decoded choice object returned by chat completion responses and chunks.
  *
- * @category response
+ * @category models
  * @since 4.0.0
  */
 export type ChatCompletionChoice = typeof ChatCompletionChoice.Type
 /**
  * Decoded token usage summary returned by chat completions.
  *
- * @category response
+ * @category models
  * @since 4.0.0
  */
 export type ChatCompletionUsage = typeof ChatCompletionUsage.Type
 /**
  * Decoded successful response from the chat completions endpoint.
  *
- * @category response
+ * @category models
  * @since 4.0.0
  */
 export type ChatCompletionResponse = typeof ChatCompletionResponse.Type
@@ -1190,13 +1202,23 @@ export type ChatCompletionResponse = typeof ChatCompletionResponse.Type
  */
 export type ChatCompletionChunk = typeof ChatCompletionChunk.Type
 /**
- * Streaming chat completion event, including decoded chunks and the `[DONE]`
- * sentinel.
+ * A parsed chat completion event that does not match the expected chunk schema.
  *
  * @category streaming
  * @since 4.0.0
  */
-export type ChatCompletionStreamEvent = ChatCompletionChunk | "[DONE]"
+export interface UnknownChatCompletionEvent {
+  readonly _tag: "UnknownChatCompletionEvent"
+  readonly data: unknown
+}
+/**
+ * Streaming chat completion event, including decoded chunks, unknown parsed
+ * events, and the `[DONE]` sentinel.
+ *
+ * @category streaming
+ * @since 4.0.0
+ */
+export type ChatCompletionStreamEvent = ChatCompletionChunk | UnknownChatCompletionEvent | "[DONE]"
 
 const parseJson = (value: string): unknown => {
   try {
@@ -1215,7 +1237,11 @@ const decodeChatCompletionSseData = (
     return data
   }
   const parsed = parseJson(data)
-  return isChatCompletionChunk(parsed)
-    ? parsed
-    : undefined
+  if (parsed === undefined) {
+    return undefined
+  }
+  return isChatCompletionChunk(parsed) ? parsed : {
+    _tag: "UnknownChatCompletionEvent",
+    data: parsed
+  }
 }

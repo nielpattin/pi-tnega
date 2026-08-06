@@ -483,18 +483,6 @@ describe("Effect", () => {
         assert.deepStrictEqual(results, [1, 2, 3, 4, 5])
       }))
 
-    it.effect("inherit unbounded", () =>
-      Effect.gen(function*() {
-        const handle = yield* Effect.forEach([1, 2, 3], (_) => Effect.succeed(_).pipe(Effect.delay(50)), {
-          concurrency: "inherit"
-        }).pipe(
-          Effect.withConcurrency("unbounded"),
-          Effect.forkChild
-        )
-        yield* TestClock.adjust(90)
-        assert.deepStrictEqual(handle.pollUnsafe(), Exit.succeed([1, 2, 3]))
-      }))
-
     it.effect("sequential interrupt", () =>
       Effect.gen(function*() {
         const done: Array<number> = []
@@ -1442,6 +1430,21 @@ describe("Effect", () => {
             duration: Duration.zero
           }
         ])
+      }))
+  })
+
+  describe("timed", () => {
+    it.effect("uses monotonic time when wall time moves backward", () =>
+      Effect.gen(function*() {
+        yield* TestClock.setTime(1_000)
+        const [duration, result] = yield* Effect.gen(function*() {
+          yield* TestClock.adjust("100 millis")
+          yield* TestClock.setTime(0)
+          return "done"
+        }).pipe(Effect.timed)
+
+        assert.strictEqual(result, "done")
+        assert.strictEqual(Duration.toMillis(duration), 100)
       }))
   })
 

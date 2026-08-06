@@ -97,12 +97,12 @@ describe("Schema.toDifferJsonPatch", () => {
       deepStrictEqual(differ.patch(-0, [{ op: "replace", path: "", value: 0 }]), 0)
     })
 
-    it("Date: encodes invalid Date as a string on diff", () => {
+    it("Date: rejects an invalid Date on diff", () => {
       const differ = Schema.toDifferJsonPatch(Schema.Date)
 
-      deepStrictEqual(
-        differ.diff(new Date("1970-01-01T00:00:00.000Z"), new Date(NaN)),
-        [{ op: "replace", path: "", value: "Invalid Date" }]
+      throws(
+        () => differ.diff(new Date("1970-01-01T00:00:00.000Z"), new Date(NaN)),
+        "Expected a valid Date"
       )
     })
 
@@ -218,13 +218,12 @@ describe("Schema.toDifferJsonPatch", () => {
       roundtrip(Schema.RegExp)
       roundtrip(Schema.Duration)
       roundtrip(Schema.DateTimeUtc)
-      roundtrip(Schema.DateValid)
       roundtrip(Schema.Uint8Array)
       roundtrip(Schema.PropertyKey)
       roundtrip(Schema.Option(Schema.String))
       roundtrip(Schema.Result(Schema.Number, Schema.String))
       roundtrip(Schema.ReadonlyMap(Schema.String, Schema.Number))
-      roundtrip(Schema.Error())
+      roundtrip(Schema.ErrorInstance())
       roundtrip(Schema.Json)
       roundtrip(Schema.Exit(Schema.Number, Schema.String, Schema.Json))
 
@@ -232,7 +231,7 @@ describe("Schema.toDifferJsonPatch", () => {
       class B extends Schema.Class<B>("B")({ a: A }) {}
       roundtrip(B)
 
-      class E extends Schema.ErrorClass<E>("E")({ message: Schema.String }) {}
+      class E extends Schema.Error<E>("E")({ message: Schema.String }) {}
       roundtrip(E)
     })
   })
