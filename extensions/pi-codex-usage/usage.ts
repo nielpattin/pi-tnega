@@ -136,11 +136,23 @@ export function parseCodexUsagePayload(payload: unknown): CodexUsageSnapshot {
    };
 }
 
+function findCodexModel(ctx: ExtensionContext): RuntimeModel | undefined {
+   const activeModel = ctx.model;
+   if (activeModel?.provider === "openai-codex") {
+      const registeredActiveModel = ctx.modelRegistry.find(activeModel.provider, activeModel.id);
+      return registeredActiveModel ?? activeModel;
+   }
+
+   return (
+      ctx.modelRegistry.getAvailable().find((model) => model.provider === "openai-codex") ??
+      ctx.modelRegistry.getAll().find((model) => model.provider === "openai-codex")
+   );
+}
+
 export async function fetchCodexUsage(ctx: ExtensionContext): Promise<CodexUsageSnapshot> {
-   const model = ctx.model;
-   if (!model) throw new Error("No active model selected.");
-   if (model.provider !== "openai-codex") {
-      throw new Error("Codex usage is only available for OpenAI Codex subscription models.");
+   const model = findCodexModel(ctx);
+   if (!model) {
+      throw new Error("No OpenAI Codex model is available. Log in with /login openai-codex first.");
    }
 
    const headers = await buildCodexUsageHeaders(ctx, model);

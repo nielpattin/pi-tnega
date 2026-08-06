@@ -192,5 +192,4 @@ agents/
 **/target/
 *-sync.json
 pi-acks.json
-lan-voice
-REALTIME-SYSTEM-PROMPT.md
+pi-codex-usage.json
