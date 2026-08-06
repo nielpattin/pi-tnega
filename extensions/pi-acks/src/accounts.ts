@@ -1,8 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { defineMenu, runMenu } from "@narumitw/pi-tui-kit";
 import {
    AccountStore,
-   consumeMigrationNotice,
    defineOwn,
    defineOwnMap,
    getOwnCredential,
@@ -29,8 +27,6 @@ export {
    AccountStore,
    type AccountsData,
    InMemoryAccountStorageBackend,
-   LEGACY_CODEX_ACCOUNTS_FILE,
-   migrateLegacyCodexAccountsFile,
    type ProviderAccountsData,
    parseAccountName,
    parseAccountsData,
@@ -49,7 +45,6 @@ export type AccountsDependencies = {
 
 export default function accountsExtension(pi: ExtensionAPI, dependencies: AccountsDependencies = {}): void {
    const store = dependencies.store ?? new AccountStore();
-   let migrationNotice = dependencies.store ? undefined : consumeMigrationNotice();
    const providers = [
       ...(dependencies.providers ??
          createBuiltinProviderAdapters({ closeCodexWebSockets: dependencies.closeCodexWebSockets }))
@@ -141,10 +136,6 @@ export default function accountsExtension(pi: ExtensionAPI, dependencies: Accoun
       sessionGeneration += 1;
       menuController.abort(new DOMException("Accounts session replaced", "AbortError"));
       menuController = new AbortController();
-      if (migrationNotice) {
-         ctx.ui.notify(migrationNotice, "warning");
-         migrationNotice = undefined;
-      }
       await syncAll(ctx);
    });
 
@@ -235,147 +226,96 @@ async function showAccountsMenu(
       ctx.ui.notify("/accounts requires interactive UI (TUI or RPC mode).", "error");
       return;
    }
-   let selectedProviderId: AccountProviderId | undefined;
-   type State = {
-      states: Map<AccountProviderId, ProviderMenuState>;
-      currentProviderId: AccountProviderId | undefined;
-      hasAnyStoredAccount: boolean;
-   };
    type Screen = "main" | "login-providers" | "switch-providers" | "switch-accounts" | "remove";
-   type Action =
-      | "login-route"
-      | "login-provider"
-      | "switch-current"
-      | "switch-route"
-      | "switch-provider"
-      | "switch-account"
-      | "remove-route"
-      | "remove-account";
-   const menu = defineMenu<State, Screen, Action>({
-      start: "main",
-      screens: {
-         main: ({ state }) => {
-            const currentState = state.currentProviderId ? state.states.get(state.currentProviderId) : undefined;
-            return {
-               kind: "actions",
-               title: "Accounts",
-               lines: formatAccountsMenuTitle(ctx, state.states, state.hasAnyStoredAccount).split("\n").slice(1),
-               items: buildAccountMainItems(state.states, currentState, state.hasAnyStoredAccount),
-               hint: "close"
-            };
-         },
-         "login-providers": ({ state }) => ({
-            kind: "actions",
-            title: "Select provider",
-            items: sortedProviderStates(state.states).map((provider) => ({
-               id: provider.id,
-               label: provider.adapter.displayName,
-               action: "login-provider"
-            })),
-            hint: "back"
-         }),
-         "switch-providers": ({ state }) => ({
-            kind: "actions",
-            title: "Select provider",
-            items: providerStatesWithAccounts(state.states, state.currentProviderId).map((provider) => ({
-               id: provider.id,
-               label: provider.adapter.displayName,
-               action: "switch-provider"
-            })),
-            hint: "back"
-         }),
-         "switch-accounts": ({ state }) => {
-            const provider = selectedProviderId ? state.states.get(selectedProviderId) : undefined;
-            const options = provider ? switchAccountOptions(provider.active, Object.keys(provider.accounts)) : [];
-            return {
-               kind: "actions",
-               title: provider ? `Switch ${provider.adapter.displayName} account` : "Switch account",
-               items: options.map((option) => {
-                  const accountName = stripActiveMarker(option);
-                  return {
-                     id: accountItemId(accountName),
-                     label: option,
-                     action: "switch-account" as const,
-                     disabled: accountName === (provider?.active ?? "default")
-                  };
-               }),
-               hint: "back"
-            };
-         },
-         remove: ({ state }) => ({
-            kind: "actions",
-            title: "Remove account",
-            items: removeAccountOptions(state.states, state.currentProviderId).map((option) => ({
-               id: removeAccountItemId(option.adapter.id, option.accountName),
-               label: option.label,
-               action: "remove-account"
-            })),
-            hint: "back"
-         })
-      },
-      actions: {
-         "login-route": async () => ({ kind: "to", screen: "login-providers" }),
-         "login-provider": async ({ itemId }) => {
-            if (!isAccountProviderId(itemId)) return { kind: "rejected" };
-            const adapter = requireAdapter(adapters, itemId);
-            const name = await ctx.ui.input(`Name this ${adapter.displayName} account:`, "work");
-            if (name === undefined || !owner.isCurrent()) return { kind: "close" };
-            await loginAccount(pi, ctx, store, adapter, name, syncProvider, () => owner.isCurrent());
-            return { kind: "close" };
-         },
-         "switch-current": async ({ itemId }) => {
-            if (!isAccountProviderId(itemId)) return { kind: "rejected" };
-            selectedProviderId = itemId;
-            return { kind: "to", screen: "switch-accounts" };
-         },
-         "switch-route": async () => ({ kind: "to", screen: "switch-providers" }),
-         "switch-provider": async ({ itemId }) => {
-            if (!isAccountProviderId(itemId)) return { kind: "rejected" };
-            selectedProviderId = itemId;
-            return { kind: "to", screen: "switch-accounts" };
-         },
-         "switch-account": async ({ itemId }) => {
-            const providerId = selectedProviderId;
-            if (!providerId) return { kind: "rejected" };
-            const latest = await store.readProviderAsync(providerId);
-            if (!owner.isCurrent()) return { kind: "close" };
-            const accountName = switchAccountOptions(latest.active, Object.keys(latest.accounts))
-               .map(stripActiveMarker)
-               .find((name) => accountItemId(name) === itemId);
-            if (!accountName) return { kind: "rejected" };
-            await switchAccount(ctx, store, requireAdapter(adapters, providerId), accountName, syncProvider);
-            return { kind: "close" };
-         },
-         "remove-route": async () => ({ kind: "to", screen: "remove" }),
-         "remove-account": async ({ itemId }) => {
-            const states = await readProviderMenuStates(store, adapters);
-            if (!owner.isCurrent()) return { kind: "close" };
-            const option = removeAccountOptions(states, toProviderId(ctx.model?.provider)).find(
-               (candidate) => removeAccountItemId(candidate.adapter.id, candidate.accountName) === itemId
-            );
-            if (!option) return { kind: "rejected" };
-            const confirmed = await ctx.ui.confirm(
-               "Remove account",
-               `Remove ${option.adapter.displayName} account "${option.accountName}"?`
-            );
-            if (!confirmed || !owner.isCurrent()) return { kind: "close" };
-            await removeAccount(ctx, store, option.adapter, option.accountName, syncProvider);
-            return { kind: "close" };
-         }
+   let screen: Screen = "main";
+   let selectedProviderId: AccountProviderId | undefined;
+   while (true) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- menu state must load before each stateful iteration.
+      const states = await readProviderMenuStates(store, adapters);
+      if (!owner.isCurrent()) return;
+      const currentProviderId = toProviderId(ctx.model?.provider);
+      const hasAnyStoredAccount = [...states.values()].some((state) => accountNames(state).length > 0);
+      const options = accountMenuScreenOptions(
+         states,
+         currentProviderId,
+         hasAnyStoredAccount,
+         screen,
+         selectedProviderId
+      );
+      const title =
+         screen === "main"
+            ? formatAccountsMenuTitle(ctx, states, hasAnyStoredAccount)
+            : accountMenuScreenTitle(states, screen, selectedProviderId);
+      // oxlint-disable-next-line eslint/no-await-in-loop -- wait for the user's choice before advancing the menu state.
+      const choice = await ctx.ui.select(title, options, { signal: owner.signal });
+      if (!owner.isCurrent()) return;
+      if (choice === undefined) {
+         if (screen === "main") return;
+         screen = "main";
+         continue;
       }
-   });
-   await runMenu(ctx, menu, {
-      getState: async () => {
-         const states = await readProviderMenuStates(store, adapters);
-         return {
+      if (screen === "main") {
+         const item = buildAccountMainItems(
             states,
-            currentProviderId: toProviderId(ctx.model?.provider),
-            hasAnyStoredAccount: [...states.values()].some((state) => accountNames(state).length > 0)
-         };
-      },
-      signal: owner.signal,
-      isCurrent: () => owner.isCurrent()
-   });
+            currentProviderId ? states.get(currentProviderId) : undefined,
+            hasAnyStoredAccount
+         ).find((candidate) => candidate.label === choice);
+         if (!item) continue;
+         if (item.action === "login-route") screen = "login-providers";
+         else if (item.action === "switch-current") {
+            selectedProviderId = currentProviderId;
+            screen = "switch-accounts";
+         } else if (item.action === "switch-route") screen = "switch-providers";
+         else if (item.action === "remove-route") screen = "remove";
+         continue;
+      }
+      if (screen === "login-providers") {
+         const provider = sortedProviderStates(states).find((candidate) => candidate.adapter.displayName === choice);
+         if (!provider) continue;
+         // oxlint-disable-next-line eslint/no-await-in-loop -- wait for the account name before starting login.
+         const name = await ctx.ui.input(`Name this ${provider.adapter.displayName} account:`, "work");
+         if (name === undefined || !owner.isCurrent()) return;
+         // oxlint-disable-next-line eslint/no-await-in-loop -- login must finish before leaving the menu.
+         await loginAccount(pi, ctx, store, provider.adapter, name, syncProvider, () => owner.isCurrent());
+         return;
+      }
+      if (screen === "switch-providers") {
+         const provider = providerStatesWithAccounts(states, currentProviderId).find(
+            (candidate) => candidate.adapter.displayName === choice
+         );
+         if (!provider) continue;
+         selectedProviderId = provider.id;
+         screen = "switch-accounts";
+         continue;
+      }
+      if (screen === "switch-accounts") {
+         const provider = selectedProviderId ? states.get(selectedProviderId) : undefined;
+         if (!provider) {
+            screen = "main";
+            continue;
+         }
+         const accountName = switchAccountOptions(provider.active, Object.keys(provider.accounts))
+            .map(stripActiveMarker)
+            .find((name) => name === stripActiveMarker(choice));
+         if (!accountName) continue;
+         // oxlint-disable-next-line eslint/no-await-in-loop -- account switching must finish before leaving the menu.
+         await switchAccount(ctx, store, provider.adapter, accountName, syncProvider);
+         return;
+      }
+      if (screen === "remove") {
+         const option = removeAccountOptions(states, currentProviderId).find((candidate) => candidate.label === choice);
+         if (!option) continue;
+         // oxlint-disable-next-line eslint/no-await-in-loop -- confirmation must complete before removal.
+         const confirmed = await ctx.ui.confirm(
+            "Remove account",
+            `Remove ${option.adapter.displayName} account "${option.accountName}"?`
+         );
+         if (!confirmed || !owner.isCurrent()) return;
+         // oxlint-disable-next-line eslint/no-await-in-loop -- removal must finish before leaving the menu.
+         await removeAccount(ctx, store, option.adapter, option.accountName, syncProvider);
+         return;
+      }
+   }
 }
 
 async function readProviderMenuStates(
@@ -474,12 +414,44 @@ function buildAccountMainItems(
    ];
 }
 
-function accountItemId(accountName: string): string {
-   return `account:${encodeURIComponent(accountName)}`;
+function accountMenuScreenTitle(
+   states: Map<AccountProviderId, ProviderMenuState>,
+   screen: "login-providers" | "switch-providers" | "switch-accounts" | "remove",
+   selectedProviderId: AccountProviderId | undefined
+): string {
+   if (screen === "login-providers" || screen === "switch-providers") return "Select provider";
+   if (screen === "switch-accounts") {
+      const provider = selectedProviderId ? states.get(selectedProviderId) : undefined;
+      return provider ? `Switch ${provider.adapter.displayName} account` : "Switch account";
+   }
+   return "Remove account";
 }
 
-function removeAccountItemId(providerId: AccountProviderId, accountName: string): string {
-   return `${providerId}:${encodeURIComponent(accountName)}`;
+function accountMenuScreenOptions(
+   states: Map<AccountProviderId, ProviderMenuState>,
+   currentProviderId: AccountProviderId | undefined,
+   hasAnyStoredAccount: boolean,
+   screen: "main" | "login-providers" | "switch-providers" | "switch-accounts" | "remove",
+   selectedProviderId: AccountProviderId | undefined
+): string[] {
+   if (screen === "main") {
+      return buildAccountMainItems(
+         states,
+         currentProviderId ? states.get(currentProviderId) : undefined,
+         hasAnyStoredAccount
+      ).map((item) => item.label);
+   }
+   if (screen === "login-providers") {
+      return sortedProviderStates(states).map((provider) => provider.adapter.displayName);
+   }
+   if (screen === "switch-providers") {
+      return providerStatesWithAccounts(states, currentProviderId).map((provider) => provider.adapter.displayName);
+   }
+   if (screen === "switch-accounts") {
+      const provider = selectedProviderId ? states.get(selectedProviderId) : undefined;
+      return provider ? switchAccountOptions(provider.active, Object.keys(provider.accounts)) : [];
+   }
+   return removeAccountOptions(states, currentProviderId).map((option) => option.label);
 }
 
 function switchCurrentProviderAction(adapter: AccountProviderAdapter): string {

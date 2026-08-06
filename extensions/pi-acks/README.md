@@ -2,7 +2,7 @@
 
 `pi-acks` is a native [Pi coding agent](https://pi.dev) extension for keeping and switching named subscription OAuth accounts independently across supported providers.
 
-It is a local fork of [`@narumitw/pi-accounts`](https://github.com/narumiruna/pi-extensions/tree/main/extensions/pi-accounts). It uses Pi's built-in providers and provider-owned OAuth implementations. A named account temporarily overrides only that provider's runtime auth; selecting `default` restores Pi's normal `/login`, `auth.json`, or environment-based resolution without deleting the named account.
+It uses Pi's built-in providers and provider-owned OAuth implementations, and builds its interactive menu from Pi's native extension UI dialogs (`ctx.ui.select`, `ctx.ui.input`, `ctx.ui.confirm`). A named account temporarily overrides only that provider's runtime auth; selecting `default` restores Pi's normal `/login`, `auth.json`, or environment-based resolution without deleting the named account.
 
 ## ✨ Features
 
@@ -17,7 +17,6 @@ It is a local fork of [`@narumitw/pi-accounts`](https://github.com/narumiruna/pi
 - Fails closed and aborts only the affected provider's turn after refresh or activation failure.
 - Restores the exact provider registration that existed before the account overlay.
 - Invalidates cached Codex WebSockets only when the applied Codex identity changes.
-- Migrates released `pi-codex-accounts.json` state without deleting the rollback source.
 
 ## 🔌 Supported providers
 
@@ -33,9 +32,6 @@ This is a local extension in the pi repository. Load it by adding `extensions/pi
 pi -e ./extensions/pi-acks
 ```
 
-> [!WARNING]
-> Do not load `pi-acks` and `@narumitw/pi-accounts` together; both can manage and refresh the same rotating Codex credential independently. They use different storage files (`pi-acks.json` vs `pi-accounts.json`), so an account added in one is not visible in the other.
-
 ## 🚀 Usage
 
 Open the interactive account manager:
@@ -44,8 +40,7 @@ Open the interactive account manager:
 /accounts
 ```
 
-The standard manager runs in TUI or RPC mode; Back returns through provider/account screens and
-Escape closes the root. Print and JSON modes reject it observably. Any extra text after `/accounts`
+The manager runs in TUI or RPC mode and is built entirely from Pi's native extension UI dialogs. The main menu and each provider/account screen are `ctx.ui.select` dialogs; account names use `ctx.ui.input` and removal uses `ctx.ui.confirm`. Escaping a sub-screen (Back) returns to the main menu, and Escaping the main menu closes it. Print and JSON modes reject it observably. Any extra text after `/accounts`
 is ignored so the entry point stays singular. Provider-owned OAuth challenges, account-name text
 input, and exact replacement/removal confirmations remain specialized dialogs because they carry
 credential and destructive-action policy rather than ordinary navigation.
@@ -100,7 +95,7 @@ To prevent that, each successful activation mirrors the active account's OAuth c
 
 Codex `availableModelIds` are projected into the active provider model list. Switching Codex accounts rebuilds the projection from the complete pre-overlay model catalog. A currently selected model that is unavailable to the named account is rejected before the turn starts.
 
-## 🗄️ Storage and migration
+## 🗄️ Storage
 
 The canonical file is:
 
@@ -111,18 +106,8 @@ The canonical file is:
 When `PI_CODING_AGENT_DIR` is set, the file is stored at
 `$PI_CODING_AGENT_DIR/pi-acks.json` instead. Its versioned structure keeps account maps and
 active names under separate provider IDs. Credential values are private and must not be committed.
-When neither canonical nor legacy storage exists, reads use an empty in-memory store without creating
-an agent directory or file; the first account mutation creates the private canonical file.
-
-On first load, if `pi-acks.json` does not exist and released `pi-codex-accounts.json` does, the extension:
-
-1. Locks and validates the legacy file.
-2. Repairs its permission to `0600`.
-3. Copies all Codex credentials and the active name into the `openai-codex` provider section.
-4. Atomically installs private `pi-acks.json`.
-5. Retains the private legacy file for rollback.
-
-If both files exist, `pi-acks.json` is canonical and the legacy file is not imported again. The retained legacy refresh token may become stale after `pi-acks` rotates it, so rollback can require a new Codex login.
+When storage does not exist, reads use an empty in-memory store without creating an agent directory or
+file; the first account mutation creates the private canonical file.
 
 ## 🚧 Limitations and non-goals
 
@@ -166,4 +151,4 @@ Pi extension, Pi coding agent, OAuth accounts, OpenAI Codex, ChatGPT Plus, ChatG
 
 ## 📄 License
 
-MIT. See [`LICENSE`](./LICENSE). Copyright (c) 2026 narumiruna, forked into this repository for local use.
+MIT. See [`LICENSE`](./LICENSE).

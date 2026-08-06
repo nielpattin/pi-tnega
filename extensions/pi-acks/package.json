@@ -2,7 +2,7 @@
    "name": "pi-acks",
    "version": "0.1.0",
    "private": true,
-   "description": "Pi extension for switching named OpenAI Codex subscription OAuth accounts. Local fork of @narumitw/pi-accounts.",
+   "description": "Pi extension for switching named OpenAI Codex subscription OAuth accounts.",
    "keywords": [
       "accounts",
       "codex",
@@ -23,7 +23,6 @@
       "typecheck": "tsc --noEmit -p tsconfig.json"
    },
    "dependencies": {
-      "@narumitw/pi-tui-kit": "^0.40.0",
       "proper-lockfile": "^4.1.2"
    },
    "devDependencies": {

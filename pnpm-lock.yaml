@@ -89,9 +89,6 @@ importers:
 
   extensions/pi-acks:
     dependencies:
-      '@narumitw/pi-tui-kit':
-        specifier: ^0.40.0
-        version: 0.40.0(@earendil-works/pi-coding-agent@0.83.0(@modelcontextprotocol/sdk@1.30.0(supports-color@7.2.0)(zod@4.4.3))(supports-color@7.2.0)(ws@8.21.1)(zod@4.4.3))(@earendil-works/pi-tui@0.83.0)
       proper-lockfile:
         specifier: ^4.1.2
         version: 4.1.2
@@ -737,18 +734,6 @@ packages:
     resolution: {integrity: sha512-CmCXPQrkbwExx3j946/PtHWHbYJiCRBRDl4BlkRQcJB/YOwQxJRTpoo7aTsortjgoJ1x7opzTSxn7C+ASSLVjQ==}
     cpu: [x64]
     os: [win32]
-
-  '@napi-rs/wasm-runtime@1.1.5':
-    resolution: {integrity: sha512-AWPoBRJ9tsnVhor4sjO7rkni+7p+2IAEFj6cx06UgP10jkQHqay/36uRV/bFkgrh18D9vb4cr8Q0Pthskgzy+Q==}
-    peerDependencies:
-      '@emnapi/core': ^1.7.1
-      '@emnapi/runtime': ^1.7.1
-
-  '@narumitw/pi-tui-kit@0.40.0':
-    resolution: {integrity: sha512-gF7sZJXr48aF08s05sTVM2EdAaRrk0jH0Ca8HWBT21xknUObUHMQnf96OAI0VMzD9hwfT3ZsSJIVW3FNrPPcmw==}
-    peerDependencies:
-      '@earendil-works/pi-coding-agent': '*'
-      '@earendil-works/pi-tui': '*'
 
   '@nodelib/fs.scandir@2.1.5':
     resolution: {integrity: sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g==}
@@ -3062,18 +3047,6 @@ snapshots:
 
   '@msgpackr-extract/msgpackr-extract-win32-x64@3.0.4':
     optional: true
-
-  '@napi-rs/wasm-runtime@1.1.5(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)':
-    dependencies:
-      '@emnapi/core': 1.10.0
-      '@emnapi/runtime': 1.10.0
-      '@tybys/wasm-util': 0.10.2
-    optional: true
-
-  '@narumitw/pi-tui-kit@0.40.0(@earendil-works/pi-coding-agent@0.83.0(@modelcontextprotocol/sdk@1.30.0(supports-color@7.2.0)(zod@4.4.3))(supports-color@7.2.0)(ws@8.21.1)(zod@4.4.3))(@earendil-works/pi-tui@0.83.0)':
-    dependencies:
-      '@earendil-works/pi-coding-agent': 0.83.0(@modelcontextprotocol/sdk@1.30.0(supports-color@7.2.0)(zod@4.4.3))(supports-color@7.2.0)(ws@8.21.1)(zod@4.4.3)
-      '@earendil-works/pi-tui': 0.83.0
 
   '@nodelib/fs.scandir@2.1.5':
     dependencies:
