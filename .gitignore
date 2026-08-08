@@ -193,3 +193,6 @@ agents/
 *-sync.json
 pi-acks.json
 pi-codex-usage.json
+
+# Local scratch tests - never committed (see .pi/skills/tdd)
+tests/

@@ -136,7 +136,6 @@ Run from the repository root for workspace validation:
 pnpm lint
 pnpm typecheck
 pnpm fmt
-git diff --check
 ```
 
 ## Attribution

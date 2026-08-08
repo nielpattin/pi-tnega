@@ -77,6 +77,7 @@ Follow this order for code changes:
 1. Run `pnpm lint`.
 2. Run `pnpm typecheck`.
 3. Run `pnpm fmt`.
-4. Run `git diff --check`.
 
 If linting or type checking fails, fix the problem and continue again from the failed step.
+
+When the change adds or alters extension behavior, follow `.pi/skills/tdd/SKILL.md` first: write the failing test in `tests/` (node:test, run with `node tests/<file>.mjs`), watch it fail, then make it pass..

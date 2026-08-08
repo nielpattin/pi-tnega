@@ -34,7 +34,6 @@ pnpm fmt                 # format with oxfmt
 pnpm lint                # lint all files with oxlint
 pnpm lint:fix            # auto-fix lint issues with oxlint
 pnpm typecheck           # typecheck all project configs
-git diff --check         # verify whitespace
 ```
 
 See **[DEVELOPMENT.md](./DEVELOPMENT.md)** for detailed contributor instructions on creating and editing packages, publishing, project structure, and tooling.

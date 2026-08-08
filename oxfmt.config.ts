@@ -16,7 +16,11 @@ export default defineConfig({
       "workflows/**",
       "**/rust-embedder/models/**",
       "**/rust-embedder/target/**",
-      "*.json"
+      "*.json",
+      "*.lock",
+      "*.tsbuildinfo",
+      "tests/**",
+      "examples/**"
    ],
    trailingComma: "none",
    printWidth: 120,

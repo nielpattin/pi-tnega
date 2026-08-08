@@ -44,6 +44,8 @@ export type ViewState =
 export interface AgentsPanelOptions {
    initialViewModel?: AgentsPanelViewModel;
    getAllTools?: () => AgentToolInfo[];
+   /** Called after the panel persists any agent change (toggle, edit, create). */
+   onAgentsChanged?: () => void | Promise<void>;
 }
 
 export const WORKER_LOCKED_TOOLS = new Set(["submit"]);
@@ -534,6 +536,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
          this.runtime,
          AgentsStore.use((s) => s.updateAgent(newAgent, cwd))
       ).catch(() => {});
+      void this.options?.onAgentsChanged?.();
       await this.refreshData();
 
       this.state.selectedIndex = Math.max(0, (this.viewModel?.agents.length ?? 1) - 1);
@@ -990,6 +993,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
             this.ctx.ui.notify(saveMessage, "info");
          } catch {}
       }
+      void this.options?.onAgentsChanged?.();
       this.tui.requestRender();
    }
 
@@ -1020,6 +1024,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
          this.runtime,
          AgentsStore.use((s) => s.updateAgent(updatedAgent, cwd))
       ).catch(() => {});
+      void this.options?.onAgentsChanged?.();
       const saveMessage =
          updatedAgent.harness === "agy"
             ? `Saved ${updatedAgent.name} to ${filePath} and linked its Agy agent`

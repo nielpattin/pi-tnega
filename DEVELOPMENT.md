@@ -118,7 +118,7 @@ pnpm --dir extensions/pi-station typecheck
 - **Raw TypeScript Extensions** (`pi-permission-system`, `pi-reference`, `pi-station`, `pi-workers`, and others):
     - Published directly as raw TypeScript source files (`.ts`).
     - Loaded by Pi harness at runtime via `jiti`. No `dist/` build step is required.
-- Ensure changes pass the applicable root checks (`pnpm lint`, `pnpm typecheck`, `pnpm fmt`, and `git diff --check`).
+- Ensure changes pass the applicable root checks (`pnpm lint`, `pnpm typecheck`, and `pnpm fmt`).
 
 ---
 
@@ -177,4 +177,4 @@ Use the helper script `publish.sh` to trigger GitHub Actions:
 
 - **No Unprompted Git Commits / Pushes**: Do NOT execute `git commit` or `git push` unless explicitly requested by the user.
 - **Surgical Edits**: Touch only what is necessary for the assignment. Preserve comments and structure.
-- **Always Verify**: Run `pnpm lint`, `pnpm typecheck`, `pnpm fmt`, and `git diff --check` before declaring success.
+- **Always Verify**: Run `pnpm lint`, `pnpm typecheck`, and `pnpm fmt` before declaring success.

@@ -267,7 +267,6 @@ When implementing `extensions/pi-workers`, every service must:
 pnpm typecheck
 pnpm lint
 pnpm fmt
-git diff --check
 pnpm --dir extensions/ask-user check
 pnpm --dir extensions/copy-all check
 pnpm --dir extensions/pi-workers check

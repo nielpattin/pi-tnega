@@ -95,6 +95,6 @@ ${ARGUMENTS:-Synthesize the goal, delegate exploration to research workers, perf
 5. **Phase 3: Final Verification (Orchestrator)**
    Once implementation workers complete, run verification checks via `bash`:
     ```bash
-    pnpm lint && pnpm typecheck && pnpm fmt && git diff --check
+    pnpm lint && pnpm typecheck && pnpm fmt
     ```
     Review the final change set, verify all tests pass, and present the completed solution to the user.

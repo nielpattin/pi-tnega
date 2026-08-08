@@ -293,6 +293,20 @@ function createWorkerToolDefinition(
    };
 }
 
+/**
+ * Rebuild the worker_spawn tool metadata for the current cwd and re-register it,
+ * so agent enable/disable/create changes apply to the live session immediately.
+ */
+export async function refreshWorkerSpawnTool(
+   pi: ExtensionAPI,
+   runtime: WorkersRuntime,
+   delivery: ParentToolDelivery,
+   cwd?: string
+): Promise<void> {
+   const augmentation = await resolveWorkerToolAugmentation(runtime, cwd);
+   pi.registerTool(createWorkerToolDefinition(runtime, delivery, augmentation));
+}
+
 interface ParentActionToolDefinition {
    readonly name: string;
    readonly label: string;
@@ -484,6 +498,7 @@ function registerParentCommands(pi: ExtensionAPI, runtime: WorkersRuntime, deliv
          if (ctx.hasUI) {
             await openAgentsPanel(ctx as any, runtime, {
                initialViewModel: model,
+               onAgentsChanged: () => void refreshWorkerSpawnTool(pi, runtime, delivery, ctx.cwd),
                getAllTools: () =>
                   pi.getAllTools().map((t) => ({
                      name: t.name,
