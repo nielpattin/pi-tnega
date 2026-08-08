@@ -694,7 +694,7 @@ export function registerWorkersExtension(pi: ExtensionAPI, options?: WorkersExte
             registry.onSettled((job) => {
                if (switchingParent || !parentContext || job.ownerSessionId !== activeOwnerSessionId) return;
                void asyncWidget.update(parentContext);
-               if (resultDelivery.shouldSuppress(job)) return;
+               if (job.status === "cancelled" || resultDelivery.shouldSuppress(job)) return;
                resultDelivery.defer({ ...job });
                if (parentContext.isIdle()) flushDeferredResults();
             })

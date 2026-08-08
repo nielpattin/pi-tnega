@@ -331,6 +331,11 @@ export class WorkflowDashboard {
             this.listIndex = this.entries.indexOf(entry);
             this.view = "detail";
          }
+      } else if (this.entries.length > 0) {
+         const runningIndex = this.entries.findIndex((e) => e.details.status === "running");
+         if (runningIndex >= 0) {
+            this.listIndex = runningIndex;
+         }
       }
       this.timer = setInterval(() => {
          if (this.entries.some((e) => e.live) || this.current?.live || this.notice) {

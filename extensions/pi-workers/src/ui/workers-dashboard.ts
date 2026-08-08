@@ -2,6 +2,8 @@
  * Real Full-screen TUI dashboard and pure state machine for /workers.
  */
 
+import * as path from "node:path";
+import { spawn } from "node:child_process";
 import type { ExtensionCommandContext, KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
 import type { Component, Focusable, TUI } from "@earendil-works/pi-tui";
 import { Input, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
@@ -13,7 +15,8 @@ import { ProcessSupervisor } from "../services/ProcessSupervisor.js";
 import { WorkerManager } from "../services/WorkerManager.js";
 import { enterAlternateScreen } from "./alternate-screen.js";
 import { formatDuration } from "./formatters.js";
-import { openJobTakeover } from "./takeover.js";
+import { buildCopiedTranscriptPayload, openJobTakeover } from "./takeover.js";
+import { readPiSessionTranscript } from "./session-transcript.js";
 import { openProcessDetail } from "./process-detail.js";
 
 export type DashboardTab = "jobs" | "bash" | "processes" | "logs" | "takeover";
@@ -46,10 +49,48 @@ export type DashboardIntent =
    | { type: "cancel_job"; id: string }
    | { type: "stop_process"; name: string }
    | { type: "restart_process"; name: string }
+   | { type: "copy_transcript"; id: string }
+   | { type: "copy_path"; path: string }
    | { type: "close" }
    | { type: "none" };
 
 export const DASHBOARD_TABS: DashboardTab[] = ["jobs", "bash", "processes", "logs", "takeover"];
+
+export async function copyToClipboard(text: string): Promise<boolean> {
+   return new Promise((resolve) => {
+      let command = "";
+      let args: string[] = [];
+
+      if (process.platform === "win32") {
+         command = "powershell";
+         args = [
+            "-NoProfile",
+            "-Command",
+            "$reader = New-Object System.IO.StreamReader([Console]::OpenStandardInput(), [System.Text.Encoding]::UTF8); $text = $reader.ReadToEnd(); $reader.Close(); Set-Clipboard -Value $text"
+         ];
+      } else if (process.platform === "darwin") {
+         command = "pbcopy";
+         args = [];
+      } else {
+         command = "xclip";
+         args = ["-selection", "clipboard"];
+      }
+
+      try {
+         const child = spawn(command, args, { stdio: ["pipe", "ignore", "ignore"] });
+         child.on("error", () => resolve(false));
+         child.on("close", (code) => resolve(code === 0));
+         child.stdin?.end(Buffer.from(text, "utf8"));
+      } catch {
+         resolve(false);
+      }
+   });
+}
+
+export function wrapIndex(index: number, delta: number, length: number): number {
+   if (length <= 0) return 0;
+   return (((index + delta) % length) + length) % length;
+}
 
 export function createWorkersDashboardState(initial?: Partial<WorkersDashboardState>): WorkersDashboardState {
    return {
@@ -119,17 +160,30 @@ export function reduceWorkersDashboardKey(
          }
       }
       const nextIndex =
-         maxCount !== undefined && maxCount > 0
-            ? Math.min(state.selectedIndex + 1, maxCount - 1)
-            : state.selectedIndex + 1;
+         maxCount !== undefined && maxCount > 0 ? wrapIndex(state.selectedIndex, 1, maxCount) : state.selectedIndex + 1;
       return {
          state: { ...state, selectedIndex: nextIndex }
       };
    }
 
    if (key === "up" || key === "k") {
+      let maxCount = context?.itemCount;
+      if (maxCount === undefined) {
+         if ((state.activeTab === "jobs" || state.activeTab === "takeover") && context?.jobs) {
+            maxCount = context.jobs.length;
+         } else if (
+            (state.activeTab === "processes" || state.activeTab === "bash" || state.activeTab === "logs") &&
+            context?.processes
+         ) {
+            maxCount = context.processes.length;
+         }
+      }
+      const nextIndex =
+         maxCount !== undefined && maxCount > 0
+            ? wrapIndex(state.selectedIndex, -1, maxCount)
+            : Math.max(0, state.selectedIndex - 1);
       return {
-         state: { ...state, selectedIndex: Math.max(0, state.selectedIndex - 1) }
+         state: { ...state, selectedIndex: nextIndex }
       };
    }
 
@@ -222,6 +276,45 @@ export function reduceWorkersDashboardKey(
       }
    }
 
+   if (key === "s") {
+      if (state.activeTab === "jobs" && context?.jobs && context.jobs[state.selectedIndex]) {
+         return {
+            state,
+            intent: { type: "copy_transcript", id: context.jobs[state.selectedIndex].id }
+         };
+      }
+   }
+
+   if (key === "y" || key === "p") {
+      if ((state.activeTab === "jobs" || state.activeTab === "takeover") && context?.jobs?.[state.selectedIndex]) {
+         const job = context.jobs[state.selectedIndex];
+         const sessionPath = job.sessionFile
+            ? path.resolve(job.sessionFile)
+            : job.cwd
+              ? path.resolve(job.cwd)
+              : undefined;
+         if (sessionPath) {
+            return {
+               state,
+               intent: { type: "copy_path", path: sessionPath }
+            };
+         }
+      }
+      if (
+         (state.activeTab === "processes" || state.activeTab === "bash" || state.activeTab === "logs") &&
+         context?.processes?.[state.selectedIndex]
+      ) {
+         const proc = context.processes[state.selectedIndex];
+         const procPath = proc.cwd ? path.resolve(proc.cwd) : undefined;
+         if (procPath) {
+            return {
+               state,
+               intent: { type: "copy_path", path: procPath }
+            };
+         }
+      }
+   }
+
    return { state };
 }
 
@@ -275,6 +368,9 @@ export class WorkersDashboardScreen implements Component, Focusable {
 
    private jobs: Job[] = [];
    private processes: ProcessEntry[] = [];
+   private initialSelectionApplied = false;
+   private notice?: string;
+   private noticeTime = 0;
 
    get focused(): boolean {
       return this._focused;
@@ -290,13 +386,62 @@ export class WorkersDashboardScreen implements Component, Focusable {
       private keybindings: KeybindingsManager,
       private runtime: WorkersRuntime,
       private done: (value: DashboardPickResult | null) => void,
-      initialState?: Partial<WorkersDashboardState>
+      initialState?: Partial<WorkersDashboardState>,
+      private lastViewedItem?: DashboardPickResult | null
    ) {
       this.state = createWorkersDashboardState(initialState);
       this.ticker = setInterval(() => {
          void this.refreshData();
       }, 500);
       void this.refreshData();
+   }
+
+   private applyInitialSelection() {
+      const item = this.lastViewedItem;
+      if (item) {
+         if (item.type === "takeover") {
+            const idx = this.jobs.findIndex((j) => j.id === item.jobId);
+            if (idx !== -1) {
+               this.state.activeTab = "jobs";
+               this.state.selectedIndex = idx;
+               return;
+            }
+         } else if (item.type === "process_detail") {
+            const idx = this.processes.findIndex((p) => p.name === item.procName || p.id === item.procName);
+            if (idx !== -1) {
+               this.state.activeTab = "processes";
+               this.state.selectedIndex = idx;
+               return;
+            }
+         }
+      }
+
+      let latestRunning: { tab: DashboardTab; index: number; time: number } | null = null;
+
+      for (let i = 0; i < this.jobs.length; i++) {
+         const job = this.jobs[i];
+         if (job.status === "running" || job.status === "pending") {
+            const time = job.startedAt ?? job.createdAt;
+            if (!latestRunning || time > latestRunning.time) {
+               latestRunning = { tab: "jobs", index: i, time };
+            }
+         }
+      }
+
+      for (let i = 0; i < this.processes.length; i++) {
+         const proc = this.processes[i];
+         if (proc.status === "running" || proc.status === "starting") {
+            const time = proc.spawnTime;
+            if (!latestRunning || time > latestRunning.time) {
+               latestRunning = { tab: "processes", index: i, time };
+            }
+         }
+      }
+
+      if (latestRunning) {
+         this.state.activeTab = latestRunning.tab;
+         this.state.selectedIndex = latestRunning.index;
+      }
    }
 
    private async refreshData() {
@@ -312,6 +457,12 @@ export class WorkersDashboardScreen implements Component, Focusable {
          );
          this.jobs = [...jobs];
          this.processes = [...procs];
+
+         if (!this.initialSelectionApplied) {
+            this.initialSelectionApplied = true;
+            this.applyInitialSelection();
+         }
+
          this.tui.requestRender();
       } catch {
          // ignore fetch errors
@@ -385,6 +536,15 @@ export class WorkersDashboardScreen implements Component, Focusable {
             ).catch(() => {});
             void this.refreshData();
             return;
+         } else if (intent.type === "copy_path") {
+            void copyToClipboard(intent.path);
+            this.notice = `Copied path: ${intent.path}`;
+            this.noticeTime = Date.now();
+            this.tui.requestRender();
+            return;
+         } else if (intent.type === "copy_transcript") {
+            void this.copyTranscriptForJob(intent.id);
+            return;
          } else if (intent.type === "takeover_control") {
             void runTool(
                this.runtime,
@@ -418,6 +578,18 @@ export class WorkersDashboardScreen implements Component, Focusable {
       this.tui.requestRender();
    }
 
+   private async copyTranscriptForJob(jobId: string) {
+      const job = this.jobs.find((j) => j.id === jobId);
+      if (!job) return;
+      const transcript = job.transcript ?? (job.sessionFile ? readPiSessionTranscript(job.sessionFile) : []);
+      const payload = buildCopiedTranscriptPayload(job, transcript);
+
+      await copyToClipboard(payload);
+      this.notice = `Copied transcript for ${job.name ?? jobId}`;
+      this.noticeTime = Date.now();
+      void this.refreshData();
+   }
+
    private borderSegment(width: number, title: string): string {
       const theme = this.theme;
       const label = title ? ` ${truncateToWidth(title, Math.max(0, width - 3))} ` : "";
@@ -438,7 +610,7 @@ export class WorkersDashboardScreen implements Component, Focusable {
       const theme = this.theme;
       const rows = this.tui.terminal.rows || 30;
       const innerWidth = width - 2;
-      const helpText = `  ${configuredKeys(this.keybindings, "tui.select.up")}/${configuredKeys(this.keybindings, "tui.select.down")}/jk: select · Tab: focus pane · Enter: inspect · x: cancel/stop · r: restart · Esc: close`;
+      const helpText = `  ${configuredKeys(this.keybindings, "tui.select.up")}/${configuredKeys(this.keybindings, "tui.select.down")}/jk: select · Tab: focus pane · Enter: inspect · s: copy transcript · y: copy path · x: cancel/stop · r: restart · Esc: close`;
       const helpLines = wrapDashboardHelp(helpText, width, theme);
       const bodyHeight = computeWorkersDashboardBodyHeight(rows, helpLines.length);
       const paneHeights = computeWorkersDashboardPaneHeights(bodyHeight);
@@ -448,11 +620,14 @@ export class WorkersDashboardScreen implements Component, Focusable {
       const activeJobs = this.jobs.filter((j) => j.status === "running" || j.status === "pending").length;
       const activeProcs = this.processes.filter((p) => p.status === "running" || p.status === "starting").length;
 
+      const showNotice = this.notice && Date.now() - this.noticeTime < 3500;
       const headerLeft = theme.fg("accent", theme.bold("Workers /workers Dashboard"));
-      const headerRight = theme.fg(
-         "muted",
-         `${this.jobs.length} job${this.jobs.length === 1 ? "" : "s"} · ${this.processes.length} process${this.processes.length === 1 ? "" : "es"}`
-      );
+      const headerRight = showNotice
+         ? theme.fg("success", theme.bold(this.notice!))
+         : theme.fg(
+              "muted",
+              `${this.jobs.length} job${this.jobs.length === 1 ? "" : "s"} · ${this.processes.length} process${this.processes.length === 1 ? "" : "es"}`
+           );
       const headerPad = Math.max(1, width - visibleWidth(headerLeft) - visibleWidth(headerRight) - 4);
       lines.push(truncateToWidth(`  ${headerLeft}${" ".repeat(headerPad)}${headerRight}  `, width));
 
@@ -595,6 +770,7 @@ export class WorkersDashboardScreen implements Component, Focusable {
 export async function openWorkersDashboard(ctx: ExtensionCommandContext, runtime: WorkersRuntime): Promise<void> {
    if (!ctx.hasUI || typeof ctx.ui?.custom !== "function") return;
 
+   let lastViewedItem: DashboardPickResult | null = null;
    const selectionState: Partial<WorkersDashboardState> = { activeTab: "jobs", selectedIndex: 0 };
 
    async function iterate(): Promise<void> {
@@ -603,7 +779,15 @@ export async function openWorkersDashboard(ctx: ExtensionCommandContext, runtime
       try {
          picked = await ctx.ui.custom<DashboardPickResult | null>(
             (tui, theme, keybindings, done) => {
-               const screen = new WorkersDashboardScreen(tui, theme, keybindings, runtime, done, selectionState);
+               const screen = new WorkersDashboardScreen(
+                  tui,
+                  theme,
+                  keybindings,
+                  runtime,
+                  done,
+                  selectionState,
+                  lastViewedItem
+               );
                releaseAlternateScreen = enterAlternateScreen(tui, screen);
                return screen;
             },
@@ -614,6 +798,8 @@ export async function openWorkersDashboard(ctx: ExtensionCommandContext, runtime
       }
 
       if (!picked) return;
+
+      lastViewedItem = picked;
 
       if (picked.type === "takeover" && picked.jobId) {
          await openJobTakeover(ctx, runtime, picked.jobId);

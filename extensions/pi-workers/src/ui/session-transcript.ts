@@ -57,10 +57,6 @@ function messageEntries(entry: { readonly timestamp?: string; readonly message?:
 
    if (message.role === "assistant") {
       if (!Array.isArray(message.content)) return [];
-      const hasToolCall = message.content.some(
-         (block) =>
-            block !== null && typeof block === "object" && (block as { readonly type?: unknown }).type === "toolCall"
-      );
       return message.content.flatMap((block): JobTranscriptEntry[] => {
          if (!block || typeof block !== "object") return [];
          const value = block as {
@@ -74,9 +70,7 @@ function messageEntries(entry: { readonly timestamp?: string; readonly message?:
          if (value.type === "thinking" && typeof value.thinking === "string") {
             return [{ type: "thinking", text: value.thinking, timestamp }];
          }
-         // A prose-only assistant turn violates the worker completion contract.
-         // Keep it out of the worker detail while preserving tool-bearing turns.
-         if (value.type === "text" && hasToolCall && typeof value.text === "string") {
+         if (value.type === "text" && typeof value.text === "string") {
             return [{ type: "assistant", text: value.text, timestamp }];
          }
          if (value.type === "toolCall" && typeof value.id === "string" && typeof value.name === "string") {

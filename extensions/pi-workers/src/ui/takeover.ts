@@ -18,6 +18,7 @@ import { JobRegistry } from "../services/JobRegistry.js";
 import { WorkerManager } from "../services/WorkerManager.js";
 import { formatDuration } from "./formatters.js";
 import { getPiSessionContextTokens, readPiSessionTranscript } from "./session-transcript.js";
+import { copyToClipboard } from "./workers-dashboard.js";
 
 function configuredKeys(keybindings: KeybindingsManager, binding: Parameters<KeybindingsManager["getKeys"]>[0]) {
    return keybindings.getKeys(binding).join("/") || "unbound";
@@ -116,6 +117,8 @@ function compactToolCall(entry: Extract<JobTranscriptEntry, { type: "tool-call" 
 
    const record = args as Record<string, unknown>;
    const text = (key: string) => (typeof record[key] === "string" ? record[key] : undefined);
+   const textArray = (key: string) =>
+      Array.isArray(record[key]) ? (record[key] as unknown[]).filter((x): x is string => typeof x === "string") : [];
    const details = (() => {
       switch (entry.toolName) {
          case "find":
@@ -202,18 +205,189 @@ function compactToolResult(entry: Extract<JobTranscriptEntry, { type: "tool-resu
 
    const text = entry.content.flatMap((content) => (content.type === "text" ? [content.text] : [])).join("\n");
    const output = compactPreview(text);
-   if (!entry.isError && ["find", "grep", "ffgrep", "ls"].includes(entry.toolName)) {
-      const count = resultLineCount(entry);
-      return `${mark} ${entry.toolName} · ${count} ${count === 1 ? "result" : "results"}`;
+   const count = resultLineCount(entry);
+   if (
+      !entry.isError &&
+      [
+         "find",
+         "grep",
+         "ffgrep",
+         "ls",
+         "glob",
+         "fffind",
+         "rtkfind",
+         "rtkgrep",
+         "web_search_exa",
+         "deep_search_exa",
+         "cortex_search",
+         "cortex_list"
+      ].includes(entry.toolName)
+   ) {
+      return `${mark} ${entry.toolName} (${count} ${count === 1 ? "result" : "results"})`;
    }
-   if (!entry.isError && entry.toolName === "read") {
-      const count = resultLineCount(entry);
-      return `${mark} read · ${count} ${count === 1 ? "line" : "lines"}${output ? ` · ${output}` : ""}`;
+   if (
+      !entry.isError &&
+      (entry.toolName === "read" ||
+         entry.toolName === "write" ||
+         entry.toolName === "edit" ||
+         entry.toolName === "bash" ||
+         entry.toolName === "web_fetch_exa" ||
+         entry.toolName === "web_reader")
+   ) {
+      return `${mark} ${entry.toolName} (${count} ${count === 1 ? "line" : "lines"})`;
+   }
+   if (entry.toolName === "submit") {
+      const preview = output || '{"ok":true,"status":"completed"}';
+      return `→ submit · ${preview}`;
    }
    if (output) return `${mark} ${entry.toolName} · ${output}`;
 
    const imageCount = entry.content.filter((content) => content.type === "image").length;
-   return `${mark} ${entry.toolName}${imageCount > 0 ? ` · ${imageCount} image${imageCount === 1 ? "" : "s"}` : ""}`;
+   return `${mark} ${entry.toolName}${imageCount > 0 ? ` (${imageCount} ${imageCount === 1 ? "image" : "images"})` : ""}`;
+}
+
+function compactCombinedToolLine(
+   call: Extract<JobTranscriptEntry, { type: "tool-call" }>,
+   result: Extract<JobTranscriptEntry, { type: "tool-result" }>
+): string {
+   const mark = result.isError ? "✗" : "✓";
+   const toolName = call.toolName;
+   const args = call.arguments;
+   const record = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+   const text = (key: string) => (typeof record[key] === "string" ? record[key] : undefined);
+   const textArray = (key: string) =>
+      Array.isArray(record[key]) ? (record[key] as unknown[]).filter((x): x is string => typeof x === "string") : [];
+
+   const callArgStr = (() => {
+      switch (toolName) {
+         case "find":
+         case "fffind":
+         case "glob":
+         case "rtkfind": {
+            const parts = [text("path"), text("pattern")].filter(Boolean);
+            return parts.join(" ");
+         }
+         case "grep":
+         case "ffgrep":
+         case "rtkgrep": {
+            const parts = [text("pattern"), text("path")].filter(Boolean);
+            return parts.join(" ");
+         }
+         case "read":
+         case "write":
+         case "edit":
+         case "ls":
+            return text("path") ?? "";
+         case "web_search_exa":
+         case "deep_search_exa":
+         case "cortex_search":
+            return text("query") ? `"${text("query")}"` : "";
+         case "web_fetch_exa":
+            return textArray("urls").length > 0 ? textArray("urls").join(" ") : (text("url") ?? "");
+         case "web_reader":
+            return text("url") ?? "";
+         case "cortex_store":
+         case "cortex_recall":
+         case "cortex_forget":
+            return text("key") ?? "";
+         case "describe_image":
+            return text("filePath") ?? "";
+         case "read_session":
+            return text("sessionId") ?? text("path") ?? "";
+         case "ask_user":
+            return text("prompt") ?? text("question") ?? "";
+         case "workflow":
+            return text("name") ?? "";
+         case "worker_spawn":
+         case "process_start": {
+            const parts = [text("name"), text("command"), text("agent")].filter(Boolean);
+            return parts.join(" · ");
+         }
+         case "process_snapshot":
+         case "process_restart":
+         case "process_stop":
+         case "worker_cancel":
+            return text("id") ?? "";
+         case "worker_list":
+         case "process_list":
+         case "bash":
+            return text("command") ?? "";
+         case "submit":
+            return "";
+         default: {
+            const parts = [
+               text("path"),
+               text("command"),
+               text("query"),
+               text("url"),
+               text("pattern"),
+               text("key"),
+               text("name"),
+               text("filePath"),
+               text("prompt")
+            ].filter(Boolean);
+            return parts.join(" · ");
+         }
+      }
+   })();
+
+   const count = resultLineCount(result);
+
+   if (result.isError) {
+      const errText = result.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join(" ");
+      const preview = compactPreview(errText, 80);
+      return callArgStr ? `${mark} ${toolName} ${callArgStr} · ${preview}` : `${mark} ${toolName} · ${preview}`;
+   }
+
+   switch (toolName) {
+      case "ls":
+      case "grep":
+      case "ffgrep":
+      case "find":
+      case "fffind":
+      case "glob":
+      case "rtkfind":
+      case "rtkgrep":
+      case "web_search_exa":
+      case "deep_search_exa":
+      case "cortex_search":
+      case "cortex_list": {
+         return callArgStr
+            ? `${mark} ${toolName} ${callArgStr} (${count} ${count === 1 ? "result" : "results"})`
+            : `${mark} ${toolName} (${count} ${count === 1 ? "result" : "results"})`;
+      }
+      case "read":
+      case "write":
+      case "edit":
+      case "bash":
+      case "web_fetch_exa":
+      case "web_reader": {
+         return callArgStr
+            ? `${mark} ${toolName} ${callArgStr} (${count} ${count === 1 ? "line" : "lines"})`
+            : `${mark} ${toolName} (${count} ${count === 1 ? "line" : "lines"})`;
+      }
+      case "submit": {
+         const resText = result.content.find((c) => c.type === "text")?.text ?? "";
+         const parsedRes = compactPreview(resText, 80) || '{"ok":true,"status":"completed"}';
+         return `→ submit · ${parsedRes}`;
+      }
+      default: {
+         if (JOB_TOOL_NAMES.has(toolName)) {
+            const summary = compactJobToolResult(result);
+            if (summary) {
+               return summary.startsWith("✓") || summary.startsWith("✗")
+                  ? summary
+                  : `${mark} ${toolName}${callArgStr ? ` ${callArgStr}` : ""} · ${summary}`;
+            }
+         }
+         const resText = result.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join(" ");
+         const preview = compactPreview(resText, 80);
+         if (preview) {
+            return callArgStr ? `${mark} ${toolName} ${callArgStr} · ${preview}` : `${mark} ${toolName} · ${preview}`;
+         }
+         return callArgStr ? `${mark} ${toolName} ${callArgStr}` : `${mark} ${toolName}`;
+      }
+   }
 }
 
 export interface JobTranscriptRenderOptions {
@@ -252,9 +426,12 @@ export function wrapTakeoverHelp(text: string, width: number, theme: Theme): str
    return wrapTextWithAnsi(theme.fg("dim", text), Math.max(1, width));
 }
 
-function getTakeoverHelpText(showThinking: boolean, unseenLines: number): string {
+function getTakeoverHelpText(showThinking: boolean, unseenLines: number, isSettled = false): string {
    const scrollHint = unseenLines > 0 ? ` · ${unseenLines} new lines · End latest` : " · End latest";
-   return `Enter steer · Alt+Enter followUp · t ${showThinking ? "collapse" : "expand"} thinking · ↑/↓ scroll · PageUp/PageDown${scrollHint} · Esc back`;
+   if (isSettled) {
+      return `s copy transcript · t ${showThinking ? "collapse" : "expand"} thinking · ↑/↓ scroll · PageUp/PageDown${scrollHint} · Esc back`;
+   }
+   return `Enter steer · Alt+Enter followUp · s copy transcript · t ${showThinking ? "collapse" : "expand"} thinking · ↑/↓ scroll · PageUp/PageDown${scrollHint} · Esc back`;
 }
 
 export function applyTranscriptUpdate(
@@ -298,6 +475,55 @@ export function moveTakeoverScroll(
    };
 }
 
+export function buildCompactTranscriptSummary(
+   job: Job,
+   transcript: ReadonlyArray<JobTranscriptEntry> = job.transcript ?? []
+): string {
+   const lines: string[] = [];
+
+   if (transcript.length > 0) {
+      const renderedResults = new Set<JobTranscriptEntry>();
+      for (const entry of transcript) {
+         if (entry.type === "user") {
+            lines.push(`You: ${entry.text}`);
+         } else if (entry.type === "assistant") {
+            lines.push(entry.text);
+         } else if (entry.type === "thinking") {
+            lines.push(`Thinking: ${entry.text}`);
+         } else if (entry.type === "tool-call") {
+            const result = entry.toolCallId
+               ? transcript.find(
+                    (candidate): candidate is Extract<JobTranscriptEntry, { type: "tool-result" }> =>
+                       candidate.type === "tool-result" && candidate.toolCallId === entry.toolCallId
+                 )
+               : undefined;
+            if (result) {
+               lines.push(compactCombinedToolLine(entry, result));
+               renderedResults.add(result);
+            } else {
+               lines.push(compactToolCall(entry));
+            }
+         } else if (entry.type === "tool-result" && !renderedResults.has(entry)) {
+            lines.push(compactToolResult(entry));
+         }
+      }
+   }
+
+   return lines.join("\n");
+}
+
+export function buildCopiedTranscriptPayload(
+   job: Job,
+   transcript: ReadonlyArray<JobTranscriptEntry> = job.transcript ?? []
+): string {
+   const workerHandle = job.id;
+   const namePart = job.name ? ` name ${job.name}` : "";
+   const header = `The ${workerHandle}${namePart} stucked and here is the current work done:`;
+   const body = buildCompactTranscriptSummary(job, transcript);
+
+   return `${header}\n\n---TRANSCRIPT-START---\n\n${body}\n\n---TRANSCRIPT-END---`;
+}
+
 export function buildJobTranscriptLines(
    job: Job,
    width: number,
@@ -326,7 +552,7 @@ export function buildJobTranscriptLines(
    if (transcript.length > 0) {
       const renderedResults = new Set<JobTranscriptEntry>();
       const renderToolResult = (entry: Extract<JobTranscriptEntry, { type: "tool-result" }>) => {
-         pushWrapped(compactToolResult(entry), entry.isError ? "error" : "dim");
+         pushWrapped(compactToolResult(entry), entry.isError ? "error" : "accent");
       };
 
       for (const entry of transcript) {
@@ -341,10 +567,11 @@ export function buildJobTranscriptLines(
                        candidate.type === "tool-result" && candidate.toolCallId === entry.toolCallId
                  )
                : undefined;
-            pushWrapped(compactToolCall(entry), "accent");
             if (result) {
-               renderToolResult(result);
+               pushWrapped(compactCombinedToolLine(entry, result), result.isError ? "error" : "accent");
                renderedResults.add(result);
+            } else {
+               pushWrapped(compactToolCall(entry), "accent");
             }
          } else if (entry.type === "thinking") {
             pushWrapped(options.showThinking === false ? "Thinking..." : `Thinking: ${entry.text}`, "dim");
@@ -473,8 +700,15 @@ export class TakeoverView implements Component, Focusable {
       this.cleanup();
    }
 
+   private isSettled(): boolean {
+      const status = this.currentJob?.status;
+      return status === "completed" || status === "failed" || status === "cancelled";
+   }
+
    handleInput(data: string): void {
       const isAltEnter = data === "\u001b\r" || data === "\u001b\n";
+      const settled = this.isSettled();
+      const canUseShortcuts = settled || this.input.getText().length === 0;
 
       if (data === "\u0003") {
          this.input.setText("");
@@ -487,13 +721,18 @@ export class TakeoverView implements Component, Focusable {
          return;
       }
 
-      if (data === "t" && this.input.getText().length === 0) {
+      if (data === "t" && canUseShortcuts) {
          this.showThinking = !this.showThinking;
          this.tui.requestRender();
          return;
       }
 
-      if (data === "\u0013" && this.input.getText().length === 0) {
+      if (data === "s" && canUseShortcuts) {
+         void this.copyTranscriptToClipboard();
+         return;
+      }
+
+      if (data === "\u0013" && canUseShortcuts) {
          this.showSystemPrompt = !this.showSystemPrompt;
          if (this.showSystemPrompt) {
             this.scrollState = { scrollTop: 0, followTail: false, unseenLines: 0 };
@@ -502,7 +741,7 @@ export class TakeoverView implements Component, Focusable {
          return;
       }
 
-      if (isAltEnter) {
+      if (isAltEnter && !settled) {
          const val = this.input.getText().trim();
          if (val) {
             this.input.setText("");
@@ -522,8 +761,8 @@ export class TakeoverView implements Component, Focusable {
       }
 
       if (
-         this.input.getText().length === 0 &&
-         (this.keybindings.matches(data, "tui.editor.cursorUp") || data === "\u001b[A")
+         canUseShortcuts &&
+         (this.keybindings.matches(data, "tui.editor.cursorUp") || data === "\u001b[A" || data === "k")
       ) {
          this.scrollState = moveTakeoverScroll(
             this.scrollState,
@@ -535,8 +774,8 @@ export class TakeoverView implements Component, Focusable {
          return;
       }
       if (
-         this.input.getText().length === 0 &&
-         (this.keybindings.matches(data, "tui.editor.cursorDown") || data === "\u001b[B")
+         canUseShortcuts &&
+         (this.keybindings.matches(data, "tui.editor.cursorDown") || data === "\u001b[B" || data === "j")
       ) {
          this.scrollState = moveTakeoverScroll(
             this.scrollState,
@@ -547,7 +786,7 @@ export class TakeoverView implements Component, Focusable {
          this.tui.requestRender();
          return;
       }
-      if (this.input.getText().length === 0 && this.keybindings.matches(data, "tui.editor.pageUp")) {
+      if (canUseShortcuts && this.keybindings.matches(data, "tui.editor.pageUp")) {
          this.scrollState = moveTakeoverScroll(
             this.scrollState,
             "pageUp",
@@ -557,7 +796,7 @@ export class TakeoverView implements Component, Focusable {
          this.tui.requestRender();
          return;
       }
-      if (this.input.getText().length === 0 && this.keybindings.matches(data, "tui.editor.pageDown")) {
+      if (canUseShortcuts && this.keybindings.matches(data, "tui.editor.pageDown")) {
          this.scrollState = moveTakeoverScroll(
             this.scrollState,
             "pageDown",
@@ -568,8 +807,8 @@ export class TakeoverView implements Component, Focusable {
          return;
       }
       if (
-         this.input.getText().length === 0 &&
-         (this.keybindings.matches(data, "tui.editor.cursorLineEnd") || data === "\u001b[F")
+         canUseShortcuts &&
+         (this.keybindings.matches(data, "tui.editor.cursorLineEnd") || data === "\u001b[F" || data === "G")
       ) {
          this.scrollState = moveTakeoverScroll(
             this.scrollState,
@@ -581,7 +820,16 @@ export class TakeoverView implements Component, Focusable {
          return;
       }
 
-      this.input.handleInput(data);
+      if (!settled) {
+         this.input.handleInput(data);
+         this.tui.requestRender();
+      }
+   }
+
+   private async copyTranscriptToClipboard(): Promise<void> {
+      if (!this.currentJob) return;
+      const payload = buildCopiedTranscriptPayload(this.currentJob, this.currentTranscript);
+      await copyToClipboard(payload);
       this.tui.requestRender();
    }
 
@@ -589,9 +837,9 @@ export class TakeoverView implements Component, Focusable {
       const rows = this.tui.terminal.rows || 30;
       const width = this.tui.terminal.columns || 80;
       const headerLineCount = this.currentJob ? buildJobHeaderLines(this.currentJob, width, this.theme).length : 2;
-      const inputLineCount = this.input.render(width).length;
+      const inputLineCount = this.isSettled() ? 0 : this.input.render(width).length;
       const helpLineCount = wrapTakeoverHelp(
-         getTakeoverHelpText(this.showThinking, this.scrollState.unseenLines),
+         getTakeoverHelpText(this.showThinking, this.scrollState.unseenLines, this.isSettled()),
          width,
          this.theme
       ).length;
@@ -603,6 +851,7 @@ export class TakeoverView implements Component, Focusable {
       const border = theme.fg("borderAccent", "─".repeat(Math.max(1, width)));
       const lines: string[] = [];
       const job = this.currentJob;
+      const settled = this.isSettled();
 
       if (!job) {
          lines.push(border);
@@ -612,9 +861,9 @@ export class TakeoverView implements Component, Focusable {
       }
 
       const header = buildJobHeaderLines(job, width, theme);
-      const inputLines = this.input.render(width);
+      const inputLines = settled ? [] : this.input.render(width);
       const helpLines = wrapTakeoverHelp(
-         getTakeoverHelpText(this.showThinking, this.scrollState.unseenLines),
+         getTakeoverHelpText(this.showThinking, this.scrollState.unseenLines, settled),
          width,
          theme
       );
