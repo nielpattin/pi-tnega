@@ -138,7 +138,7 @@ A string value is a catch-all for that surface.
 | `read`, `write`, `edit`, `grep`, `find`, `ls` | Canonical Pi built-in file tools    |
 | `bash`                                        | Shell command execution             |
 | `mcp`                                         | Registered MCP proxy tool           |
-| `task`                                        | Delegation tool                     |
+| `worker_spawn`                                | Worker delegation tool              |
 | `third_party_tool`                            | Any other registered extension tool |
 
 ```jsonc
@@ -553,7 +553,7 @@ Additional behaviors:
 
 - Unknown/unregistered tools are blocked before permission checks (prevents bypass attempts)
 - The `Available tools:` system prompt section is rewritten to match the filtered active tool set
-- Extension-provided tools like `task`, `mcp`, and third-party tools are handled by exact registered name
+- Extension-provided tools like `worker_spawn`, `mcp`, and third-party tools are handled by exact registered name
 - Generic extension-tool approval prompts include a bounded input preview; built-in file tools use concise human-readable summaries
 - Permission review logs include bounded `toolInputPreview` values for non-bash/non-MCP tool calls
 

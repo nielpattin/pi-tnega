@@ -50,8 +50,8 @@ const TOOL_GUIDELINE_RULES: readonly GuidelineRule[] = [
    {
       matches: (guideline) =>
          guideline ===
-         "use task when work should be delegated to one or more specialized agents instead of handled entirely in the current session.",
-      shouldKeep: (allowedTools) => allowedTools.has("task")
+         "use worker_spawn when work should be delegated to one or more specialized agents instead of handled entirely in the current session.",
+      shouldKeep: (allowedTools) => allowedTools.has("worker_spawn")
    },
    {
       matches: (guideline) =>

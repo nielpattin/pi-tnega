@@ -1,0 +1,531 @@
+import { Context, Effect, Layer, Deferred } from "effect";
+import { ConcurrencyLimitError, formatProcessId, type ProcessEntry, type ProcessReadyState } from "../domain.js";
+import { ShellExecutor } from "./ShellExecutor.js";
+import { OutputBuffer } from "../utils/output-buffer.js";
+import { killTree } from "../utils/kill-tree.js";
+import { filterLogLines, paginateLogLines, formatMultiProcessLogLines, selectLogStream } from "../ui/log-viewer.js";
+import { defaultTelemetryReader, type ProcessTelemetry, type TelemetryReader } from "../utils/process-telemetry.js";
+import { spawn } from "node:child_process";
+import { createConnection } from "node:net";
+// Local alias — recent @types/node marks ChildProcess as a deprecated
+// "error" type. Use the inferred spawn return type instead.
+type ChildProcess = ReturnType<typeof spawn>;
+
+export const MAX_RUNNING_PROCESSES = 8;
+export const MAX_TRACKED_PROCESSES = 32;
+export const RETAINED_STREAM_BYTES = 2097152; // 2 MB
+
+export interface ProcessSupervisorShape {
+   readonly start: (params: {
+      name: string;
+      command: string;
+      cwd?: string;
+      env?: Record<string, string>;
+      ready?: { log?: string; port?: number; timeoutSec?: number };
+      stdin?: boolean;
+   }) => Effect.Effect<ProcessEntry, ConcurrencyLimitError | Error>;
+
+   readonly stop: (name: string, signal?: NodeJS.Signals) => Effect.Effect<ProcessEntry, Error>;
+   readonly restart: (name: string) => Effect.Effect<ProcessEntry, ConcurrencyLimitError | Error>;
+   readonly ps: Effect.Effect<ReadonlyArray<ProcessEntry>>;
+   readonly logs: (
+      name: string | ReadonlyArray<string>,
+      options?: {
+         lines?: number;
+         head?: boolean;
+         grep?: string;
+         cursor?: number;
+         stream?: "stdout" | "stderr" | "both";
+         follow?: boolean;
+         timeoutSec?: number;
+      }
+   ) => Effect.Effect<{ lines: string[]; cursor: number }, Error>;
+
+   readonly awaitExit: (name: string, timeoutMs?: number) => Effect.Effect<ProcessEntry, Error>;
+   readonly disposeAll: Effect.Effect<void>;
+   readonly onSettled: (listener: (process: ProcessEntry) => void) => Effect.Effect<() => void>;
+   readonly writeStdin: (name: string, data: string | Buffer) => Effect.Effect<void, Error>;
+   readonly closeStdin: (name: string) => Effect.Effect<void, Error>;
+   readonly telemetry: (name: string, reader?: TelemetryReader) => Effect.Effect<ProcessTelemetry, Error>;
+}
+
+interface TrackedProcess {
+   entry: ProcessEntry;
+   child: ChildProcess;
+   stdoutBuffer: OutputBuffer;
+   stderrBuffer: OutputBuffer;
+   exitDeferred: Deferred.Deferred<ProcessEntry>;
+   readinessTimeout?: NodeJS.Timeout;
+   portPoll?: NodeJS.Timeout;
+}
+
+export class ProcessSupervisor extends Context.Service<ProcessSupervisor, ProcessSupervisorShape>()(
+   "workers/ProcessSupervisor"
+) {
+   static readonly layer = Layer.effect(
+      ProcessSupervisor,
+      Effect.gen(function* () {
+         const executor = yield* ShellExecutor;
+         const processes = new Map<string, TrackedProcess>();
+         const settledListeners = new Set<(process: ProcessEntry) => void>();
+         let reservedProcessSlots = 0;
+         let processSeq = 0;
+
+         const runningCount = () => {
+            let count = 0;
+            for (const p of processes.values()) {
+               if (p.entry.status === "starting" || p.entry.status === "running") {
+                  count++;
+               }
+            }
+            return count;
+         };
+
+         const pruneExited = () => {
+            if (processes.size <= MAX_TRACKED_PROCESSES) return;
+            const candidates: TrackedProcess[] = [];
+            for (const p of processes.values()) {
+               if (
+                  (p.entry.status === "exited" || p.entry.status === "failed") &&
+                  p.entry.processWaitInterest === 0 &&
+                  p.entry.processKillInterest === 0
+               ) {
+                  candidates.push(p);
+               }
+            }
+
+            candidates.sort((a, b) => (a.entry.settledAt ?? 0) - (b.entry.settledAt ?? 0));
+
+            while (processes.size > MAX_TRACKED_PROCESSES && candidates.length > 0) {
+               const victim = candidates.shift();
+               if (victim) {
+                  processes.delete(victim.entry.name ?? victim.entry.id);
+               }
+            }
+         };
+
+         const notifySettled = (entry: ProcessEntry) => {
+            for (const listener of settledListeners) {
+               try {
+                  listener({ ...entry });
+               } catch {
+                  // A settlement listener cannot break process supervision.
+               }
+            }
+         };
+
+         const settle = (
+            tracked: TrackedProcess,
+            status: "exited" | "failed",
+            code: number | null,
+            signal: NodeJS.Signals | null,
+            notify = true
+         ) => {
+            if (tracked.entry.status === "exited" || tracked.entry.status === "failed") return;
+
+            if (tracked.readinessTimeout) clearTimeout(tracked.readinessTimeout);
+            if (tracked.portPoll) clearInterval(tracked.portPoll);
+            tracked.readinessTimeout = undefined;
+            tracked.portPoll = undefined;
+            tracked.entry.status = status;
+            tracked.entry.exitCode = code ?? undefined;
+            tracked.entry.signal = signal ?? undefined;
+            tracked.entry.settledAt = Date.now();
+            const resultText = tracked.stdoutBuffer.view().text.trim();
+            if (resultText.length > 0) tracked.entry.resultText = resultText;
+            if (status === "failed") {
+               tracked.entry.errorText =
+                  tracked.stderrBuffer.view().text.trim() ||
+                  `Process exited with ${code !== null ? `code ${code}` : `signal ${signal ?? "unknown"}`}`;
+            }
+            Effect.runFork(Deferred.succeed(tracked.exitDeferred, tracked.entry));
+            if (notify) notifySettled(tracked.entry);
+         };
+
+         const start = Effect.fn("ProcessSupervisor.start")(function* (params) {
+            const existing = processes.get(params.name);
+            if (existing && (existing.entry.status === "running" || existing.entry.status === "starting")) {
+               return yield* Effect.fail(new Error(`Process "${params.name}" is already running.`));
+            }
+            if (existing) processes.delete(params.name);
+
+            if (runningCount() + reservedProcessSlots + 1 > MAX_RUNNING_PROCESSES) {
+               return yield* new ConcurrencyLimitError({
+                  message: `Maximum running background processes limit (${MAX_RUNNING_PROCESSES}) reached.`,
+                  limit: MAX_RUNNING_PROCESSES
+               });
+            }
+
+            reservedProcessSlots++;
+
+            return yield* Effect.gen(function* () {
+               pruneExited();
+               processSeq++;
+               const id = formatProcessId(processSeq);
+               const child = yield* executor.spawnProcess(params.command, {
+                  cwd: params.cwd,
+                  env: params.env,
+                  stdin: params.stdin
+               });
+
+               const stdoutBuffer = new OutputBuffer(RETAINED_STREAM_BYTES);
+               const stderrBuffer = new OutputBuffer(RETAINED_STREAM_BYTES);
+               const exitDeferred = yield* Deferred.make<ProcessEntry>();
+
+               const requiresLog = typeof params.ready?.log === "string" && params.ready.log.length > 0;
+               const requiresPort = params.ready?.port !== undefined;
+               const initialReadyState: ProcessReadyState = {
+                  ready: !requiresLog && !requiresPort,
+                  logMatched: false,
+                  portMatched: !requiresPort
+               };
+
+               const entry: ProcessEntry = {
+                  id,
+                  name: params.name,
+                  command: params.command,
+                  cwd: params.cwd ?? process.cwd(),
+                  pid: child.pid ?? 0,
+                  status: "running",
+                  readyCondition: params.ready,
+                  readyState: initialReadyState,
+                  spawnTime: Date.now(),
+                  stdoutBytes: 0,
+                  stderrBytes: 0,
+                  processWaitInterest: 0,
+                  processKillInterest: 0
+               };
+
+               const tracked: TrackedProcess = {
+                  entry,
+                  child,
+                  stdoutBuffer,
+                  stderrBuffer,
+                  exitDeferred
+               };
+
+               const updateReadiness = () => {
+                  const logReady = !requiresLog || entry.readyState.logMatched;
+                  const portReady = !requiresPort || entry.readyState.portMatched;
+                  entry.readyState.ready = logReady && portReady;
+                  if (entry.readyState.ready) {
+                     if (tracked.readinessTimeout) clearTimeout(tracked.readinessTimeout);
+                     if (tracked.portPoll) clearInterval(tracked.portPoll);
+                     tracked.readinessTimeout = undefined;
+                     tracked.portPoll = undefined;
+                  }
+               };
+
+               if (requiresPort) {
+                  const probePort = () => {
+                     const socket = createConnection({ host: "127.0.0.1", port: params.ready!.port! });
+                     socket.once("connect", () => {
+                        entry.readyState.portMatched = true;
+                        socket.destroy();
+                        updateReadiness();
+                     });
+                     socket.once("error", () => socket.destroy());
+                  };
+                  probePort();
+                  tracked.portPoll = setInterval(probePort, 50);
+                  tracked.portPoll.unref?.();
+               }
+               if (params.ready?.timeoutSec !== undefined && params.ready.timeoutSec > 0 && !entry.readyState.ready) {
+                  tracked.readinessTimeout = setTimeout(() => {
+                     if (!entry.readyState.ready) {
+                        entry.readyState.timedOut = true;
+                        if (tracked.portPoll) clearInterval(tracked.portPoll);
+                        tracked.portPoll = undefined;
+                     }
+                  }, params.ready.timeoutSec * 1000);
+                  tracked.readinessTimeout.unref?.();
+               }
+
+               processes.set(params.name, tracked);
+
+               child.stdout?.on("data", (chunk: Buffer | string) => {
+                  const str = chunk.toString("utf8");
+                  stdoutBuffer.push(str);
+                  entry.stdoutBytes += Buffer.byteLength(str, "utf8");
+                  if (params.ready?.log && !entry.readyState.logMatched) {
+                     let matched = false;
+                     try {
+                        matched = new RegExp(params.ready.log).test(str) || str.includes(params.ready.log);
+                     } catch {
+                        matched = str.includes(params.ready.log);
+                     }
+                     if (matched) {
+                        entry.readyState.logMatched = true;
+                        updateReadiness();
+                     }
+                  }
+               });
+
+               child.stderr?.on("data", (chunk: Buffer | string) => {
+                  const str = chunk.toString("utf8");
+                  stderrBuffer.push(str);
+                  entry.stderrBytes += Buffer.byteLength(str, "utf8");
+                  if (params.ready?.log && !entry.readyState.logMatched) {
+                     let matched = false;
+                     try {
+                        matched = new RegExp(params.ready.log).test(str) || str.includes(params.ready.log);
+                     } catch {
+                        matched = str.includes(params.ready.log);
+                     }
+                     if (matched) {
+                        entry.readyState.logMatched = true;
+                        updateReadiness();
+                     }
+                  }
+               });
+
+               child.once("error", (error) => {
+                  if (entry.status === "exited" || entry.status === "failed") return;
+                  const message = error instanceof Error ? error.message : String(error);
+                  stderrBuffer.push(message);
+                  entry.stderrBytes += Buffer.byteLength(message, "utf8");
+                  settle(tracked, "failed", null, null);
+               });
+
+               child.once("close", (code, signal) => {
+                  settle(tracked, code === 0 ? "exited" : "failed", code, signal);
+               });
+
+               return entry;
+            }).pipe(
+               Effect.ensuring(
+                  Effect.sync(() => {
+                     if (reservedProcessSlots > 0) reservedProcessSlots--;
+                  })
+               )
+            );
+         });
+
+         const stop = Effect.fn("ProcessSupervisor.stop")(function* (name, signal = "SIGTERM") {
+            yield* Effect.void;
+            const tracked = processes.get(name);
+            if (!tracked) {
+               throw new Error(`Process not found: ${name}`);
+            }
+
+            tracked.entry.processKillInterest++;
+            return yield* Effect.gen(function* () {
+               yield* Effect.void;
+               if (tracked.entry.status === "running" || tracked.entry.status === "starting") {
+                  killTree(tracked.child, signal);
+                  settle(tracked, "exited", null, signal);
+               }
+               return tracked.entry;
+            }).pipe(
+               Effect.ensuring(
+                  Effect.sync(() => {
+                     if (tracked.entry.processKillInterest > 0) {
+                        tracked.entry.processKillInterest--;
+                     }
+                  })
+               )
+            );
+         });
+
+         const restart = Effect.fn("ProcessSupervisor.restart")(function* (name) {
+            const tracked = processes.get(name);
+            if (!tracked) {
+               throw new Error(`Process not found: ${name}`);
+            }
+            yield* stop(name, "SIGKILL");
+            return yield* start({
+               name: tracked.entry.name ?? name,
+               command: tracked.entry.command,
+               cwd: tracked.entry.cwd,
+               ready: tracked.entry.readyCondition
+            });
+         });
+
+         const ps = Effect.sync(() => Array.from(processes.values()).map((p) => p.entry));
+
+         const onSettled = Effect.fn("ProcessSupervisor.onSettled")(function* (
+            listener: (process: ProcessEntry) => void
+         ) {
+            yield* Effect.sync(() => settledListeners.add(listener));
+            return () => settledListeners.delete(listener);
+         });
+
+         const logs = Effect.fn("ProcessSupervisor.logs")(function* (nameOrNames, options) {
+            yield* Effect.void;
+            const names = Array.isArray(nameOrNames) ? nameOrNames : [nameOrNames as string];
+
+            const processEntries: Array<{ name: string; lines: string[] }> = [];
+
+            for (const name of names) {
+               const tracked = processes.get(name);
+               if (!tracked) {
+                  if (!Array.isArray(nameOrNames)) {
+                     return yield* Effect.fail(new Error(`Process not found: ${name}`));
+                  }
+                  continue;
+               }
+               const stdoutText = tracked.stdoutBuffer.view().text;
+               const stderrText = tracked.stderrBuffer.view().text;
+               const rawLines = selectLogStream(stdoutText, stderrText, options?.stream);
+               processEntries.push({ name, lines: rawLines });
+            }
+
+            let allLines: string[];
+            if (Array.isArray(nameOrNames)) {
+               allLines = formatMultiProcessLogLines(processEntries);
+            } else {
+               allLines = processEntries[0]?.lines ?? [];
+            }
+
+            const filtered = filterLogLines(allLines, options?.grep);
+            const paginated = paginateLogLines(filtered, options);
+
+            return { lines: paginated.lines, cursor: paginated.cursor };
+         });
+
+         const awaitExit = Effect.fn("ProcessSupervisor.awaitExit")(function* (name, timeoutMs) {
+            const tracked = processes.get(name);
+            if (!tracked) {
+               throw new Error(`Process not found: ${name}`);
+            }
+
+            tracked.entry.processWaitInterest++;
+            return yield* Effect.gen(function* () {
+               if (tracked.entry.status === "exited" || tracked.entry.status === "failed") {
+                  return tracked.entry;
+               }
+               if (timeoutMs !== undefined && timeoutMs > 0) {
+                  yield* Deferred.await(tracked.exitDeferred).pipe(
+                     Effect.timeout(`${timeoutMs} millis`),
+                     Effect.ignore
+                  );
+               } else {
+                  yield* Deferred.await(tracked.exitDeferred);
+               }
+               return tracked.entry;
+            }).pipe(
+               Effect.ensuring(
+                  Effect.sync(() => {
+                     if (tracked.entry.processWaitInterest > 0) {
+                        tracked.entry.processWaitInterest--;
+                     }
+                  })
+               )
+            );
+         });
+
+         const disposeAll = Effect.gen(function* () {
+            const trackedProcesses = Array.from(processes.values());
+            const waitForClose = (tracked: TrackedProcess) =>
+               new Promise<void>((resolve) => {
+                  const child = tracked.child as ChildProcess & {
+                     exitCode?: number | null;
+                     signalCode?: string | null;
+                  };
+                  if (child.exitCode !== null && child.exitCode !== undefined) {
+                     resolve();
+                     return;
+                  }
+                  if (child.signalCode !== null && child.signalCode !== undefined) {
+                     resolve();
+                     return;
+                  }
+                  child.once("close", () => resolve());
+                  child.once("error", () => resolve());
+               });
+
+            for (const tracked of trackedProcesses) {
+               if (tracked.entry.status === "running" || tracked.entry.status === "starting") {
+                  killTree(tracked.child, "SIGTERM");
+                  settle(tracked, "exited", null, "SIGTERM", false);
+               }
+            }
+
+            yield* Effect.promise(() => Promise.all(trackedProcesses.map(waitForClose))).pipe(
+               Effect.timeout("2000 millis"),
+               Effect.ignore
+            );
+            processes.clear();
+         });
+
+         const writeStdin = Effect.fn("ProcessSupervisor.writeStdin")(function* (name, data) {
+            yield* Effect.void;
+            const tracked = processes.get(name);
+            if (!tracked) {
+               return yield* Effect.fail(new Error(`Process not found: ${name}`));
+            }
+            if (tracked.entry.status !== "running" && tracked.entry.status !== "starting") {
+               return yield* Effect.fail(new Error(`Process ${name} is not running`));
+            }
+            if (!tracked.child.stdin || tracked.child.stdin.destroyed || !tracked.child.stdin.writable) {
+               return yield* Effect.fail(new Error(`Stdin not available for process: ${name}`));
+            }
+            return yield* Effect.callback<void, Error>((resume) => {
+               tracked.child.stdin!.write(data, (err) => {
+                  if (err) {
+                     resume(Effect.fail(err));
+                  } else {
+                     resume(Effect.succeed(undefined));
+                  }
+               });
+            });
+         });
+
+         const closeStdin = Effect.fn("ProcessSupervisor.closeStdin")(function* (name) {
+            yield* Effect.void;
+            const tracked = processes.get(name);
+            if (!tracked) {
+               return yield* Effect.fail(new Error(`Process not found: ${name}`));
+            }
+            if (!tracked.child.stdin || tracked.child.stdin.destroyed) {
+               return yield* Effect.fail(new Error(`Stdin not available for process: ${name}`));
+            }
+            yield* Effect.sync(() => {
+               tracked.child.stdin!.end();
+            });
+            return yield* Effect.void;
+         });
+
+         const telemetry = Effect.fn("ProcessSupervisor.telemetry")(function* (name, customReader) {
+            yield* Effect.void;
+            const tracked = processes.get(name);
+            if (!tracked) {
+               return yield* Effect.fail(new Error(`Process not found: ${name}`));
+            }
+            if (tracked.entry.status !== "running" && tracked.entry.status !== "starting") {
+               return yield* Effect.succeed<ProcessTelemetry>({
+                  status: "unavailable",
+                  pid: tracked.entry.pid,
+                  reason: `Process is ${tracked.entry.status}`,
+                  timestamp: Date.now()
+               });
+            }
+            const reader = customReader ?? defaultTelemetryReader;
+            return yield* reader(tracked.entry.pid) as Effect.Effect<ProcessTelemetry, Error>;
+         });
+
+         return ProcessSupervisor.of({
+            start,
+            stop,
+            restart,
+            ps,
+            logs,
+            awaitExit,
+            disposeAll,
+            onSettled,
+            writeStdin,
+            closeStdin,
+            telemetry
+         });
+      })
+   );
+
+   static override use<A, E, R>(
+      fn: (svc: ProcessSupervisorShape) => Effect.Effect<A, E, R>
+   ): Effect.Effect<A, E, R | ProcessSupervisor> {
+      return Effect.gen(function* () {
+         const svc = yield* ProcessSupervisor;
+         return yield* fn(svc);
+      });
+   }
+}

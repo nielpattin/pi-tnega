@@ -10,12 +10,12 @@
 
 Effect is the **async runtime core** for process lifecycle, fiber orchestration, concurrency caps, resource teardown, and typed errors.
 
-| Package / script                  | Key Usage                                                                                                               |
-| :-------------------------------- | :----------------------------------------------------------------------------------------------------------------------- |
-| `extensions/ask-user`             | `Effect.tryPromise` + `Effect.runPromiseExit` for TUI prompts                                                           |
+| Package / script                  | Key Usage                                                                                                              |
+| :-------------------------------- | :--------------------------------------------------------------------------------------------------------------------- |
+| `extensions/ask-user`             | `Effect.tryPromise` + `Effect.runPromiseExit` for TUI prompts                                                          |
 | `extensions/copy-all`             | `Effect.callback` for clipboard processes, `Data.TaggedError`                                                          |
-| `extensions/pi-harbor`            | `Context.Service`, `Layer`, `ManagedRuntime`, `Deferred`, `Effect.callback`, explicit `Scope`, and typed domain errors |
-| `scripts/sync-reference-repos.ts` | Effect CLI, `Schema`, `FileSystem`, `Stream`, and `ChildProcessSpawner`                                                 |
+| `extensions/pi-workers`           | `Context.Service`, `Layer`, `ManagedRuntime`, `Deferred`, `Effect.callback`, explicit `Scope`, and typed domain errors |
+| `scripts/sync-reference-repos.ts` | Effect CLI, `Schema`, `FileSystem`, `Stream`, and `ChildProcessSpawner`                                                |
 
 ### When NOT to Use Effect
 
@@ -96,7 +96,7 @@ export class SpawnError extends Schema.TaggedError<SpawnError>()("SpawnError", {
 }) {}
 ```
 
-**Existing repo code uses:** `Data.TaggedError` in `extensions/copy-all`; Harbor and the sync script use `Schema.TaggedError`.
+**Existing repo code uses:** `Data.TaggedError` in `extensions/copy-all`; Workers and the sync script use `Schema.TaggedError`.
 
 ### 4.4 Schema for domain + validation
 
@@ -109,11 +109,11 @@ const JsonSource = Schema.fromJsonString(Schema.Unknown);
 export const decodeJsonSource = Schema.decodeUnknownEffect(JsonSource);
 ```
 
-**Harbor note:** Pi tool _parameter_ schemas stay TypeBox (Pi SDK). Harbor _internal_ domain + `outputSchema` validation prefer Effect `Schema` where possible; TypeBox remains for tool JSON Schema surfaces.
+**Workers note:** Pi tool _parameter_ schemas stay TypeBox (Pi SDK). Workers _internal_ domain + `outputSchema` validation prefer Effect `Schema` where possible; TypeBox remains for tool JSON Schema surfaces.
 
 ### 4.5 Services: `Context.Service` + static `layer`
 
-Canonical shape for Harbor services:
+Canonical shape for Workers services:
 
 ```ts
 import { Context, Effect, Layer } from "effect";
@@ -123,7 +123,7 @@ export interface JobRegistryShape {
     readonly list: Effect.Effect<ReadonlyArray<Job>>;
 }
 
-export class JobRegistry extends Context.Service<JobRegistry, JobRegistryShape>()("harbor/JobRegistry") {
+export class JobRegistry extends Context.Service<JobRegistry, JobRegistryShape>()("workers/JobRegistry") {
     static readonly layer = Layer.effect(
         JobRegistry,
         Effect.gen(function* () {
@@ -144,7 +144,7 @@ export type JobRegistryService = JobRegistry["Service"];
 Compose layers:
 
 ```ts
-const HarborLive = TaskManager.layer.pipe(
+const WorkersLive = WorkerManager.layer.pipe(
     Layer.provide(JobRegistry.layer),
     Layer.provideMerge(ProcessSupervisor.layer)
 );
@@ -152,23 +152,23 @@ const HarborLive = TaskManager.layer.pipe(
 
 - `Layer.provide`: hide deps, expose only outer service.
 - `Layer.provideMerge`: expose outer + provided services.
-- Root assembly: `ManagedRuntime.make(HarborLive)` in `runtime.ts`. Name the layer `HarborLive` (a `Layer`), not "ManagedRuntime".
+- Root assembly: `ManagedRuntime.make(WorkersLive)` in `runtime.ts`. Name the layer `WorkersLive` (a `Layer`), not "ManagedRuntime".
 
 ### 4.6 Resources: explicit `Scope`
 
-Harbor creates an explicit scope for each external agent process, provides that scope to its polling effects, and closes it when the process settles or is cancelled.
+The pi-workers extension creates an explicit scope for each external agent process, provides that scope to its polling effects, and closes it when the process settles or is cancelled.
 
 ```ts
-const scope = yield* Scope.make();
-yield* Scope.provide(work, scope);
-yield* Scope.close(scope, undefined as any);
+const scope = yield * Scope.make();
+yield * Scope.provide(work, scope);
+yield * Scope.close(scope, undefined as any);
 ```
 
 Use `Effect.forkScoped` for work that must follow the lifetime of an enclosing scope.
 
 ### 4.7 Reservation + interest (concurrency caps)
 
-TaskManager and ProcessSupervisor reserve capacity before spawning work:
+WorkerManager and ProcessSupervisor reserve capacity before spawning work:
 
 1. Check the current running count plus the incoming count before spawning.
 2. Increment the reservation synchronously.
@@ -187,17 +187,17 @@ const wait = Effect.gen(function* () {
 
 ### 4.8 Fibers, Deferred, and streams
 
-| Primitive           | Current use                                                                 |
-| :------------------ | :--------------------------------------------------------------------------- |
-| `Effect.forkScoped` | Background decoding work tied to a Harbor scope                         |
-| `Deferred`          | Job and process settlement signals                                       |
-| `Effect.runFork`    | Completing settlement deferreds from synchronous listener callbacks     |
+| Primitive           | Current use                                                                |
+| :------------------ | :------------------------------------------------------------------------- |
+| `Effect.forkScoped` | Background decoding work tied to a Workers scope                           |
+| `Deferred`          | Job and process settlement signals                                         |
+| `Effect.runFork`    | Completing settlement deferreds from synchronous listener callbacks        |
 | `Stream`            | Concurrently collecting child-process stdout and stderr in the sync script |
 
 ### 4.9 Interrupts and timeouts
 
 ```ts
-yield* work.pipe(Effect.timeout("2000 millis"), Effect.ignore);
+yield * work.pipe(Effect.timeout("2000 millis"), Effect.ignore);
 
 const exit = await Effect.runPromiseExit(effect, signal ? { signal } : undefined);
 ```
@@ -209,12 +209,12 @@ Pi tools are plain `async` functions. Bridge once:
 ```ts
 import { Cause, Exit, ManagedRuntime, type Effect } from "effect";
 
-export function makeHarborRuntime() {
-    return ManagedRuntime.make(HarborLive);
+export function makeWorkersRuntime() {
+    return ManagedRuntime.make(WorkersLive);
 }
 
 export async function runTool<A, E>(
-    runtime: ReturnType<typeof makeHarborRuntime>,
+    runtime: ReturnType<typeof makeWorkersRuntime>,
     effect: Effect.Effect<A, E>,
     options: { signal?: AbortSignal; interruptMessage?: string } = {}
 ) {
@@ -230,7 +230,7 @@ export async function runTool<A, E>(
 
 ### 4.11 Child processes
 
-`pi-harbor` uses Node `spawn` wrapped with `Effect.callback` in `ShellExecutor` and `ProcessSupervisor`. The repository sync script uses `effect/unstable/process` and `ChildProcessSpawner` for Git subprocesses.
+`pi-workers` uses Node `spawn` wrapped with `Effect.callback` in `ShellExecutor` and `ProcessSupervisor`. The repository sync script uses `effect/unstable/process` and `ChildProcessSpawner` for Git subprocesses.
 
 ### 4.12 Logging
 
@@ -240,23 +240,23 @@ Use `Console.log` for CLI output in `scripts/sync-reference-repos.ts`. Keep Effe
 
 ## 5. Current repo conventions
 
-1. Use `Context.Service` with a static `layer` for Harbor services.
-2. Use `Schema.TaggedError` for Harbor and script domain errors.
+1. Use `Context.Service` with a static `layer` for Workers services.
+2. Use `Schema.TaggedError` for Workers and script domain errors.
 3. Use `Data.TaggedError` only where existing `copy-all` code already uses it.
 4. Prefer `Effect.fn("Name.method")` for named Effect functions.
 
 ---
 
-## 6. Harbor-Oriented Checklist
+## 6. Workers-Oriented Checklist
 
-When implementing `extensions/pi-harbor`, every service must:
+When implementing `extensions/pi-workers`, every service must:
 
-1. Use `Context.Service<Name, Shape>()("harbor/Name")` with `static layer`.
+1. Use `Context.Service<Name, Shape>()("workers/Name")` with `static layer`.
 2. Implement methods with `Effect.fn("Name.method")`.
 3. Use `Schema.TaggedError` for domain errors.
 4. Reserve slots sync; release with `Effect.ensuring`.
 5. Use an explicit per-entry `Scope` and close it when the child settles.
-6. Expose one `HarborLive` layer + `makeHarborRuntime()` + `runTool`.
+6. Expose one `WorkersLive` layer + `makeWorkersRuntime()` + `runTool`.
 7. Keep TUI code outside Effect fibers (call into runtime only).
 
 ---
@@ -270,6 +270,6 @@ pnpm fmt
 git diff --check
 pnpm --dir extensions/ask-user check
 pnpm --dir extensions/copy-all check
-pnpm --dir extensions/pi-harbor check
+pnpm --dir extensions/pi-workers check
 pnpm sync:repos --dry-run
 ```

@@ -1,14 +1,13 @@
 {
-   "extends": "./tsconfig.base.json",
-   "include": [
-      "*.ts",
-      "extensions/*.ts",
-      "extensions/shared/**/*.ts",
-      "extensions/notification/**/*.ts",
-      "extensions/pi-rtk/**/*.ts",
-      "extensions/tool-selector/**/*.ts",
-      "extensions/treepluss/**/*.ts",
-      "extensions/workflows/**/*.ts"
-   ],
-   "exclude": ["node_modules"]
+  "extends": "./tsconfig.base.json",
+  "include": [
+    "*.ts",
+    "extensions/*.ts",
+    "extensions/notification/**/*.ts",
+    "extensions/pi-rtk/**/*.ts",
+    "extensions/tool-selector/**/*.ts",
+    "extensions/treepluss/**/*.ts",
+    "extensions/workflows/**/*.ts"
+  ],
+  "exclude": ["node_modules"]
 }

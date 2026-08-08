@@ -24,7 +24,7 @@ The following concepts are shared between OpenCode and this extension:
 | `external_directory` surface  | Gates access to paths outside the working directory                                                             |
 | `bash` surface                | Command patterns matched against shell commands                                                                 |
 | `skill` surface               | Skill name patterns matched against skill invocations                                                           |
-| `task` surface                | Gates subagent/delegation tool calls                                                                            |
+| `worker_spawn` surface        | Gates worker delegation tool calls                                                                              |
 | Session-scoped approvals      | `once` / `always` / `reject` from the ask dialog; `always` adds a session rule                                  |
 | Per-agent overrides           | Override global permissions for specific agents                                                                 |
 | Tool hiding                   | Denied tools are removed before the agent starts (no wasted turns probing)                                      |

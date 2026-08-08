@@ -13,7 +13,7 @@ This document provides the full contributor workflow for developing and publishi
     - [`pi-permission-system`](./extensions/pi-permission-system): Central permission gates for tools, bash, MCP, skills, file paths, and subagents.
     - [`pi-reference`](./extensions/pi-reference): Project reference declaration & resolution with `@alias` autocomplete.
     - [`pi-station`](./extensions/pi-station): Status bar, layout manager, bash mode, hashline editor with in-chat diff preview.
-    - [`pi-harbor`](./extensions/pi-harbor): Agent jobs, Agy/Pi harnesses, process supervision, inter-agent messaging, Vibe mode, and the `/tasks` dashboard.
+    - [`pi-workers`](./extensions/pi-workers): Worker jobs, Agy/Pi harnesses, process supervision, inter-worker messaging, Vibe mode, and the `/workers` dashboard.
 - **Workflow & Automation Tools**:
     - `.githooks/`: Versioned Git hooks (`pre-commit` runs `lint-staged`); `prepare` points Git at them via `core.hooksPath`.
     - `.github/workflows/publish.yml`: GitHub Actions manual tag-based package publish workflow.
@@ -35,7 +35,7 @@ agent-root/
 │   ├── pi-permission-system      # permission system extension
 │   ├── pi-reference              # project references extension
 │   ├── pi-station                # published npm extension
-│   └── pi-harbor                 # agent jobs and process supervision extension
+│   └── pi-workers                # worker jobs and process supervision extension
 ├── scripts/
 │   ├── release.mjs               # legacy per-package release orchestrator
 │   └── typecheck.mjs             # project-wide type check
@@ -81,7 +81,7 @@ Run scripts for individual packages from the root using `pnpm --dir`:
 
 ```bash
 pnpm --dir extensions/pi-permission-system check
-pnpm --dir extensions/pi-harbor check
+pnpm --dir extensions/pi-workers check
 pnpm --dir extensions/pi-station typecheck
 ```
 
@@ -115,7 +115,7 @@ pnpm --dir extensions/pi-station typecheck
 
 ## 5. Editing an Existing Package
 
-- **Raw TypeScript Extensions** (`pi-permission-system`, `pi-reference`, `pi-station`, `pi-harbor`, and others):
+- **Raw TypeScript Extensions** (`pi-permission-system`, `pi-reference`, `pi-station`, `pi-workers`, and others):
     - Published directly as raw TypeScript source files (`.ts`).
     - Loaded by Pi harness at runtime via `jiti`. No `dist/` build step is required.
 - Ensure changes pass the applicable root checks (`pnpm lint`, `pnpm typecheck`, `pnpm fmt`, and `git diff --check`).
@@ -176,5 +176,5 @@ Use the helper script `publish.sh` to trigger GitHub Actions:
 ## 9. Guidelines & Constraints
 
 - **No Unprompted Git Commits / Pushes**: Do NOT execute `git commit` or `git push` unless explicitly requested by the user.
-- **Surgical Edits**: Touch only what is necessary for the task. Preserve comments and structure.
+- **Surgical Edits**: Touch only what is necessary for the assignment. Preserve comments and structure.
 - **Always Verify**: Run `pnpm lint`, `pnpm typecheck`, `pnpm fmt`, and `git diff --check` before declaring success.

@@ -59,8 +59,13 @@ export function createBuiltinProviderAdapters(
 }
 
 export function createOAuthInteraction(ctx: ExtensionCommandContext, providerName: string): AuthInteraction {
+   const controller = new AbortController();
+   if (ctx.signal) {
+      if (ctx.signal.aborted) controller.abort(ctx.signal.reason);
+      else ctx.signal.addEventListener("abort", () => controller.abort(ctx.signal?.reason), { once: true });
+   }
    return {
-      signal: ctx.signal,
+      signal: controller.signal,
       prompt: async (prompt) => promptForOAuth(ctx, prompt),
       notify: (event) => notifyOAuthEvent(ctx, providerName, event)
    };

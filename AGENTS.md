@@ -3,7 +3,7 @@
 ## Non-negotiable rules
 
 - **No unprompted releases or Git mutations:** Do not run `git commit`, `git push`, or release/publish flows unless the user explicitly requests it.
-- **Use surgical edits:** Touch only what the task requires. Preserve existing comments and structure unless changing them is necessary.
+- **Use surgical edits:** Touch only what the assignment requires. Preserve existing comments and structure unless changing them is necessary.
 
 ## Repository layout and commands
 
@@ -20,7 +20,7 @@
     Examples:
 
     ```text
-    pnpm --dir extensions/pi-harbor check
+    pnpm --dir extensions/pi-workers check
     ```
 
 - Run lint for a single extension from the repository root with:

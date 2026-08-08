@@ -2880,8 +2880,8 @@ fn main() -> anyhow::Result<()> {
                 let r = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?, row.get::<_, i32>(2)?, row.get::<_, String>(3)?)))?;
                 r.collect::<Result<Vec<_>, _>>()?
             } else {
-                // Normalize separators on both sides so `extensions/pi-harbor`
-                // matches stored Windows paths like `extensions\pi-harbor\...`.
+                // Normalize separators on both sides so `extensions/pi-workers`
+                // matches stored Windows paths like `extensions\pi-workers\...`.
                 let filter = req.ast_grep.path_filter.replace('\\', "/");
                 let mut stmt = s.db.prepare("SELECT path, start_line, end_line, text FROM chunks WHERE replace(path, '\\', '/') LIKE ?1 LIMIT 50000")?;
                 let r = stmt.query_map(params![format!("%{filter}%")], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?, row.get::<_, i32>(2)?, row.get::<_, String>(3)?)))?;
