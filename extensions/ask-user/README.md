@@ -15,8 +15,8 @@
 
 ## 🛠️ Tools
 
-| Tool | Purpose |
-| --- | --- |
+| Tool       | Purpose                                                                                      |
+| ---------- | -------------------------------------------------------------------------------------------- |
 | `ask_user` | Prompt the user with a question and 2 to 5 multiple-choice options (plus custom text input). |
 
 ---

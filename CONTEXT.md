@@ -1,106 +1,119 @@
-# Pi Workers
+# Architecture & Domain Context
 
-Pi Workers coordinates delegated agent work, supervised processes, and parent-led worker-session follow-up inside Pi. Its domain separates terminal worker outcomes from externally supervised commands and transcript-based takeover.
+This repository is a monorepo containing native extensions, tools, sub-agent execution engines, and TUI components built for the [Pi coding agent](https://pi.dev) harness (`@earendil-works/pi-coding-agent` v0.84+).
 
-## Participants and Work
+Code in this monorepo is written in TypeScript using **Effect v4** (`effect` v4.0.0-beta), **TypeBox**, and Pi's native extension APIs (`@earendil-works/pi-agent-core`, `@earendil-works/pi-tui`).
 
-**Parent session**:
-The interactive session that delegates work, receives worker outcomes, and can take over worker sessions.
-_Avoid_: controller, manager
+---
 
-**Worker**:
-A child agent session responsible for carrying out one delegated assignment.
-_Avoid_: subagent, child worker
+## 🏛️ System Architecture
 
-**Worker assignment**:
-A unit of agent work delegated by a parent session. A worker assignment runs independently of the parent and eventually reaches one terminal status.
-_Avoid_: background job, process
+```text
+                               ┌──────────────────────────────────────────┐
+                               │              Parent Session              │
+                               │  (Interactive TUI / Orchestrator Mode)   │
+                               └────────────────────┬─────────────────────┘
+                                                    │
+                ┌───────────────────────────────────┼──────────────────────────────────┐
+                │                                   │                                  │
+                ▼                                   ▼                                  ▼
+┌───────────────────────────────┐   ┌───────────────────────────────┐   ┌───────────────────────────────┐
+│          pi-workers           │   │           workflows           │   │     pi-permission-system      │
+│  Delegation & Supervision     │   │     JavaScript DSL Engine     │   │   Security & Policy Control   │
+│ (worker_spawn, process_start) │   │  (parallel, phase, schema)    │   │     (allow, ask, deny)        │
+└───────────────┬───────────────┘   └───────────────┬───────────────┘   └───────────────┬───────────────┘
+                │                                   │                                   │
+                ▼                                   ▼                                   ▼
+┌───────────────────────────────┐   ┌───────────────────────────────┐   ┌───────────────────────────────┐
+│     Child Worker Agents       │   │    Child Workflow Workers     │   │   Tool & Command Gateways     │
+│   (Isolated Pi Sessions)      │   │     (Isolated Agents)         │   │   (Bash, MCP, File Paths)     │
+└───────────────────────────────┘   └───────────────────────────────┘   └───────────────────────────────┘
+```
 
-**Job**:
-A Workers-tracked unit of work with an identity, owner, lifecycle, and outcome. Worker assignments and supervised processes are distinct job kinds.
-_Avoid_: worker when referring to a supervised process, process when referring to agent work
+---
 
-**Process**:
-An external command that Workers supervises independently of worker assignment execution.
-_Avoid_: worker when referring to a supervised process
+## 👥 Participants & Domain Vocabulary
 
-**Harness**:
-The execution environment used to run a worker session, such as Pi or Agy.
-_Avoid_: agent, worker
+### Participants & Roles
 
-## Lifecycle and Outcomes
+- **Parent Session**: The primary interactive conversation session that orchestrates work, receives worker outcomes, and initiates takeover when necessary. _(Avoid: controller, manager)_
+- **Worker**: A child agent session created to execute one delegated assignment independently. _(Avoid: subagent, child worker)_
+- **Orchestrator**: The primary agent operating in coordination mode to delegate tasks to 1–4 concurrent worker agents using `worker_spawn` rather than performing broad exploration itself.
+- **Owner Session**: The parent session that created and owns a job's lifecycle and delivery boundary. _(Avoid: current session, worker session)_
+- **Harness**: The execution environment running a session (e.g. Pi or Agy). _(Avoid: agent, worker)_
 
-**Pending**:
-The worker assignment or process has been accepted but has not started executing.
+### Work & Execution Units
 
-**Spawned**:
-An immediate worker-tool acknowledgement that a worker job was created and handed off for execution. It is an acknowledgement state, not a lifecycle state used by job inspection.
-_Avoid_: running, completed
+- **Worker Assignment**: A unit of agent work delegated by a parent session. Runs independently and reaches a terminal outcome. _(Avoid: background job, process)_
+- **Job**: A tracked unit of work with an identity, owner, lifecycle, and outcome (`worker` vs `process`). _(Avoid: worker when referring to a process)_
+- **Process**: An external command or service supervised independently of worker assignments (e.g. `pnpm dev`, watchers). _(Avoid: worker when referring to a process)_
 
-**Running**:
-The worker assignment or process is currently executing.
+### Lifecycle & Outcomes
 
-**Completed**:
-The worker assignment or process reached its intended terminal outcome successfully.
-_Avoid_: delivered, because delivery is separate from completion
+- **Pending**: The assignment or process has been accepted but has not started executing.
+- **Spawned**: Immediate tool acknowledgement that a job was created and handed off. _(Avoid: running, completed)_
+- **Running**: The assignment or process is currently executing.
+- **Completed**: The job reached its intended terminal outcome successfully. _(Avoid: delivered)_
+- **Failed**: Execution or validation could not succeed. _(Avoid: cancelled)_
+- **Cancelled**: Execution was intentionally stopped before normal completion.
+- **Worker Result**: The terminal payload submitted by a worker for its assignment. Separate from progress updates.
 
-**Failed**:
-The worker assignment or process reached a terminal outcome because execution or validation could not succeed.
-_Avoid_: cancelled
+### Interaction & Delivery
 
-**Cancelled**:
-Execution was intentionally stopped before normal completion.
-_Avoid_: failed
+- **Submit**: The worker's final act of submitting a worker result or error.
+- **Parent Delivery**: Automatic presentation of a settled worker result to the parent session (no polling required).
+- **Takeover View**: Parent-led inspection and interaction with a worker session through its transcript history.
+- **Targeted Inspection (Phase 1.5)**: Direct reading of specific key files by the orchestrator using `read` after receiving research findings, before delegating code changes.
 
-**Worker result**:
-The terminal outcome submitted by a worker for its assignment. It is separate from progress messages and is delivered once the worker settles.
-_Avoid_: update
+---
 
-**Cancellation**:
-An intentional request to stop a running or pending job. Cancellation is a lifecycle outcome, not an execution error.
+## 🧩 Monorepo Extensions
 
-## Completion and Interaction
+The monorepo contains 17 native extensions located under `extensions/`:
 
-**Submit**:
-The worker's final act of providing a worker result or worker error. Submit is the only terminal worker-result channel.
-_Avoid_: progress update, transcript entry
+| Extension              | Category               | Description                                                                                                        | Key Directives / Commands                                    |
+| ---------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| `pi-workers`           | Sub-agents & Processes | Multi-worker task delegation, process supervision, TUI dashboard, and orchestrator prompt mode.                    | `worker_spawn`, `process_start`, `/orchestrator`, `/workers` |
+| `workflows`            | Multi-Agent DSL        | JavaScript multi-agent orchestration DSL with parallel fan-out and schema validation.                              | `workflow`, `/workflows`                                     |
+| `pi-permission-system` | Security & Governance  | Granular policy enforcement (`allow`, `ask`, `deny`) across tools, bash commands, MCP servers, and file paths.     | `~/.pi/agent/permission.jsonc`                               |
+| `pi-reference`         | Code Accessibility     | Project reference manager auto-cloning Git repos into `~/.cache/checkouts/` and auto-allowing directories.         | `@alias/path`, `/references`                                 |
+| `pi-cortex`            | Code Intelligence      | Semantic and AST pattern search, call graphs, ONNX embeddings, SQLite knowledge triples, and agent memory.         | `code_search`, `code_ast_grep`, `/cc-index`                  |
+| `pi-exa`               | Web & Research         | Exa-powered web search, webpage content fetching, and multi-source deep research.                                  | `web_search_exa`, `web_fetch_exa`, `deep_search_exa`         |
+| `pi-acks`              | Auth & Accounts        | Subscription OAuth account manager and credential switcher for OpenAI Codex.                                       | `/accounts`                                                  |
+| `pi-rtk`               | Token Optimization     | Token-optimized bash command rewriting (`rtk rewrite`) and RTK tools (`rtk_grep`, `rtk_find`).                     | `/pi-rtk`                                                    |
+| `pi-station`           | TUI Compositor         | Fixed-layout TUI compositor status bar, bash mode, hashline file anchors (`LINE#HASH`), prompt history, undo/redo. | `/station`, `/stash-history`                                 |
+| `pi-code-block-picker` | Utilities              | Code block extractor from session history, fuzzy selector, and cross-platform clipboard copy.                      | `/codeblocks`, `Ctrl+Shift+Y`                                |
+| `pi-codex-usage`       | Monitoring             | OpenAI Codex token limit monitoring and response verbosity control.                                                | `/codex-usage`                                               |
+| `pi-skill-toggle`      | Skill Governance       | Interactive checklist to toggle skills between automatic agent invocation and manual-only mode.                    | `/toggle-skills`                                             |
+| `ask-user`             | Interaction            | Structured multiple-choice user question tool with custom text input.                                              | `ask_user`                                                   |
+| `notification`         | Audio Alerts           | Audio completion notifications (`agent_end`) with configurable sounds and volume.                                  | `~/.pi/agent/settings.json`                                  |
+| `copy-all`             | Utilities              | Copies the active post-compaction conversation window to the system clipboard.                                     | `/copy-all`                                                  |
+| `tool-selector`        | Inspection             | Read-only inspector displaying active and inactive status for all session tools.                                   | `/tools`                                                     |
+| `treepluss`            | TUI Compositor         | Enhanced conversation branch tree component renderer for interactive mode.                                         | TUI session visualizer                                       |
 
-**Parent delivery**:
-Automatic presentation of a settled worker result to the parent session after the worker completes.
-_Avoid_: polling
+---
 
-**Takeover**:
-A parent-led continuation of a worker session through its transcript, used when the parent needs to inspect, steer, or follow up on work.
-_Avoid_: worker result, new worker
+## ⚡ Effect v4 Engineering Standards
 
-## Identity and History
+When writing TypeScript code in this monorepo:
 
-**Owner session**:
-The parent session that created and owns a job's lifecycle and delivery boundary.
-_Avoid_: current session, worker session
+1. **Source of Truth**: Follow [`repos/effect/LLMS.md`](./repos/effect/LLMS.md) for idiomatic Effect usage, tests, module structure, and API design.
+2. **Cheat Sheet**: Refer to [`docs/effect-v4-cheatsheet.md`](./docs/effect-v4-cheatsheet.md) for project-specific Effect v4 idioms.
+3. **Idioms**:
+    - Use `Effect.gen` for async control flow.
+    - Define services using `Context.Tag` and `Layer`.
+    - Handle errors explicitly using typed error channels and `Cause` inspection.
+    - Avoid unhandled promise rejections or raw `try/catch` blocks inside Effect code.
 
-**Session**:
-A conversation identity for a parent or worker participant. Session identity determines which participant may observe and control a job.
-_Avoid_: job, transcript
+---
 
-**Transcript**:
-The readable activity history of a worker session, expressed as user messages, tool use, tool results, and assistant messages. A transcript describes how work progressed; it is not the worker result.
-_Avoid_: result log, output JSON
+## ⚙️ Package Management & Tooling
 
-**Worker identity**:
-The stable Workers identity used to refer to one delegated worker assignment throughout its lifecycle.
-_Avoid_: worker name
-
-**Worker name**:
-A short human-readable label for a worker assignment. It helps people recognize an assignment but does not identify it uniquely.
-_Avoid_: worker ID, agent
-
-## Coordination Modes
-
-**Hub**:
-The coordination surface for inspecting jobs and processes and supervising commands according to the participant's permissions.
-_Avoid_: worker runner
-
-**Agent profile**:
-A named worker capability selected when a worker assignment is delegated. The profile describes how the worker should approach its assignment; it is not the worker's runtime identity.
-_Avoid_: worker name, worker ID
+- **Package Manager**: Use `pnpm` exclusively. Do **not** use `npm`, `bun`, `npx`, or `bunx`. Use `pnpx` for binary execution without global installation.
+- **Python Manager**: Use `uv` exclusively for Python execution and environment management.
+- **Surgical Edits**: Touch only what the assignment requires. Preserve existing comments and file structures.
+- **Verification Workflow**: Run the following checks in order before completing work:
+    1. `pnpm lint`
+    2. `pnpm typecheck`
+    3. `pnpm fmt`
+    4. `git diff --check`

@@ -5,6 +5,10 @@
 - **No unprompted releases or Git mutations:** Do not run `git commit`, `git push`, or release/publish flows unless the user explicitly requests it.
 - **Use surgical edits:** Touch only what the assignment requires. Preserve existing comments and structure unless changing them is necessary.
 
+## Context and Architecture
+
+- **Read `CONTEXT.md` first:** Before working on non-trivial features, refactors, or architectural changes, read [`CONTEXT.md`](./CONTEXT.md) for domain models, system architecture, and key design constraints.
+
 ## Repository layout and commands
 
 - This repository is a single pnpm monorepo.

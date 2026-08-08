@@ -20,32 +20,32 @@
 
 ### Worker Delegation Tools
 
-| Tool | Purpose |
-| --- | --- |
-| `worker_spawn` | Spawn 1 to 4 worker agents concurrently with `{ workers: [{ name, task, agent }] }`. |
-| `worker_list` | List active and historical worker jobs and their status. |
-| `worker_cancel` | Cancel a running worker job by ID (suppresses parent result delivery). |
+| Tool            | Purpose                                                                              |
+| --------------- | ------------------------------------------------------------------------------------ |
+| `worker_spawn`  | Spawn 1 to 4 worker agents concurrently with `{ workers: [{ name, task, agent }] }`. |
+| `worker_list`   | List active and historical worker jobs and their status.                             |
+| `worker_cancel` | Cancel a running worker job by ID (suppresses parent result delivery).               |
 
 ### Process Supervision Tools
 
-| Tool | Purpose |
-| --- | --- |
-| `process_start` | Start a long-running process or background service (dev servers, watchers, queues). |
-| `process_list` | List all background processes supervised by Pi. |
-| `process_snapshot` | Inspect recent output logs and status of a supervised process. |
-| `process_restart` | Restart a supervised background process by ID. |
-| `process_stop` | Stop a running background process by ID or name. |
+| Tool               | Purpose                                                                             |
+| ------------------ | ----------------------------------------------------------------------------------- |
+| `process_start`    | Start a long-running process or background service (dev servers, watchers, queues). |
+| `process_list`     | List all background processes supervised by Pi.                                     |
+| `process_snapshot` | Inspect recent output logs and status of a supervised process.                      |
+| `process_restart`  | Restart a supervised background process by ID.                                      |
+| `process_stop`     | Stop a running background process by ID or name.                                    |
 
 ---
 
 ## 🚀 Commands
 
-| Command | Description |
-| --- | --- |
-| `/orchestrator [instructions]` | Switch the main agent into Orchestrator Mode to coordinate sub-tasks across concurrent workers. |
-| `/workers` | Open the interactive TUI Workers Dashboard (or output a job/process table snapshot in print mode). |
-| `/agents` | View available agent profiles and open the agent profile configuration UI. |
-| `/btw <question>` | Ask a side question to a background worker without interrupting the main conversation. |
+| Command                        | Description                                                                                        |
+| ------------------------------ | -------------------------------------------------------------------------------------------------- |
+| `/orchestrator [instructions]` | Switch the main agent into Orchestrator Mode to coordinate sub-tasks across concurrent workers.    |
+| `/workers`                     | Open the interactive TUI Workers Dashboard (or output a job/process table snapshot in print mode). |
+| `/agents`                      | View available agent profiles and open the agent profile configuration UI.                         |
+| `/btw <question>`              | Ask a side question to a background worker without interrupting the main conversation.             |
 
 ---
 

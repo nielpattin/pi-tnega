@@ -12,8 +12,8 @@
 
 ## 🚀 Commands
 
-| Command | Description |
-| --- | --- |
+| Command  | Description                                                                        |
+| -------- | ---------------------------------------------------------------------------------- |
 | `/tools` | Display active and inactive status for all available tools in the current session. |
 
 ---

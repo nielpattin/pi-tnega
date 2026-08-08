@@ -14,11 +14,11 @@
 
 ## 🚀 Commands
 
-| Command | Description |
-| --- | --- |
-| `/codex-usage` | Open the interactive Codex usage and quota screen in TUI mode. |
-| `/codex-usage <low\|medium\|high>` | Set OpenAI Codex response verbosity directly. |
-| `/codex-usage verbosity` | Select response verbosity from an interactive UI menu. |
+| Command                            | Description                                                    |
+| ---------------------------------- | -------------------------------------------------------------- |
+| `/codex-usage`                     | Open the interactive Codex usage and quota screen in TUI mode. |
+| `/codex-usage <low\|medium\|high>` | Set OpenAI Codex response verbosity directly.                  |
+| `/codex-usage verbosity`           | Select response verbosity from an interactive UI menu.         |
 
 ---
 

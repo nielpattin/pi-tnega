@@ -15,8 +15,8 @@
 
 ## 🛠️ Tools
 
-| Tool | Purpose |
-| --- | --- |
+| Tool       | Purpose                                                        |
+| ---------- | -------------------------------------------------------------- |
 | `workflow` | Execute an inline JavaScript multi-agent orchestration script. |
 
 > **Usage Note**: The AI model calls `workflow` when multi-step fan-out orchestration is requested or when the user invokes `ultracode`.
@@ -25,9 +25,9 @@
 
 ## 🚀 Commands
 
-| Command | Description |
-| --- | --- |
-| `/workflows` | List active and historical workflow runs in an interactive TUI dashboard. |
+| Command              | Description                                                                     |
+| -------------------- | ------------------------------------------------------------------------------- |
+| `/workflows`         | List active and historical workflow runs in an interactive TUI dashboard.       |
 | `/workflows <runId>` | Open detailed execution view and step-by-step logs for a specific workflow run. |
 
 ---
@@ -36,30 +36,31 @@
 
 ```js
 export const meta = {
-  name: "reliability-review",
-  description: "Review modules for reliability risks, then report",
-  phases: [{ title: "Scan" }, { title: "Report" }]
+    name: "reliability-review",
+    description: "Review modules for reliability risks, then report",
+    phases: [{ title: "Scan" }, { title: "Report" }]
 };
 
 phase("Scan");
 
 const FINDINGS = {
-  type: "object",
-  properties: {
-    issues: { type: "array", items: { type: "string" } },
-    ok: { type: "boolean" }
-  },
-  required: ["issues", "ok"]
+    type: "object",
+    properties: {
+        issues: { type: "array", items: { type: "string" } },
+        ok: { type: "boolean" }
+    },
+    required: ["issues", "ok"]
 };
 
 const scans = await parallel(
-  args.files.map((file) => () =>
-    agent(`Review ${file} for correctness and reliability risks.`, {
-      label: `scan:${file}`,
-      phase: "Scan",
-      schema: FINDINGS
-    })
-  )
+    args.files.map(
+        (file) => () =>
+            agent(`Review ${file} for correctness and reliability risks.`, {
+                label: `scan:${file}`,
+                phase: "Scan",
+                schema: FINDINGS
+            })
+    )
 );
 
 const findings = scans.filter((r) => r.ok).map((r) => r.structured);
@@ -67,13 +68,13 @@ const findings = scans.filter((r) => r.ok).map((r) => r.structured);
 phase("Report");
 
 const report = await agent(`Summarize these findings: ${JSON.stringify(findings)}`, {
-  label: "report",
-  phase: "Report"
+    label: "report",
+    phase: "Report"
 });
 
 return {
-  findings,
-  report: report.ok ? report.output : report.error
+    findings,
+    report: report.ok ? report.output : report.error
 };
 ```
 

@@ -14,8 +14,8 @@
 
 ## 🚀 Commands
 
-| Command | Description |
-| --- | --- |
+| Command          | Description                                                                                        |
+| ---------------- | -------------------------------------------------------------------------------------------------- |
 | `/toggle-skills` | Open the interactive skill toggle menu to enable or disable automatic agent invocation for skills. |
 
 ---

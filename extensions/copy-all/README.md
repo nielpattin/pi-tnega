@@ -15,8 +15,8 @@
 
 ## 🚀 Commands
 
-| Command | Purpose |
-| --- | --- |
+| Command     | Purpose                                                                                             |
+| ----------- | --------------------------------------------------------------------------------------------------- |
 | `/copy-all` | Copy the compaction summary and active user/assistant turn messages up to the current session leaf. |
 
 ---

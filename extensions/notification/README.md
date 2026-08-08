@@ -18,10 +18,10 @@ Configure notification preferences in `~/.pi/agent/settings.json` (or `.pi/setti
 
 ```json
 {
-  "notification": {
-    "sound": "assets/done.mp3",
-    "volume": 100
-  }
+    "notification": {
+        "sound": "assets/done.mp3",
+        "volume": 100
+    }
 }
 ```
 

@@ -15,10 +15,10 @@
 
 ## 🚀 Commands & Shortcuts
 
-| Command / Shortcut | Description |
-| --- | --- |
-| `/codeblocks` | Open the interactive code block picker for the current session. |
-| `Ctrl+Shift+Y` | Global keybinding shortcut to open the code block picker. |
+| Command / Shortcut | Description                                                     |
+| ------------------ | --------------------------------------------------------------- |
+| `/codeblocks`      | Open the interactive code block picker for the current session. |
+| `Ctrl+Shift+Y`     | Global keybinding shortcut to open the code block picker.       |
 
 ---
 
