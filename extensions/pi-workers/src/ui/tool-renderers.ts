@@ -145,7 +145,7 @@ export function renderWorkerCall(
       const name = stringValue(singleWorker.name) ?? "worker_spawn";
       const agent = stringValue(singleWorker.agent) ?? "agent";
       return new Text(
-         `${theme.fg("toolTitle", theme.bold("worker_spawn"))} ${theme.fg("muted", agent)} ${theme.fg("muted", "·")} ${theme.fg("accent", name)}\n${theme.fg("dim", stringValue(singleWorker.worker) ?? "")}`,
+         `${theme.fg("toolTitle", theme.bold("worker_spawn"))} ${theme.fg("muted", agent)} ${theme.fg("muted", "·")} ${theme.fg("accent", name)}\n${theme.fg("dim", stringValue(singleWorker.task ?? (singleWorker as any).worker) ?? "")}`,
          0,
          0
       );
@@ -158,7 +158,7 @@ export function renderWorkerCall(
       const name = stringValue(worker.name) ?? "worker_spawn";
       const agent = stringValue(worker.agent) ?? "agent";
       lines.push(
-         `${workerIndicator(index, theme, context)} ${theme.fg("accent", name)} ${theme.fg("muted", `· ${agent}`)} ${theme.fg("dim", preview(worker.worker))}`
+         `${workerIndicator(index, theme, context)} ${theme.fg("accent", name)} ${theme.fg("muted", `· ${agent}`)} ${theme.fg("dim", preview(worker.task ?? (worker as any).worker))}`
       );
    }
    return new Text(lines.join("\n"), 0, 0);

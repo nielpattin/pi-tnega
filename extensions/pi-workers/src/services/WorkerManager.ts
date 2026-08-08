@@ -313,6 +313,7 @@ export class WorkerManager extends Context.Service<WorkerManager, WorkerManagerS
                      harness === "agy" && typeof agentDef?.filePath === "string"
                         ? ensureAgyAgentLink(agentDef.name, agentDef.filePath).agentName
                         : undefined;
+                  const taskPrompt = spec.task;
                   const job = yield* registry.register({
                      id: jobId,
                      ownerSessionId,
@@ -326,9 +327,9 @@ export class WorkerManager extends Context.Service<WorkerManager, WorkerManagerS
                      origin,
                      batchId: options?.batchId,
                      batchSize: options?.batchSize,
-                     promptOrCommand: spec.worker,
+                     promptOrCommand: taskPrompt,
                      harness,
-                     transcript: harness === "agy" ? [{ type: "user", text: spec.worker }] : undefined
+                     transcript: harness === "agy" ? [{ type: "user", text: taskPrompt }] : undefined
                   });
 
                   const runningJob = yield* registry.updateStatus(job.id, "running");
@@ -352,9 +353,9 @@ export class WorkerManager extends Context.Service<WorkerManager, WorkerManagerS
                         return chunk;
                      };
                      const onAgyOutput = onLiveOutput(jobId);
-                     agyTranscripts.set(jobId, [{ type: "user", text: spec.worker }]);
+                     agyTranscripts.set(jobId, [{ type: "user", text: spec.task }]);
                      const fsmSession = agyBackend.createFsmSession({
-                        prompt: spec.worker,
+                        prompt: spec.task,
                         logFilePath,
                         readLogChunk,
                         readDb: readAgyTranscriptRecords,
@@ -438,7 +439,7 @@ export class WorkerManager extends Context.Service<WorkerManager, WorkerManagerS
                               .spawnSession({
                                  jobId,
                                  sessionName: `worker: ${spec.name ?? jobId} ${jobId}`,
-                                 prompt: spec.worker,
+                                 prompt: spec.task,
                                  cwd: spec.cwd ?? process.cwd(),
                                  parentSessionFile: options?.parentSessionFile,
                                  agentDef,

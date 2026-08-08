@@ -24,9 +24,9 @@ const JobIdSchema = Type.String({
 
 /** Schema for one worker delegated by the parent session. */
 export const WorkerSpecSchema = Type.Object({
-   worker: Type.String({
+   task: Type.String({
       description: [
-         "Detailed instruction for the worker.",
+         "Detailed task instruction prompt for the worker.",
          "State the expected outcome, scope, edit permission, and stop condition."
       ].join(" ")
    }),
@@ -107,7 +107,7 @@ export function createWorkerSpawnToolParamsSchema(agentProfileNames: readonly st
 /** Description sent to the model with the worker spawn tool definition. */
 export const WORKER_SPAWN_TOOL_BASE_DESCRIPTION = [
    "Spawn one or more workers.",
-   'Use this input: { workers: [{ worker: "prompt", name: "short-title", agent, ... }], context? }.',
+   'Use this input: { workers: [{ task: "prompt", name: "short-title", agent, ... }], context? }.',
    "The workers array must contain 1 to 4 worker specifications.",
    "The parent session receives a spawned acknowledgement immediately.",
    "Each worker runs independently and submits a worker result when it completes.",
@@ -118,16 +118,7 @@ export const WORKER_SPAWN_TOOL_BASE_DESCRIPTION = [
 
 /** Short description shown in the available-tools section. */
 export const WORKER_SPAWN_TOOL_BASE_PROMPT_SNIPPET =
-   "Spawn 1 to 4 workers with { workers: [{ worker, name, agent, ... }], context? }.";
-
-/** Prompt rules that apply while the worker spawn tool is active. */
-export const WORKER_SPAWN_TOOL_BASE_PROMPT_GUIDELINES = [
-   "Set each worker's agent to one of the enabled agent profiles listed in the current worker_spawn tool metadata.",
-   "Give each worker a short human-readable worker name. Do not use the agent profile name as the worker name.",
-   "When the parent session delegates a worker, call worker_spawn before reading, searching, or investigating the target yourself.",
-   "After worker_spawn returns a spawned acknowledgement, stop the parent session turn. Do not call worker_list, process_snapshot, bash, or sleep to wait. Parent delivery presents the worker result automatically.",
-   "Use worker_spawn with { workers: [{ worker, name, agent, ... }], context? } for 1 to 4 concurrent workers."
-];
+   "Spawn 1 to 4 workers with { workers: [{ task, name, agent, ... }], context? }.";
 
 /** Static worker tool definition for callers that do not need dynamic profile names. */
 export const workerSpawnToolDefinition = {
@@ -160,8 +151,6 @@ export interface WorkerToolMetadataAugmentation {
    readonly agentNames: ReadonlyArray<string>;
    /** Profile list appended to the tool description. */
    readonly descriptionAppendix: string;
-   /** Profile-specific rules appended to the prompt guidelines. */
-   readonly additionalGuidelines: ReadonlyArray<string>;
 }
 
 /** Optional filter for the agent profiles advertised by the worker tool. */
@@ -172,11 +161,6 @@ export interface WorkerToolMetadataOptions {
 function formatAgentProfile(agent: AgentDefinition): string {
    const description = agent.description.trim();
    return description.length === 0 ? `  - ${agent.name}` : `  - ${agent.name}: ${description}`;
-}
-
-function formatAgentGuideline(agent: AgentDefinition): string {
-   const description = agent.description.trim() || "this profile";
-   return `Use worker_spawn agent: "${agent.name}" when the work matches: ${description}.`;
 }
 
 /**
@@ -197,8 +181,7 @@ export function augmentWorkerToolMetadata(
    if (enabledAgents.length === 0) {
       return {
          agentNames: [],
-         descriptionAppendix: "",
-         additionalGuidelines: []
+         descriptionAppendix: ""
       };
    }
 
@@ -207,8 +190,7 @@ export function augmentWorkerToolMetadata(
       descriptionAppendix: [
          "Enabled agent profiles for the current workspace:",
          ...enabledAgents.map(formatAgentProfile)
-      ].join("\n"),
-      additionalGuidelines: enabledAgents.map(formatAgentGuideline)
+      ].join("\n")
    };
 }
 

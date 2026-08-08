@@ -12,7 +12,8 @@ import type { ExtensionAPI, ExtensionContext, SessionStartEvent } from "@earendi
 import { getAgentDir, keyHint } from "@earendil-works/pi-coding-agent";
 import { Box, Text, type Component, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { makeWorkersRuntime, runTool } from "./runtime.js";
 import { buildWorkerSystemPrompt as orderWorkerSystemPrompt } from "./backends/pi.js";
 import { JobRegistry } from "./services/JobRegistry.js";
@@ -34,7 +35,6 @@ import {
    WorkerCancelToolParamsSchema,
    WORKER_SPAWN_TOOL_BASE_DESCRIPTION,
    WORKER_SPAWN_TOOL_BASE_PROMPT_SNIPPET,
-   WORKER_SPAWN_TOOL_BASE_PROMPT_GUIDELINES,
    augmentWorkerToolMetadata
 } from "./tools/worker.js";
 import {
@@ -226,13 +226,11 @@ function makeAsyncWorkerWidgetState(runtime: WorkersRuntime): AsyncWorkerWidgetS
 interface WorkerToolAugmentation {
    readonly agentNames: ReadonlyArray<string>;
    readonly descriptionAppendix: string;
-   readonly additionalGuidelines: ReadonlyArray<string>;
 }
 
 const EMPTY_WORKER_TOOL_AUGMENTATION: WorkerToolAugmentation = {
    agentNames: [],
-   descriptionAppendix: "",
-   additionalGuidelines: []
+   descriptionAppendix: ""
 };
 
 async function resolveWorkerToolAugmentation(runtime: WorkersRuntime, cwd?: string): Promise<WorkerToolAugmentation> {
@@ -261,7 +259,6 @@ function createWorkerToolDefinition(
       label: "worker_spawn",
       description,
       promptSnippet: WORKER_SPAWN_TOOL_BASE_PROMPT_SNIPPET,
-      promptGuidelines: [...WORKER_SPAWN_TOOL_BASE_PROMPT_GUIDELINES, ...augmentation.additionalGuidelines],
       parameters: createWorkerSpawnToolParamsSchema(augmentation.agentNames),
       renderCall: renderWorkerCall,
       renderResult: renderWorkerResult,
@@ -296,31 +293,12 @@ function createWorkerToolDefinition(
    };
 }
 
-const WORKER_JOB_PROMPT_GUIDELINES = [
-   "Use worker_list to inspect active or finished worker status when asked for status.",
-   "Do not use worker_list to wait for a worker_spawn result. Parent delivery presents worker results automatically.",
-   "Use worker_cancel with a worker job ID to cancel a delegated worker."
-];
-
-const PROCESS_JOB_PROMPT_GUIDELINES = [
-   'Use process_start ONLY for never-ending services that run until stopped, for example { name: "api", command: "pnpm dev" }. For one-shot checks (pnpm lint, pnpm exec tsc --noEmit, pnpm fmt, git diff --check) use bash.',
-   "process_start creates a retained process-N job. It is not a one-shot shell.",
-   "Use process_list to list long-running processes.",
-   "Use process_snapshot with a process job ID to read a retained process job's recent logs.",
-   "Use process_stop with a process job ID to stop a retained process job.",
-   "Use process_restart with a process job ID to restart a retained process job."
-];
-
-const WORKER_CANCEL_PROMPT_GUIDELINES = ["Use worker_cancel with a worker job ID to cancel a delegated worker."];
-
-const PROCESS_STOP_PROMPT_GUIDELINES = ["Use process_stop with a process job ID to stop a long-running process."];
-
 interface ParentActionToolDefinition {
    readonly name: string;
    readonly label: string;
    readonly description: string;
    readonly promptSnippet: string;
-   readonly promptGuidelines: ReadonlyArray<string>;
+   readonly promptGuidelines?: ReadonlyArray<string>;
    readonly parameters: any;
    readonly renderCall: any;
    readonly renderResult: any;
@@ -338,7 +316,7 @@ function createParentActionToolDefinition(
       label: definition.label,
       description: definition.description,
       promptSnippet: definition.promptSnippet,
-      promptGuidelines: [...definition.promptGuidelines],
+      ...(definition.promptGuidelines ? { promptGuidelines: [...definition.promptGuidelines] } : {}),
       parameters: definition.parameters,
       renderCall: definition.renderCall,
       renderResult: definition.renderResult,
@@ -369,7 +347,6 @@ function registerParentTools(pi: ExtensionAPI, runtime: WorkersRuntime, delivery
          label: "Worker List",
          description: "List worker jobs.",
          promptSnippet: "List workers.",
-         promptGuidelines: WORKER_JOB_PROMPT_GUIDELINES,
          parameters: WorkerListToolParamsSchema,
          renderCall: renderWorkerListCall,
          renderResult: renderWorkerListResult,
@@ -383,7 +360,6 @@ function registerParentTools(pi: ExtensionAPI, runtime: WorkersRuntime, delivery
          label: "Worker Cancel",
          description: "Cancel a worker by job ID.",
          promptSnippet: "Cancel a worker.",
-         promptGuidelines: WORKER_CANCEL_PROMPT_GUIDELINES,
          parameters: WorkerCancelToolParamsSchema,
          renderCall: renderWorkerCancelCall,
          renderResult: renderWorkerCancelResult,
@@ -399,7 +375,6 @@ function registerParentTools(pi: ExtensionAPI, runtime: WorkersRuntime, delivery
             "Start a retained long-running process job that runs until stopped (for example pnpm dev). For one-shot shell checks like lint, typecheck, fmt, or git diff, use bash instead.",
          promptSnippet:
             "Start a retained process only for never-ending services (pnpm dev). Use bash for one-shot checks.",
-         promptGuidelines: PROCESS_JOB_PROMPT_GUIDELINES,
          parameters: ProcessStartToolParamsSchema,
          renderCall: renderProcessStartCall,
          renderResult: renderProcessStartResult,
@@ -413,7 +388,6 @@ function registerParentTools(pi: ExtensionAPI, runtime: WorkersRuntime, delivery
          label: "Process List",
          description: "List all long-running process jobs.",
          promptSnippet: "List long-running processes.",
-         promptGuidelines: PROCESS_JOB_PROMPT_GUIDELINES,
          parameters: ProcessListToolParamsSchema,
          renderCall: renderProcessListCall,
          renderResult: renderProcessListResult,
@@ -427,7 +401,6 @@ function registerParentTools(pi: ExtensionAPI, runtime: WorkersRuntime, delivery
          label: "Process Snapshot",
          description: "Read status and recent logs for a retained process job. For one-shot bash output use bash.",
          promptSnippet: "Read a retained process snapshot. Use bash for one-shot checks.",
-         promptGuidelines: PROCESS_JOB_PROMPT_GUIDELINES,
          parameters: ProcessSnapshotToolParamsSchema,
          renderCall: renderProcessSnapshotCall,
          renderResult: renderProcessSnapshotResult,
@@ -441,7 +414,6 @@ function registerParentTools(pi: ExtensionAPI, runtime: WorkersRuntime, delivery
          label: "Process Restart",
          description: "Restart a retained process job by job ID.",
          promptSnippet: "Restart a retained process job.",
-         promptGuidelines: PROCESS_JOB_PROMPT_GUIDELINES,
          parameters: ProcessRestartToolParamsSchema,
          renderCall: renderProcessRestartCall,
          renderResult: renderProcessRestartResult,
@@ -455,7 +427,6 @@ function registerParentTools(pi: ExtensionAPI, runtime: WorkersRuntime, delivery
          label: "Process Stop",
          description: "Stop a long-running process job by job ID or name.",
          promptSnippet: "Stop a long-running process.",
-         promptGuidelines: PROCESS_STOP_PROMPT_GUIDELINES,
          parameters: ProcessStopToolParamsSchema,
          renderCall: renderProcessStopCall,
          renderResult: renderProcessStopResult,
@@ -595,6 +566,13 @@ export function registerWorkersExtension(pi: ExtensionAPI, options?: WorkersExte
 
    // Worker tools always present (submit only).
    registerWorkerTools(pi, runtime);
+
+   pi.on("resources_discover", async (_event, _ctx) => {
+      const promptsDir = join(dirname(fileURLToPath(import.meta.url)), "../prompts");
+      return {
+         promptPaths: [promptsDir]
+      };
+   });
 
    const resultDelivery = createDeferredResultDelivery();
    const asyncWidget = makeAsyncWorkerWidgetState(runtime);

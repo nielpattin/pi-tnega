@@ -121,7 +121,7 @@ export interface AgentDefinition {
 }
 
 export interface WorkerSpec {
-   worker: string;
+   task: string;
    name?: string;
    agent: string;
    thinking?: string;
@@ -206,11 +206,13 @@ export function formatProcessId(seq: number): string {
 }
 
 export function normalizeWorkerSpecs(params: {
-   readonly workers?: ReadonlyArray<Pick<WorkerSpec, "worker" | "name" | "agent" | "outputSchema">>;
+   readonly workers?: ReadonlyArray<
+      { readonly task?: string; readonly worker?: string } & Pick<WorkerSpec, "name" | "agent" | "outputSchema">
+   >;
 }): WorkerSpec[] {
    return (
       params.workers?.map((spec) => ({
-         worker: spec.worker,
+         task: spec.task ?? spec.worker ?? "",
          name: spec.name,
          agent: spec.agent,
          outputSchema: spec.outputSchema
@@ -224,7 +226,7 @@ export function prependContext(workers: WorkerSpec[], context?: string): WorkerS
    }
    return workers.map((t) => ({
       ...t,
-      worker: `${context}\n\n${t.worker}`
+      task: `${context}\n\n${t.task}`
    }));
 }
 

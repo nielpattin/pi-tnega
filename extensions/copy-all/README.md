@@ -1,26 +1,29 @@
-# copy-all
+# 📋 copy-all — Active Session Clipboard Exporter for Pi
 
-Copy the active post-compaction window of the current session to the system clipboard.
+`copy-all` is a native [Pi coding agent](https://pi.dev) extension that copies the active post-compaction conversation window of the current session directly to your system clipboard.
 
-## What it does
+---
 
-Registers one user command:
+## ✨ Features
 
-| Command     | Purpose                                                                                  |
-| ----------- | ---------------------------------------------------------------------------------------- |
-| `/copy-all` | Copy the last compaction summary + user/assistant messages up to the current active leaf |
+- **Post-Compaction Window Selection**: Copies user/assistant messages after the last compaction (including the compaction summary), dropping stale or summarized-away history.
+- **Clean Text Formatting**: Formats copied history into clean `USER:` and `ASSISTANT:` blocks separated by clear section dividers (`---`).
+- **Cross-Platform Clipboard**: Copies safely via `powershell` / `clip` (Windows), `pbcopy` (macOS), and `wl-copy` / `xclip` / `xsel` (Linux).
+- **Tool-Noise Filtering**: Excludes internal tool execution results, abandoned conversation branches, and system entries.
 
-It does **not** register model tools. This is a human-facing convenience command.
+---
 
-## How to use
+## 🚀 Commands
 
-In Pi:
+| Command | Purpose |
+| --- | --- |
+| `/copy-all` | Copy the compaction summary and active user/assistant turn messages up to the current session leaf. |
 
-```text
-/copy-all
-```
+---
 
-It waits until the agent is idle, then uses `sessionManager.buildContextEntries()` so pre-compaction history is dropped. When the branch was compacted, the clipboard starts with the latest compaction summary:
+## 📄 Clipboard Output Format
+
+When history has been compacted, output starts with the compaction summary:
 
 ```text
 COMPACTION:
@@ -37,48 +40,14 @@ ASSISTANT:
 ...
 ```
 
-If the session was never compacted, it copies the full active branch (user + assistant only).
+If the session has never been compacted, `/copy-all` exports the active branch's complete user and assistant history.
 
-If there are no sections to copy, it notifies and does nothing.
+---
 
-## What gets copied
+## 📦 Installation
 
-Included:
+To load `copy-all` in Pi, add `extensions/copy-all` to your workspace extension list, or try it directly from the repository root:
 
-- latest compaction summary (when present on the active branch)
-- user messages after the last compaction (or the full branch if never compacted)
-- assistant messages in that same window
-
-Excluded:
-
-- messages summarized away by compaction (pre-`firstKeptEntryId`)
-- abandoned / non-active branches
-- tool results
-- custom system/extension entries
-- empty messages
-
-Image blocks become:
-
-```text
-[image]
-```
-
-## Platform note
-
-Clipboard resolution strategy:
-
-- **Windows**: Prefers `powershell` (`Set-Clipboard` via UTF-8 `StreamReader`), falls back to `clip`.
-- **macOS**: Native `pbcopy`.
-- **Linux**: Prefers `wl-copy` (Wayland), falls back to `xclip` or `xsel`.
-
-## Dependencies
-
-```text
-effect
-```
-
-## Reload after install
-
-```text
-/reload
+```bash
+pi -e ./extensions/copy-all
 ```

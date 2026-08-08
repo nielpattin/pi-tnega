@@ -12,7 +12,7 @@ export function canSpawnBtw(activeBtwCount: number): boolean {
 
 export function buildBtwJobFields(prompt: string): WorkerSpec & { origin: "btw" } {
    return {
-      worker: prompt,
+      task: prompt,
       agent: "worker",
       name: "btw",
       origin: "btw"
