@@ -1,4 +1,4 @@
-# 🌳 treepluss — Enhanced Session Tree Component for Pi
+# 🌳 treepluss: Enhanced Session Tree Component for Pi
 
 `treepluss` is a native [Pi coding agent](https://pi.dev) extension that enhances session tree visualization and interactive TUI turn rendering.
 

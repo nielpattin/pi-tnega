@@ -16,6 +16,7 @@ This document provides the full contributor workflow for developing and publishi
     - [`workflows`](./extensions/workflows): Primary profile-configured multi-agent orchestration, persistent child sessions, structured results, the `/workflows` dashboard, and the `/agents` profile editor.
     - [`pi-processes`](./extensions/pi-processes): Standalone retained process supervision and the `/processes` dashboard.
     - [`btw`](./extensions/btw): Independent side-chat and explicit parent-session handoff.
+    - [`pi-constellation`](./extensions/pi-constellation): Deterministic zero-LLM compaction and incremental session transcript inspection (`session_inspect`).
 - **Workflow & Automation Tools**:
     - `.githooks/`: Versioned Git hooks (`pre-commit` runs `lint-staged`); `prepare` points Git at them via `core.hooksPath`.
     - `.github/workflows/publish.yml`: GitHub Actions manual tag-based package publish workflow.
@@ -37,7 +38,11 @@ agent-root/
 │   ├── pi-permission-system      # permission system extension
 │   ├── pi-reference              # project references extension
 │   ├── pi-station                # published npm extension
-│   └── pi-workers                # worker jobs and process supervision extension
+│   ├── workflows                 # primary multi-agent orchestration
+│   ├── pi-processes              # standalone process supervision
+│   ├── btw                       # independent side-chat extension
+│   ├── pi-constellation          # deterministic compaction & session inspection
+│   └── shared                    # shared extension helpers
 ├── scripts/
 │   ├── release.mjs               # legacy per-package release orchestrator
 │   └── typecheck.mjs             # project-wide type check
@@ -83,7 +88,8 @@ Run scripts for individual packages from the root using `pnpm --dir`:
 
 ```bash
 pnpm --dir extensions/pi-permission-system check
-pnpm --dir extensions/pi-workers check
+pnpm --dir extensions/workflows check
+pnpm --dir extensions/pi-processes check
 pnpm --dir extensions/pi-station typecheck
 ```
 
@@ -117,7 +123,7 @@ pnpm --dir extensions/pi-station typecheck
 
 ## 5. Editing an Existing Package
 
-- **Raw TypeScript Extensions** (`pi-permission-system`, `pi-reference`, `pi-station`, `pi-workers`, and others):
+- **Raw TypeScript Extensions** (`pi-permission-system`, `pi-reference`, `pi-station`, `workflows`, `pi-processes`, `btw`, `pi-constellation`, and others):
     - Published directly as raw TypeScript source files (`.ts`).
     - Loaded by Pi harness at runtime via `jiti`. No `dist/` build step is required.
 - Ensure changes pass the applicable root checks (`pnpm lint`, `pnpm typecheck`, and `pnpm fmt`).

@@ -16,6 +16,7 @@ All extensions publish raw TypeScript source that Pi loads through jiti, so they
 | [workflows](./extensions/workflows)                       | Primary profile-configured multi-agent orchestration with phases, parallel fan-out, compaction-aware child sessions, structured output, profile editing, and the `/workflows` dashboard. | `<NONE>`                          |                                                             | 0.1.0   |
 | [pi-processes](./extensions/pi-processes)                 | Standalone retained process supervision, logs, readiness checks, lifecycle controls, and the `/processes` dashboard.                                                                     | `<NONE>`                          |                                                             | 0.1.0   |
 | [btw](./extensions/btw)                                   | Independent side-chat with explicit `/btw:inject` handoff.                                                                                                                               | `<NONE>`                          |                                                             | 0.1.0   |
+| [pi-constellation](./extensions/pi-constellation)         | Deterministic zero-LLM compaction and incremental session transcript inspection (`session_inspect`).                                                                                     | `<NONE>`                          |                                                             | 0.1.0   |
 
 ## Prerequisites
 
@@ -54,7 +55,9 @@ agent-root/
 │   ├── pi-station                # published npm extension
 │   ├── workflows                 # primary multi-agent orchestration
 │   ├── pi-processes              # standalone process supervision
-│   └── btw                       # independent side-chat extension
+│   ├── btw                       # independent side-chat extension
+│   ├── pi-constellation          # deterministic compaction & session inspection
+│   └── shared                    # shared extension helpers
 ├── scripts/                      # release and typecheck scripts
 ├── publish.sh                    # gh workflow dispatch helper
 ├── CHANGELOG.md                  # package changelog summary

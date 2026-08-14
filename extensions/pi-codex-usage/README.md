@@ -1,4 +1,4 @@
-# 📊 pi-codex-usage — OpenAI Codex Usage & Verbosity Control for Pi
+# 📊 pi-codex-usage: OpenAI Codex Usage & Verbosity Control for Pi
 
 `pi-codex-usage` is a native [Pi coding agent](https://pi.dev) extension for checking OpenAI Codex quota/usage and controlling response verbosity.
 

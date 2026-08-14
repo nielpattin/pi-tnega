@@ -52,8 +52,8 @@ pi /exa-login
 
 | command                        | description                                                                                                                        |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `/exa-login`                   | Writes your Exa API key to `.pi/agents/auth.json`                                                                                  |
-| `/exa-logout`                  | Removes your API key from `.pi/agents/auth.json`                                                                                   |
+| `/exa-login`                   | Writes your Exa API key to `~/.pi/agent/auth.json`                                                                                 |
+| `/exa-logout`                  | Removes your API key from `~/.pi/agent/auth.json`                                                                                  |
 | `/exa-status`                  | Shows the Pi Exa extension status                                                                                                  |
 | `/exa-advanced-search on\|off` | Toggles the advanced Exa web search tool                                                                                           |
 | `/exa-deep-search on\|off`     | Toggles the Exa deep search tool. Requires an Exa API key                                                                          |

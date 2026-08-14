@@ -1,4 +1,4 @@
-# 📋 copy-all — Active Session Clipboard Exporter for Pi
+# 📋 copy-all: Active Session Clipboard Exporter for Pi
 
 `copy-all` is a native [Pi coding agent](https://pi.dev) extension that copies the active post-compaction conversation window of the current session directly to your system clipboard.
 

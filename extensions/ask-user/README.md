@@ -1,4 +1,4 @@
-# ❓ ask-user — Multiple-Choice Question Tool for Pi
+# ❓ ask-user: Multiple-Choice Question Tool for Pi
 
 `ask-user` is a native [Pi coding agent](https://pi.dev) extension that gives the AI model the ability to ask the user structured, multiple-choice questions during a session.
 

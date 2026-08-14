@@ -1,4 +1,4 @@
-# 🎛️ pi-skill-toggle — Skill Invocation Toggle for Pi
+# 🎛️ pi-skill-toggle: Skill Invocation Toggle for Pi
 
 `pi-skill-toggle` is a native [Pi coding agent](https://pi.dev) extension that lets you interactively toggle whether skills are agent-invocable or manual-only.
 

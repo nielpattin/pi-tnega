@@ -1,4 +1,4 @@
-# 🔔 notification — Audio Completion Alerts for Pi
+# 🔔 notification: Audio Completion Alerts for Pi
 
 `notification` is a native [Pi coding agent](https://pi.dev) extension that plays audio completion notifications when agent tasks finish (`agent_end`).
 

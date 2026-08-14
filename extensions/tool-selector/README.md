@@ -1,4 +1,4 @@
-# 🛠️ tool-selector — Tool Status Inspector for Pi
+# 🛠️ tool-selector: Tool Status Inspector for Pi
 
 `tool-selector` is a native [Pi coding agent](https://pi.dev) extension that provides tool visibility and status inspection.
 

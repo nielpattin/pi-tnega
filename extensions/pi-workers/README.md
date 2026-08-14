@@ -1,6 +1,8 @@
-# 🤖 pi-workers — Concurrent Worker Delegation & Process Supervision for Pi
+# 🤖 pi-workers: Concurrent Worker Delegation & Process Supervision for Pi (Legacy Reference)
 
 `pi-workers` is a native [Pi coding agent](https://pi.dev) extension that provides sub-agent task delegation, multi-agent coordination, long-running process supervision, and an interactive TUI dashboard.
+
+> **Note:** Primary multi-agent orchestration has moved to [`workflows`](../workflows), standalone process supervision to [`pi-processes`](../pi-processes), and independent side-chat to [`btw`](../btw). `pi-workers` is retained as a reference implementation.
 
 ---
 
@@ -26,6 +28,13 @@
 | `worker_list`   | List active and historical worker jobs and their status.                             |
 | `worker_cancel` | Cancel a running worker job by ID (suppresses parent result delivery).               |
 
+### Worker Completion Tools (Child Sessions)
+
+| Tool                | Purpose                                                            |
+| ------------------- | ------------------------------------------------------------------ |
+| `structured_output` | Return final structured outcome (`summary` and Markdown `report`). |
+| `worker_error`      | Report an unrecoverable worker failure with an explicit reason.    |
+
 ### Process Supervision Tools
 
 | Tool               | Purpose                                                                             |
@@ -45,7 +54,7 @@
 | `/orchestrator [instructions]` | Switch the main agent into Orchestrator Mode to coordinate sub-tasks across concurrent workers.    |
 | `/workers`                     | Open the interactive TUI Workers Dashboard (or output a job/process table snapshot in print mode). |
 | `/agents`                      | View available agent profiles and open the agent profile configuration UI.                         |
-| `/btw <question>`              | Ask a side question to a background worker without interrupting the main conversation.             |
+| `/btw [question]`              | Open an independent Pi chat in a centered modal dialog.                                            |
 
 ---
 

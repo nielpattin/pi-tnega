@@ -24,7 +24,7 @@
     Examples:
 
     ```text
-    pnpm --dir extensions/pi-workers check
+    pnpm --dir extensions/workflows check
     ```
 
 - Run lint for a single extension from the repository root with:
@@ -63,12 +63,9 @@ The contributor monorepo workflow for creating and publishing packages lives in 
 
 ## Extension conventions
 
-- Every extension must have its entry point at `extensions/<extension-name-folder>/index.ts`.
-- Re-export each extension from `extensions/index.ts` with:
-
-    ```ts
-    export * from "./<extension-name>.ts";
-    ```
+- Multi-file extensions live in `extensions/<extension-name>/` with their entry point at `extensions/<extension-name>/index.ts`.
+- Single-file extensions live directly at `extensions/<extension-name>.ts`.
+- Shared cross-extension helpers live under `extensions/shared/`.
 
 ## Verification workflow
 
@@ -80,4 +77,4 @@ Follow this order for code changes:
 
 If linting or type checking fails, fix the problem and continue again from the failed step.
 
-When the change adds or alters extension behavior, follow `.pi/skills/tdd/SKILL.md` first: write the failing test in `tests/` (node:test, run with `node tests/<file>.mjs`), watch it fail, then make it pass..
+When the change adds or alters extension behavior, follow `.pi/skills/tdd/SKILL.md` first: write the failing test in `tests/` (node:test, run with `node tests/<file>.mjs`), watch it fail, then make it pass.

@@ -1,4 +1,4 @@
-# 🔐 pi-acks — Subscription OAuth Account Switcher for Pi
+# 🔐 pi-acks: Subscription OAuth Account Switcher for Pi
 
 `pi-acks` is a native [Pi coding agent](https://pi.dev) extension for keeping and switching named subscription OAuth accounts independently across supported providers.
 

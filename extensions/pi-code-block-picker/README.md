@@ -1,4 +1,4 @@
-# 📋 pi-code-block-picker — Conversation Code Block Selector for Pi
+# 📋 pi-code-block-picker: Conversation Code Block Selector for Pi
 
 `pi-code-block-picker` is a native [Pi coding agent](https://pi.dev) extension that extracts code blocks from session history and lets you fuzzy search and copy them directly to your clipboard.
 
