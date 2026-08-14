@@ -1,0 +1,17 @@
+{
+  "name": "@nielpattin/btw",
+  "version": "0.1.0",
+  "description": "Independent BTW side-chat extension for Pi.",
+  "main": "./index.ts",
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit -p tsconfig.json"
+  },
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.0",
+    "@earendil-works/pi-tui": "^0.84.0"
+  }
+}
