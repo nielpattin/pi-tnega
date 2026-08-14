@@ -8,6 +8,7 @@ type SessionMessage = {
    readonly toolCallId?: string;
    readonly toolName?: string;
    readonly isError?: boolean;
+   readonly errorMessage?: string;
    readonly output?: string;
 };
 
@@ -56,36 +57,41 @@ function messageEntries(entry: { readonly timestamp?: string; readonly message?:
    }
 
    if (message.role === "assistant") {
-      if (!Array.isArray(message.content)) return [];
-      return message.content.flatMap((block): JobTranscriptEntry[] => {
-         if (!block || typeof block !== "object") return [];
-         const value = block as {
-            readonly type?: string;
-            readonly text?: unknown;
-            readonly thinking?: unknown;
-            readonly id?: unknown;
-            readonly name?: unknown;
-            readonly arguments?: unknown;
-         };
-         if (value.type === "thinking" && typeof value.thinking === "string") {
-            return [{ type: "thinking", text: value.thinking, timestamp }];
-         }
-         if (value.type === "text" && typeof value.text === "string") {
-            return [{ type: "assistant", text: value.text, timestamp }];
-         }
-         if (value.type === "toolCall" && typeof value.id === "string" && typeof value.name === "string") {
-            return [
-               {
-                  type: "tool-call",
-                  toolCallId: value.id,
-                  toolName: value.name,
-                  arguments: value.arguments,
-                  timestamp
-               }
-            ];
-         }
-         return [];
-      });
+      const entries = Array.isArray(message.content)
+         ? message.content.flatMap((block): JobTranscriptEntry[] => {
+              if (!block || typeof block !== "object") return [];
+              const value = block as {
+                 readonly type?: string;
+                 readonly text?: unknown;
+                 readonly thinking?: unknown;
+                 readonly id?: unknown;
+                 readonly name?: unknown;
+                 readonly arguments?: unknown;
+              };
+              if (value.type === "thinking" && typeof value.thinking === "string") {
+                 return [{ type: "thinking", text: value.thinking, timestamp }];
+              }
+              if (value.type === "text" && typeof value.text === "string") {
+                 return [{ type: "assistant", text: value.text, timestamp }];
+              }
+              if (value.type === "toolCall" && typeof value.id === "string" && typeof value.name === "string") {
+                 return [
+                    {
+                       type: "tool-call",
+                       toolCallId: value.id,
+                       toolName: value.name,
+                       arguments: value.arguments,
+                       timestamp
+                    }
+                 ];
+              }
+              return [];
+           })
+         : [];
+      if (typeof message.errorMessage === "string" && message.errorMessage.length > 0) {
+         entries.push({ type: "error", text: message.errorMessage, timestamp });
+      }
+      return entries;
    }
 
    if (message.role === "toolResult") {

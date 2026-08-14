@@ -48,7 +48,7 @@ export interface AgentsPanelOptions {
    onAgentsChanged?: () => void | Promise<void>;
 }
 
-export const WORKER_LOCKED_TOOLS = new Set(["submit"]);
+export const WORKER_LOCKED_TOOLS = new Set(["structured_output", "worker_error"]);
 export const DISABLED_NESTED_TOOLS = new Set(["worker"]);
 
 export interface AgentsPanelViewModel {
@@ -812,9 +812,14 @@ export class FullScreenAgentsManager implements Component, Focusable {
             promptSnippet: "Stop process"
          },
          {
-            name: "submit",
-            description: "Submit final worker result or error (worker sessions).",
-            promptSnippet: "Submit job execution result"
+            name: "structured_output",
+            description: "Return the final structured worker result (worker sessions).",
+            promptSnippet: "Return structured worker result"
+         },
+         {
+            name: "worker_error",
+            description: "Report an unrecoverable worker failure (worker sessions).",
+            promptSnippet: "Report worker failure"
          },
          {
             name: "web_search_exa",

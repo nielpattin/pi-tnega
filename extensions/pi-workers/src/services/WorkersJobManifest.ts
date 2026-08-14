@@ -781,7 +781,7 @@ function parseTranscript(value: unknown): ReadonlyArray<JobTranscriptEntry> | un
       const timestamp = parseOptionalTimestamp(item);
       if ("timestamp" in item && timestamp === undefined) return undefined;
 
-      if (item.type === "user" || item.type === "thinking" || item.type === "assistant") {
+      if (item.type === "user" || item.type === "thinking" || item.type === "assistant" || item.type === "error") {
          if (!hasOnlyKeys(item, new Set(["type", "text", "timestamp"])) || !isPersistedString(item.text)) {
             return undefined;
          }

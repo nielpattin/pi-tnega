@@ -236,9 +236,11 @@ function compactToolResult(entry: Extract<JobTranscriptEntry, { type: "tool-resu
    ) {
       return `${mark} ${entry.toolName} (${count} ${count === 1 ? "line" : "lines"})`;
    }
-   if (entry.toolName === "submit") {
-      const preview = output || '{"ok":true,"status":"completed"}';
-      return `→ submit · ${preview}`;
+   if (entry.toolName === "structured_output") {
+      return output ? `→ structured_output · ${output}` : "→ structured_output";
+   }
+   if (entry.toolName === "worker_error") {
+      return `→ worker_error · ${output || "Worker failed"}`;
    }
    if (output) return `${mark} ${entry.toolName} · ${output}`;
 
@@ -312,8 +314,10 @@ function compactCombinedToolLine(
          case "process_list":
          case "bash":
             return text("command") ?? "";
-         case "submit":
+         case "structured_output":
             return "";
+         case "worker_error":
+            return text("error") ?? "";
          default: {
             const parts = [
                text("path"),
@@ -366,10 +370,14 @@ function compactCombinedToolLine(
             ? `${mark} ${toolName} ${callArgStr} (${count} ${count === 1 ? "line" : "lines"})`
             : `${mark} ${toolName} (${count} ${count === 1 ? "line" : "lines"})`;
       }
-      case "submit": {
+      case "structured_output": {
          const resText = result.content.find((c) => c.type === "text")?.text ?? "";
-         const parsedRes = compactPreview(resText, 80) || '{"ok":true,"status":"completed"}';
-         return `→ submit · ${parsedRes}`;
+         const parsedRes = compactPreview(resText, 80);
+         return parsedRes ? `→ structured_output · ${parsedRes}` : "→ structured_output";
+      }
+      case "worker_error": {
+         const resText = result.content.find((c) => c.type === "text")?.text ?? "";
+         return `→ worker_error · ${compactPreview(resText, 80) || "Worker failed"}`;
       }
       default: {
          if (JOB_TOOL_NAMES.has(toolName)) {
@@ -426,12 +434,15 @@ export function wrapTakeoverHelp(text: string, width: number, theme: Theme): str
    return wrapTextWithAnsi(theme.fg("dim", text), Math.max(1, width));
 }
 
-function getTakeoverHelpText(showThinking: boolean, unseenLines: number, isSettled = false): string {
+export const WRAP_UP_STEER_PROMPT =
+   "Wrap up your current task now. Stop further tool calls, finalize your work based on what has already been done, and submit your final response using structured_output.";
+
+export function getTakeoverHelpText(showThinking: boolean, unseenLines: number, isSettled = false): string {
    const scrollHint = unseenLines > 0 ? ` · ${unseenLines} new lines · End latest` : " · End latest";
    if (isSettled) {
       return `s copy transcript · t ${showThinking ? "collapse" : "expand"} thinking · ↑/↓ scroll · PageUp/PageDown${scrollHint} · Esc back`;
    }
-   return `Enter steer · Alt+Enter followUp · s copy transcript · t ${showThinking ? "collapse" : "expand"} thinking · ↑/↓ scroll · PageUp/PageDown${scrollHint} · Esc back`;
+   return `Enter steer · Alt+Enter followUp · w wrap up · s copy transcript · t ${showThinking ? "collapse" : "expand"} thinking · ↑/↓ scroll · PageUp/PageDown${scrollHint} · Esc back`;
 }
 
 export function applyTranscriptUpdate(
@@ -488,6 +499,8 @@ export function buildCompactTranscriptSummary(
             lines.push(`You: ${entry.text}`);
          } else if (entry.type === "assistant") {
             lines.push(entry.text);
+         } else if (entry.type === "error") {
+            lines.push(`Error: ${entry.text}`);
          } else if (entry.type === "thinking") {
             lines.push(`Thinking: ${entry.text}`);
          } else if (entry.type === "tool-call") {
@@ -560,6 +573,8 @@ export function buildJobTranscriptLines(
             pushWrapped(`You: ${entry.text}`, "accent");
          } else if (entry.type === "assistant") {
             pushWrapped(entry.text, "text");
+         } else if (entry.type === "error") {
+            pushWrapped(`Error: ${entry.text}`, "error");
          } else if (entry.type === "tool-call") {
             const result = entry.toolCallId
                ? transcript.find(
@@ -587,7 +602,10 @@ export function buildJobTranscriptLines(
       pushWrapped(resStr, "success");
    }
 
-   if (job.errorText) {
+   const transcriptHasJobError =
+      typeof job.errorText === "string" &&
+      transcript.some((entry) => entry.type === "error" && entry.text === job.errorText);
+   if (job.errorText && !transcriptHasJobError) {
       lines.push(theme.fg("dim", "--- Error ---"));
       pushWrapped(job.errorText, "error");
    }
@@ -729,6 +747,21 @@ export class TakeoverView implements Component, Focusable {
 
       if (data === "s" && canUseShortcuts) {
          void this.copyTranscriptToClipboard();
+         return;
+      }
+
+      if (data === "w" && canUseShortcuts && !settled) {
+         void runTool(
+            this.runtime,
+            WorkerManager.use((s) => s.controlJob(this.jobId, WRAP_UP_STEER_PROMPT, "steer"))
+         ).catch(() => {});
+         this.scrollState = moveTakeoverScroll(
+            this.scrollState,
+            "latest",
+            this.lastTranscriptLineCount,
+            this.viewportHeight()
+         );
+         this.tui.requestRender();
          return;
       }
 

@@ -15,7 +15,7 @@ export * from "./src/backends/agy.js";
 export * from "./src/backends/pi.js";
 export * from "./src/backends/pi-model.js";
 export * from "./src/tools/worker.js";
-export * from "./src/tools/submit.js";
+export * from "./src/tools/structured-output.js";
 export * from "./src/tools/jobs.js";
 export * from "./src/tools/process.js";
 export * from "./src/ui/formatters.js";

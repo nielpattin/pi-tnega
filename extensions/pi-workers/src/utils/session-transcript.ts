@@ -64,20 +64,24 @@ export function readSessionTranscript(sessionFile: string): ReadonlyArray<JobTra
       }
 
       if (role === "assistant") {
-         if (!Array.isArray(message.content)) continue;
-         for (const part of message.content) {
-            if (!isRecord(part)) continue;
-            if (part.type === "text" && typeof part.text === "string") {
-               transcript.push({ type: "assistant", text: part.text, timestamp });
-            } else if (part.type === "toolCall" && typeof part.id === "string" && typeof part.name === "string") {
-               transcript.push({
-                  type: "tool-call",
-                  toolCallId: part.id,
-                  toolName: part.name,
-                  arguments: part.arguments,
-                  timestamp
-               });
+         if (Array.isArray(message.content)) {
+            for (const part of message.content) {
+               if (!isRecord(part)) continue;
+               if (part.type === "text" && typeof part.text === "string") {
+                  transcript.push({ type: "assistant", text: part.text, timestamp });
+               } else if (part.type === "toolCall" && typeof part.id === "string" && typeof part.name === "string") {
+                  transcript.push({
+                     type: "tool-call",
+                     toolCallId: part.id,
+                     toolName: part.name,
+                     arguments: part.arguments,
+                     timestamp
+                  });
+               }
             }
+         }
+         if (typeof message.errorMessage === "string" && message.errorMessage.length > 0) {
+            transcript.push({ type: "error", text: message.errorMessage, timestamp });
          }
          continue;
       }

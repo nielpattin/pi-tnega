@@ -369,6 +369,10 @@ function transcriptEntryLines(entry: Details, expanded: boolean, theme: Theme): 
       const text = stringValue(entry.text) ?? "";
       return [theme.fg("accent", `${type}:`) + (text ? ` ${theme.fg("toolOutput", text)}` : "")];
    }
+   if (type === "error") {
+      const text = stringValue(entry.text) ?? "";
+      return [theme.fg("error", "error:") + (text ? ` ${theme.fg("error", text)}` : "")];
+   }
    if (type === "tool-call") {
       const toolName = stringValue(entry.toolName) ?? "tool";
       const args = expanded ? expandedOutput(entry.arguments) : JSON.stringify(entry.arguments ?? {});

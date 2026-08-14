@@ -134,7 +134,7 @@ export class WorkerManager extends Context.Service<WorkerManager, WorkerManagerS
 
          // Keep only transient live output. Pi takeover output comes directly
          // from the worker's persisted JSONL session; Pi uses this only as a
-         // completion fallback when a submit refers to earlier output.
+         // completion fallback when structured output refers to earlier output.
          const liveOutputState = new Map<string, { text?: string }>();
          const onLiveOutput = (jobId: string) => (text: string) => {
             liveOutputState.set(jobId, { text });
@@ -255,9 +255,6 @@ export class WorkerManager extends Context.Service<WorkerManager, WorkerManagerS
                      });
                   }
                }
-               if (spec.outputSchema && Option.isSome(schemaValidatorOpt)) {
-                  yield* schemaValidatorOpt.value.convertSchema(spec.outputSchema);
-               }
             }
 
             if (!skipSlot) {
@@ -301,10 +298,6 @@ export class WorkerManager extends Context.Service<WorkerManager, WorkerManagerS
                         thinking: spec.thinking ?? agentDef?.thinking,
                         tools: spec.tools ?? agentDef?.tools
                      };
-                  }
-
-                  if (spec.outputSchema && Option.isSome(schemaValidatorOpt)) {
-                     yield* schemaValidatorOpt.value.convertSchema(spec.outputSchema);
                   }
 
                   const resolvedModel = agentDef?.model;
@@ -447,7 +440,6 @@ export class WorkerManager extends Context.Service<WorkerManager, WorkerManagerS
                                  specTools: spec.tools,
                                  modelRegistry: options?.modelRegistry,
                                  inheritedModel: options?.inheritedModel,
-                                 outputSchema: spec.outputSchema,
                                  signal: startupController.signal,
                                  runEffect: (eff) =>
                                     Effect.runPromise(Effect.provide(eff as Effect.Effect<any, any>, workerContext)),

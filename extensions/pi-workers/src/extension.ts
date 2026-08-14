@@ -3,7 +3,7 @@
  *
  * Product gate (must be true before calling "done"):
  * - tools register with execute handlers that call WorkersLive + runTool
- * - commands register real handlers (workers/agents text, btw spawn)
+ * - commands register real handlers (workers/agents plus independent BTW chat)
  * - cutover fails closed without legacy force-excludes
  * - session_start enforces parent vs worker surfaces
  */
@@ -49,8 +49,7 @@ import {
    ProcessStartToolParamsSchema,
    ProcessStopToolParamsSchema
 } from "./tools/process.js";
-import { handleSubmit, SubmitToolParamsSchema } from "./tools/submit.js";
-import { handleBtwCommand, formatBtwResultEntry } from "./commands/btw.js";
+import { registerBtwCommand } from "./commands/btw.js";
 import { formatDuration, formatJobTable, formatProcessTable } from "./ui/formatters.js";
 import { buildAgentsPanelViewModel, openAgentsPanel } from "./ui/agents-panel.js";
 import { openWorkersDashboard } from "./ui/workers-dashboard.js";
@@ -149,27 +148,6 @@ function asErrorResult(message: string) {
       content: [{ type: "text" as const, text: message }],
       details: { ok: false, error: message }
    };
-}
-
-function registerWorkerTools(pi: ExtensionAPI, runtime: WorkersRuntime): void {
-   pi.registerTool({
-      name: "submit",
-      label: "Submit",
-      description: "Submit final worker execution result or error (worker sessions).",
-      parameters: SubmitToolParamsSchema,
-      async execute(_toolCallId, params, signal) {
-         try {
-            const jobId = (params as { jobId?: string }).jobId;
-            const result = await runTool(runtime, handleSubmit(params, { jobId }), {
-               signal,
-               interruptMessage: "submit aborted"
-            });
-            return asTextResult(result);
-         } catch (err) {
-            return asErrorResult(err instanceof Error ? err.message : String(err));
-         }
-      }
-   });
 }
 
 interface ParentToolDelivery {
@@ -513,58 +491,7 @@ function registerParentCommands(pi: ExtensionAPI, runtime: WorkersRuntime, deliv
       }
    });
 
-   pi.registerCommand("btw", {
-      description: "Ask a side question without consuming a normal agent slot",
-      handler: async (args, ctx) => {
-         const prompt = args.trim();
-         if (!prompt) {
-            if (ctx.hasUI) ctx.ui.notify("Usage: /btw <question>", "error");
-            return;
-         }
-
-         try {
-            const parentSessionFile = ctx.sessionManager.getSessionFile?.();
-            await runTool(runtime, ensureParentSessionRecovery(parentSessionFile));
-
-            const jobs = await runTool(
-               runtime,
-               JobRegistry.use((r) => r.list())
-            );
-            const activeBtwCount = jobs.filter(
-               (j: Job) => j.origin === "btw" && (j.status === "running" || j.status === "pending")
-            ).length;
-
-            const workerManager = await runTool(runtime, WorkerManager);
-            const result = await handleBtwCommand({
-               prompt,
-               parentSessionFile,
-               activeBtwCount,
-               workerManager
-            });
-
-            if (!result.ok) {
-               if (ctx.hasUI) ctx.ui.notify(result.message ?? "btw failed", "error");
-               return;
-            }
-
-            if (result.jobId) {
-               const job = await runTool(
-                  runtime,
-                  JobRegistry.use((r) => r.get(result.jobId!))
-               );
-               if (job) {
-                  const entry = formatBtwResultEntry(job);
-                  pi.appendEntry(entry.customType, entry.data);
-               }
-            }
-
-            if (ctx.hasUI) ctx.ui.notify(`btw started: ${result.jobId}`, "info");
-         } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            if (ctx.hasUI) ctx.ui.notify(message, "error");
-         }
-      }
-   });
+   registerBtwCommand(pi);
 }
 
 /**
@@ -578,9 +505,6 @@ export function registerWorkersExtension(pi: ExtensionAPI, options?: WorkersExte
    // Prefer explicit test injection; otherwise read real agent settings.json from disk.
    // ExtensionAPI has no getSettings(); previous code always saw [] and false-blocked cutover.
    const settingsExtensions = options?.settingsExtensions ?? loadSettingsExtensionsFromDisk();
-
-   // Worker tools always present (submit only).
-   registerWorkerTools(pi, runtime);
 
    pi.on("resources_discover", async (_event, _ctx) => {
       const promptsDir = join(dirname(fileURLToPath(import.meta.url)), "../prompts");
@@ -806,12 +730,6 @@ export function registerWorkersExtension(pi: ExtensionAPI, options?: WorkersExte
       const text = data?.text ?? JSON.stringify(data ?? {});
       return { render: () => [text] } as any;
    });
-   pi.registerEntryRenderer("btw-result", (entry) => {
-      const data = (entry as { data?: { text?: string; jobId?: string; status?: string } }).data;
-      const text = data?.text ?? JSON.stringify(data ?? {});
-      return { render: () => [`btw ${data?.jobId ?? ""} (${data?.status ?? "?"}): ${text}`] } as any;
-   });
-
    pi.on("session_start", async (_event: SessionStartEvent, ctx) => {
       // Print/worker child sessions: only worker tools.
       if (ctx.mode === "print" || !ctx.hasUI) {
@@ -822,7 +740,7 @@ export function registerWorkersExtension(pi: ExtensionAPI, options?: WorkersExte
          const workerOnly = pi
             .getAllTools()
             .map((t) => t.name)
-            .filter((name) => name === "submit" || name === "bash");
+            .filter((name) => name === "structured_output" || name === "worker_error" || name === "bash");
          try {
             pi.setActiveTools(workerOnly);
          } catch {
@@ -890,13 +808,6 @@ export function registerWorkersExtension(pi: ExtensionAPI, options?: WorkersExte
       // Refresh worker tool metadata with the enabled agents for this cwd before the system prompt is built.
       const workerAugmentation = await resolveWorkerToolAugmentation(runtime, ctx.cwd);
       pi.registerTool(createWorkerToolDefinition(runtime, delivery, workerAugmentation));
-
-      try {
-         const normalTools = pi.getActiveTools().filter((name) => name !== "submit");
-         pi.setActiveTools(normalTools);
-      } catch {
-         // session_start may run before active-tool mutation is available in some hosts.
-      }
    });
 
    pi.on("before_agent_start", (event) => {

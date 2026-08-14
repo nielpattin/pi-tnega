@@ -32,7 +32,7 @@ Maintain focus on the assigned work. Do not deviate from it.
 
 ## Result
 
-Return the complete, self-contained result through the \`submit\` tool. The submitted data must contain every detail the parent needs. Never refer to text above, prior assistant prose, or the worker transcript.`;
+Return the complete, self-contained result through the \`structured_output\` tool (providing \`summary\` and detailed Markdown \`report\`). The structured data must contain every detail the parent needs. Use \`worker_error\` only when the assignment cannot be completed. Never refer to text above, prior assistant prose, or the worker transcript.`;
 
 export const GOOD_AGENT_BODY = `# GOOD AGENT
 
@@ -80,7 +80,7 @@ You excel at difficult implementation challenges: multi-file features, deep root
 
 ## Result
 
-Return the complete, self-contained result through the \`submit\` tool. Include every detail the parent needs directly inside result data. Never refer to text above, previous prose, or the worker transcript.`;
+Return the complete, self-contained result through the \`structured_output\` tool (providing \`summary\` and detailed Markdown \`report\`). Include every detail the parent needs directly inside its structured arguments. Use \`worker_error\` only when the assignment cannot be completed. Never refer to text above, previous prose, or the worker transcript.`;
 
 export const SCOUT_AGENT_BODY = `# SCOUT AGENT
 
@@ -147,7 +147,7 @@ export const BUILTIN_AGENTS: Record<string, AgentDefinition> = {
       name: "fast",
       display_name: "fast",
       description: "Lightweight worker for quick research and small implementation work.",
-      tools: ["read", "write", "edit", "bash", "ffgrep", "fffind", "submit"],
+      tools: ["read", "write", "edit", "bash", "ffgrep", "fffind", "structured_output", "worker_error"],
       guidance: "Use for quick research and light implementation work.",
       harness: "pi",
       enabled: true,
@@ -158,7 +158,7 @@ export const BUILTIN_AGENTS: Record<string, AgentDefinition> = {
       name: "good",
       display_name: "good",
       description: "Full-capability worker for complex implementation work.",
-      tools: ["read", "write", "edit", "bash", "ffgrep", "fffind", "web_search_exa", "web_fetch_exa", "submit"],
+      tools: ["read", "write", "edit", "bash", "ffgrep", "fffind", "structured_output", "worker_error"],
       guidance: "Use for complex implementation work and edge-case verification.",
       harness: "pi",
       enabled: true,
@@ -169,7 +169,7 @@ export const BUILTIN_AGENTS: Record<string, AgentDefinition> = {
       name: "scout",
       display_name: "scout",
       description: "Read-only codebase research agent for rapid exploration and analysis.",
-      tools: ["read", "ffgrep", "fffind", "web_search_exa", "web_fetch_exa", "submit"],
+      tools: ["read", "ffgrep", "fffind", "structured_output", "worker_error"],
       guidance: "Read-only research scout returning compressed context.",
       harness: "pi",
       enabled: true,
@@ -180,7 +180,7 @@ export const BUILTIN_AGENTS: Record<string, AgentDefinition> = {
       name: "worker",
       display_name: "worker",
       description: "General-purpose worker for delegated implementation work with full tool access.",
-      tools: ["read", "write", "edit", "bash", "ffgrep", "fffind", "web_search_exa", "web_fetch_exa", "submit"],
+      tools: ["read", "write", "edit", "bash", "ffgrep", "fffind", "structured_output", "worker_error"],
       guidance: "Use for delegated implementation work that needs full tools.",
       harness: "pi",
       enabled: true,
@@ -191,7 +191,7 @@ export const BUILTIN_AGENTS: Record<string, AgentDefinition> = {
       name: "reviewer",
       display_name: "reviewer",
       description: "Code review agent that evaluates git changes and PR diffs.",
-      tools: ["read", "ffgrep", "fffind", "web_search_exa", "web_fetch_exa", "submit"],
+      tools: ["read", "ffgrep", "fffind", "structured_output", "worker_error"],
       guidance: "Review agent evaluating code diffs and safety boundaries.",
       harness: "pi",
       enabled: true,

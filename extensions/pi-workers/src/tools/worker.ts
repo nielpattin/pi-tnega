@@ -36,8 +36,7 @@ export const WorkerSpecSchema = Type.Object({
    agent: Type.String({
       minLength: 1,
       description: "Required enabled agent profile name listed in the current worker_spawn tool metadata."
-   }),
-   outputSchema: Type.Optional(Type.Unknown({ description: "Raw JSON Schema used to validate the worker result." }))
+   })
 });
 
 const batchContextSchema = Type.Optional(
@@ -110,7 +109,7 @@ export const WORKER_SPAWN_TOOL_BASE_DESCRIPTION = [
    'Use this input: { workers: [{ task: "prompt", name: "short-title", agent, ... }], context? }.',
    "The workers array must contain 1 to 4 worker specifications.",
    "The parent session receives a spawned acknowledgement immediately.",
-   "Each worker runs independently and submits a worker result when it completes.",
+   "Each worker runs independently and returns a worker result when it completes.",
    "Parent delivery presents worker results to the parent session automatically.",
    "The worker name is a display label. The returned id is the worker identity.",
    "Each worker's agent field selects an enabled agent profile."

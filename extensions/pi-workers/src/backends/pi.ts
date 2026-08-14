@@ -124,6 +124,8 @@ export function ensureAutoCompactionEnabled(settingsManager: SettingsManager): v
    settingsManager.applyOverrides({ compaction: { enabled: true } });
 }
 
+export const WORKER_COMPLETION_TOOL_NAMES = ["structured_output", "worker_error"] as const;
+
 export function configureChildTools(
    childSession: {
       getAllTools: () => Array<{ name: string }>;
@@ -132,10 +134,12 @@ export function configureChildTools(
    allowedTools: readonly string[]
 ) {
    const available = new Set(childSession.getAllTools().map((t) => t.name));
-   if (!available.has("submit")) {
-      throw new Error("Workers submit tool is unavailable");
+   for (const toolName of WORKER_COMPLETION_TOOL_NAMES) {
+      if (!available.has(toolName)) {
+         throw new Error(`Workers ${toolName} tool is unavailable`);
+      }
    }
-   const requested = [...allowedTools, "submit", "bash"];
+   const requested = [...allowedTools, ...WORKER_COMPLETION_TOOL_NAMES, "bash"];
    const filtered = [...new Set(requested)].filter((tool) => available.has(tool));
    childSession.setActiveToolsByName(filtered);
 }
@@ -158,7 +162,6 @@ export class PiSessionRunner {
    private settled = false;
    private compacting = false;
    private retrying = false;
-   private correctiveSubmit = false;
 
    constructor(private options: PiSessionRunnerOptions) {}
 
@@ -188,35 +191,22 @@ export class PiSessionRunner {
          return;
       }
 
-      if (event?.type === "tool_execution_end" && event?.toolName === "submit") {
+      if (
+         event?.type === "tool_execution_end" &&
+         (event?.toolName === "structured_output" || event?.toolName === "worker_error")
+      ) {
          if (event.isError === true || event.result?.isError === true) {
             return;
          }
          const details = event.result?.details ?? event.result;
-         if (details?.ok === false) {
-            if (this.isSchemaRejection(details)) {
-               this.correctiveSubmit = true;
-            }
+         if (event.toolName === "worker_error") {
+            const error = event.args?.error ?? details?.error;
+            this.settle("failed", undefined, String(error ?? "Worker failed"));
             return;
          }
-         if (details?.status === "failed") {
-            this.settle(
-               "failed",
-               undefined,
-               String(details.result?.error ?? details.errorText ?? details.error ?? "Worker submission failed")
-            );
-            return;
-         }
-         const result = event.args?.result ?? details?.result;
-         if (result && typeof result === "object") {
-            if ("data" in result) {
-               this.settle("completed", result.data);
-               return;
-            }
-            if ("error" in result) {
-               this.settle("failed", undefined, String(result.error));
-               return;
-            }
+         const result = details?.data ?? event.args;
+         if (result !== undefined) {
+            this.settle("completed", result);
          }
          return;
       }
@@ -227,7 +217,7 @@ export class PiSessionRunner {
          }
          const lastAssistant = this.lastAssistantMessage(event);
          // Pi handles context overflow via auto-compaction rather than terminal failure.
-         // Do not treat an overflow (explicit error or silent window exceedance) as a missing submit.
+         // Do not treat an overflow (explicit error or silent window exceedance) as a missing completion.
          if (lastAssistant && isContextOverflow(lastAssistant, this.options.modelContextWindow)) {
             return;
          }
@@ -247,9 +237,6 @@ export class PiSessionRunner {
             this.settle("failed", undefined, errorText);
             return;
          }
-         if (this.correctiveSubmit) {
-            return;
-         }
          this.tryRemind();
       }
    }
@@ -261,17 +248,6 @@ export class PiSessionRunner {
       );
    }
 
-   private isSchemaRejection(details: any): boolean {
-      const errorText = typeof details?.error === "string" ? details.error : "";
-      const normalized = errorText.toLowerCase();
-      return (
-         normalized.includes("schema validation") ||
-         normalized.includes("schema conversion") ||
-         normalized.includes("failed to convert json schema") ||
-         normalized === "schema document must be an object."
-      );
-   }
-
    private tryRemind(): void {
       if (this.settled || this.compacting || this.retrying) {
          return;
@@ -279,7 +255,7 @@ export class PiSessionRunner {
       if (this.reminderCount < 3) {
          this.reminderCount++;
          const reminder =
-            "Your previous response did not complete the worker. Do not explain or summarize. Call submit now.";
+            "Your previous response did not complete the worker. Do not explain or summarize. Call structured_output now, or call worker_error if the assignment cannot be completed.";
          if (this.options.session.followUp) {
             Promise.resolve(this.options.session.followUp(reminder)).catch(() => {});
          } else {
@@ -289,7 +265,7 @@ export class PiSessionRunner {
             });
          }
       } else {
-         this.settle("failed", undefined, "Job ended with missing submit after 3 reminders");
+         this.settle("failed", undefined, "Job ended without structured output after 3 reminders");
       }
    }
 
@@ -321,37 +297,39 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { deriveChildSessionDirectory } from "../utils/child-session-dir.js";
 import { resolvePiModel, mapThinkingLevel } from "./pi-model.js";
-import { createSubmitToolParamsSchema, handleSubmit } from "../tools/submit.js";
+import {
+   createStructuredOutputToolParamsSchema,
+   createWorkerErrorTool,
+   handleStructuredOutput
+} from "../tools/structured-output.js";
 
-export function createWorkerSubmitTool(
+export function createWorkerStructuredOutputTool(
    runEffect: <A, E>(effect: Effect.Effect<A, E, any>) => Promise<A>,
-   jobId: string,
-   expectedSchema?: unknown
+   jobId: string
 ) {
    return {
-      name: "submit",
-      label: "Submit",
+      name: "structured_output",
+      label: "Structured Output",
       description:
-         "Submit the complete self-contained worker result or error. result.data must contain every detail the parent needs, match the schema shown in this tool's parameters when one is provided, and never refer to text above or the private worker transcript. This is the only valid way to complete a worker. If submit returns validation errors, correct the result data and call submit again through the same tool.",
-      promptSnippet: "Use submit as the final action to complete the worker.",
+         "Return the final worker result as a structured summary and detailed Markdown report. Call this exactly once as the final action. Do not emit a final assistant answer before or after it. If the result cannot be produced, call worker_error instead.",
+      promptSnippet: "Return the final structured worker result.",
       promptGuidelines: [
-         "Use submit exactly once as the final action after completing the worker.",
-         "Use submit with { result: { data: ... } } for success or { result: { error: ... } } for failure.",
-         "Use submit result.data for the full self-contained answer matching the tool schema, not a short summary or a reference to previous assistant prose.",
-         "Do not emit a final assistant answer before or after calling submit.",
-         "If submit returns schema validation errors, correct the result data and call submit again through the same tool."
+         "Call structured_output exactly once as the final action after completing the worker.",
+         "Pass summary and report fields containing your final findings in Markdown prose.",
+         "Do not emit a final assistant answer before or after calling structured_output.",
+         "Call worker_error instead only when the assignment cannot be completed."
       ],
-      parameters: createSubmitToolParamsSchema(expectedSchema),
-      async execute(_toolCallId: string, params: any) {
-         const res = await runEffect(handleSubmit(params, { jobId, expectedSchema, settleJob: false }));
+      parameters: createStructuredOutputToolParamsSchema(),
+      async execute(_toolCallId: string, params: unknown) {
+         const res = await runEffect(handleStructuredOutput(params, { jobId, settleJob: false }));
          if (!res || typeof res !== "object" || !("ok" in res) || res.ok !== true) {
             const errorMessage =
-               res && typeof res === "object" && "error" in res ? String(res.error) : "Submission rejected";
+               res && typeof res === "object" && "error" in res ? String(res.error) : "Output rejected";
             throw new Error(errorMessage);
          }
          return {
-            content: [{ type: "text" as const, text: JSON.stringify(res) }],
-            details: { ...res, result: params.result },
+            content: [],
+            details: res,
             terminate: true as const
          };
       }
@@ -373,7 +351,6 @@ export interface SpawnPiSessionOptions {
    };
    specThinking?: string;
    specTools?: readonly string[];
-   outputSchema?: unknown;
    modelRegistry?: any;
    modelRuntime?: any;
    inheritedModel?: { provider: string; id: string };
@@ -392,24 +369,6 @@ export interface SpawnPiSessionOptions {
    resourceLoader?: DefaultResourceLoader;
 }
 
-/** Strong worker-only completion contract, shared by the Pi backend and extension prompt assembly. */
-export const PI_WORKER_SUBMIT_MANDATE = `## MANDATORY COMPLETION CONTRACT
-
-YOU ARE A WORKER. YOUR TURN MUST END WITH A CALL TO THE submit TOOL.
-
-THERE IS NO VALID FINAL TEXT RESPONSE, MESSAGE, SUMMARY, OR EXPLANATION.
-
-DO NOT WRITE A FINAL ASSISTANT ANSWER. DO NOT SAY "DONE". DO NOT EXPLAIN OR SUMMARIZE IN PROSE.
-
-THE ONLY VALID COMPLETION IS:
-
-- submit { "result": { "data": <complete answer> } } for success
-- submit { "result": { "error": "<message>" } } for failure
-
-WHEN THE WORK IS COMPLETE, IMMEDIATELY CALL submit. YOUR TEXT IS DISCARDED; ONLY SUBMITTED DATA REACHES THE PARENT.
-
-Submit a complete, self-contained result with every detail the parent needs. Include detailed findings, decisions, paths, changes, verification, risks, and next steps directly inside result.data as applicable. Never refer to text above, previous prose, or the worker transcript. Do not submit a short summary that omits the detailed answer. If the worker specifies an outputSchema, submit.result.data must validate against it before the worker can complete. If submit returns validation errors, correct the result data and call submit again through the same tool.`;
-
 /** Internal delimiters removed after Pi Workers reorders a worker prompt around Pi's native sections. */
 export const PI_WORKER_PROMPT_PREFIX_START = "<!-- pi-workers-worker-prompt-prefix -->";
 export const PI_WORKER_AGENT_BODY_START = "<!-- pi-workers-worker-agent-body -->";
@@ -424,6 +383,11 @@ function stripPiDefaultRolePrompt(systemPrompt: string): string {
    return systemPrompt.slice(PI_DEFAULT_ROLE_PROMPT.length).trimStart();
 }
 
+/** Append a user-turn completion instruction after assignments that may request prose output. */
+export function buildWorkerTaskPrompt(prompt: string) {
+   return `${prompt}\n\n## WORKER COMPLETION REQUIREMENT\nWhen the assignment is complete, call structured_output with summary and report fields as your final action. Do not return the completed answer as assistant prose. If the assignment cannot be completed, call worker_error instead.`;
+}
+
 /** Move the selected worker body and contract ahead of Pi's native prompt sections. */
 export function buildWorkerSystemPrompt(systemPrompt: string): string {
    const prefixStart = systemPrompt.indexOf(PI_WORKER_PROMPT_PREFIX_START);
@@ -433,15 +397,14 @@ export function buildWorkerSystemPrompt(systemPrompt: string): string {
       bodyEnd < 0 ? -1 : systemPrompt.indexOf(PI_WORKER_PROMPT_PREFIX_END, bodyEnd + PI_WORKER_AGENT_BODY_END.length);
 
    if (prefixStart < 0 || prefixEnd < 0 || bodyStart < 0 || bodyEnd < 0) {
-      return `${PI_WORKER_SUBMIT_MANDATE}\n\n${stripPiDefaultRolePrompt(systemPrompt).trim()}`;
+      return stripPiDefaultRolePrompt(systemPrompt).trim();
    }
 
    const workerBody = systemPrompt.slice(bodyStart + PI_WORKER_AGENT_BODY_START.length, bodyEnd).trim();
    const nativePrompt = stripPiDefaultRolePrompt(
       `${systemPrompt.slice(0, prefixStart)}${systemPrompt.slice(prefixEnd + PI_WORKER_PROMPT_PREFIX_END.length)}`
    ).trim();
-   const workerPrefix = workerBody ? `${workerBody}\n\n${PI_WORKER_SUBMIT_MANDATE}` : PI_WORKER_SUBMIT_MANDATE;
-   return `${workerPrefix}\n\n${nativePrompt}`;
+   return workerBody ? `${workerBody}\n\n${nativePrompt}` : nativePrompt;
 }
 
 function buildWorkerInstructions(body: string | undefined): string {
@@ -450,7 +413,6 @@ function buildWorkerInstructions(body: string | undefined): string {
       PI_WORKER_AGENT_BODY_START,
       body?.trim(),
       PI_WORKER_AGENT_BODY_END,
-      PI_WORKER_SUBMIT_MANDATE,
       PI_WORKER_PROMPT_PREFIX_END
    ]
       .filter((part): part is string => typeof part === "string" && part.length > 0)
@@ -524,7 +486,8 @@ export async function spawnPiSession(options: SpawnPiSessionOptions) {
    const thinkingHint = options.specThinking ?? options.agentDef?.thinking;
    const thinkingLevel = thinkingHint ? mapThinkingLevel(thinkingHint) : undefined;
 
-   const submitTool = createWorkerSubmitTool(options.runEffect, options.jobId, options.outputSchema);
+   const structuredOutputTool = createWorkerStructuredOutputTool(options.runEffect, options.jobId);
+   const workerErrorTool = createWorkerErrorTool();
 
    const createSessionOptions: any = {
       cwd,
@@ -532,8 +495,8 @@ export async function spawnPiSession(options: SpawnPiSessionOptions) {
       sessionManager,
       settingsManager,
       resourceLoader: loader,
-      customTools: [submitTool],
-      excludeTools: ["worker_spawn", "worker_spawn"]
+      customTools: [structuredOutputTool, workerErrorTool],
+      excludeTools: ["worker_spawn"]
    };
 
    if (model) {
@@ -669,7 +632,7 @@ export async function spawnPiSession(options: SpawnPiSessionOptions) {
       : undefined;
 
    Promise.resolve()
-      .then(() => childSession.prompt(options.prompt))
+      .then(() => childSession.prompt(buildWorkerTaskPrompt(options.prompt)))
       .catch((error) => {
          const status = options.signal?.aborted ? "cancelled" : "failed";
          const errorText = error instanceof Error ? error.message : String(error);

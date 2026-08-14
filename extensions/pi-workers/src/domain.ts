@@ -22,6 +22,7 @@ export type JobTranscriptEntry =
    | { readonly type: "user"; readonly text: string; readonly timestamp?: number }
    | { readonly type: "thinking"; readonly text: string; readonly timestamp?: number }
    | { readonly type: "assistant"; readonly text: string; readonly timestamp?: number }
+   | { readonly type: "error"; readonly text: string; readonly timestamp?: number }
    | {
         readonly type: "tool-call";
         readonly toolCallId: string;
@@ -130,7 +131,6 @@ export interface WorkerSpec {
    systemPrompt?: string;
    cwd?: string;
    readonly context?: string;
-   outputSchema?: unknown;
 }
 
 // --- Tagged Error Classes (Effect Schema) ---
@@ -207,15 +207,14 @@ export function formatProcessId(seq: number): string {
 
 export function normalizeWorkerSpecs(params: {
    readonly workers?: ReadonlyArray<
-      { readonly task?: string; readonly worker?: string } & Pick<WorkerSpec, "name" | "agent" | "outputSchema">
+      { readonly task?: string; readonly worker?: string } & Pick<WorkerSpec, "name" | "agent">
    >;
 }): WorkerSpec[] {
    return (
       params.workers?.map((spec) => ({
          task: spec.task ?? spec.worker ?? "",
          name: spec.name,
-         agent: spec.agent,
-         outputSchema: spec.outputSchema
+         agent: spec.agent
       })) ?? []
    );
 }
