@@ -1,43 +1,27 @@
-# ⚡ workflows — Multi-Agent JavaScript Workflow DSL for Pi
+# workflows
 
-`workflows` is a native [Pi coding agent](https://pi.dev) extension for multi-agent orchestration, fan-out sub-task execution, and structured result aggregation using an inline JavaScript DSL.
+`workflows` is Pi's primary multi-agent orchestration extension. It runs model-authored JavaScript workflows in a permission-restricted child process and exposes isolated profile-configured agents, phases, parallel fan-out, structured results, persistence, a profile editor, and a workflow dashboard.
 
----
+## Features
 
-## ✨ Features
+- Sandboxed inline JavaScript orchestration with `phase()`, `agent()`, `parallel()`, and `args`.
+- Bounded parallel execution with a maximum of four active agents and 32 calls per run.
+- Profile-based child agents. Workflow scripts select `fast`, `good`, `scout`, or `reviewer` instead of selecting models, providers, or thinking effort directly.
+- Profile settings control tools, instructions, model selection, and thinking level.
+- Schema-driven `structured_output` results with a hardened final-action prompt contract and the existing `{ ok, output, structured, error }` result contract.
+- Compaction-aware child sessions that tolerate provider retries and recoverable context overflow.
+- Persistent Pi child sessions scoped to the parent Pi session when a parent session file exists.
+- Workflow artifacts under `~/.pi/agent/workflows/<runId>/` for scripts, arguments, results, transcripts, and recovery metadata.
+- Blocking and background runs with automatic follow-up delivery.
+- `/workflows` dashboard for phases, agents, transcripts, usage, and recovered runs.
+- `/agents` profile listing and fullscreen profile editor with save, toggle, create, delete, and prompt editing.
 
-- **Inline JavaScript Orchestration DSL**: Write declarative workflow scripts specifying execution phases, concurrent agent tasks, and structured schema validations.
-- **Parallel Fan-Out Execution**: Run up to 4 child agent tasks in parallel with bounded concurrency and automatic schema validation.
-- **Background Execution**: Launch workflows asynchronously in background mode (`background: true`) and monitor progress via TUI status views.
-- **Interactive TUI Dashboard**: Monitor active and historical workflow runs via `/workflows`.
-
----
-
-## 🛠️ Tools
-
-| Tool       | Purpose                                                        |
-| ---------- | -------------------------------------------------------------- |
-| `workflow` | Execute an inline JavaScript multi-agent orchestration script. |
-
-> **Usage Note**: The AI model calls `workflow` when multi-step fan-out orchestration is requested or when the user invokes `ultracode`.
-
----
-
-## 🚀 Commands
-
-| Command              | Description                                                                     |
-| -------------------- | ------------------------------------------------------------------------------- |
-| `/workflows`         | List active and historical workflow runs in an interactive TUI dashboard.       |
-| `/workflows <runId>` | Open detailed execution view and step-by-step logs for a specific workflow run. |
-
----
-
-## 📐 Workflow DSL Example
+## Workflow DSL
 
 ```js
 export const meta = {
     name: "reliability-review",
-    description: "Review modules for reliability risks, then report",
+    description: "Review modules and summarize the findings",
     phases: [{ title: "Scan" }, { title: "Report" }]
 };
 
@@ -56,6 +40,7 @@ const scans = await parallel(
     args.files.map(
         (file) => () =>
             agent(`Review ${file} for correctness and reliability risks.`, {
+                agent: "scout",
                 label: `scan:${file}`,
                 phase: "Scan",
                 schema: FINDINGS
@@ -63,11 +48,11 @@ const scans = await parallel(
     )
 );
 
-const findings = scans.filter((r) => r.ok).map((r) => r.structured);
+const findings = scans.filter((result) => result.ok).map((result) => result.structured);
 
 phase("Report");
-
 const report = await agent(`Summarize these findings: ${JSON.stringify(findings)}`, {
+    agent: "good",
     label: "report",
     phase: "Report"
 });
@@ -78,20 +63,30 @@ return {
 };
 ```
 
----
+`agent()` defaults to the `good` profile when `agent` is omitted. It never throws into the workflow script. Always inspect `result.ok` before using `result.output` or `result.structured`.
 
-## 🛡️ Safety & Execution Limits
+## Persistence and recovery
 
-- **Max Agent Calls**: 32 total agent invocations per workflow run.
-- **Max Concurrency**: Bounded at 4 concurrent agents.
-- **Execution Sandbox**: Disables `import`, `eval`, timers, network, or raw filesystem access inside workflow scripts.
-- **Process Cleanup**: Ensures clean sub-process tree termination across Windows, macOS, and Linux.
+Workflow metadata is stored under `~/.pi/agent/workflows/<runId>/`. When the parent Pi session is persisted, each child agent also receives a persistent Pi session file in the parent-scoped child-session directory. The workflow dashboard can inspect recovered transcripts, usage, profile, model, and session metadata.
 
----
+Recovery marks interrupted runs as aborted. It never silently resumes provider work.
 
-## 📦 Installation
+## Commands
 
-To load `workflows` in Pi, add `extensions/workflows` to your workspace extension list, or try it directly from the repository root:
+- `/workflows` opens the workflow run dashboard in a full-size screen. Regular TUI mode uses an alternate terminal buffer; fullscreen mode reuses Pi's existing alternate buffer without nesting one.
+- `/workflows <runId>` opens one run.
+- In an agent transcript, `s` copies the transcript, `y`/`p` copies the child session path, `t` toggles thinking, `Ctrl+S` toggles the system prompt, and the mouse wheel scrolls three lines per step.
+- `/agents` opens the profile editor in the TUI, or lists profiles in non-interactive mode.
+
+## Safety limits
+
+- Maximum four concurrent agents per workflow.
+- Maximum 32 agent calls per workflow.
+- Workflow source, arguments, IPC messages, and results are byte bounded.
+- Workflow scripts cannot import modules, evaluate dynamic code, access the filesystem, access the network, start processes, invoke interactive questions, or recursively start workflows.
+- Child tool calls and first responses have bounded timeouts.
+
+## Installation
 
 ```bash
 pi -e ./extensions/workflows

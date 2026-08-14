@@ -5,7 +5,7 @@
 
 import * as os from "node:os";
 import { truncateHead, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { formatContextUtilization } from "./shared/context-utilization.ts";
+import { formatContextUtilization } from "../shared/context-utilization.ts";
 import { safeStringify } from "./serialization.ts";
 
 export type Theme = ExtensionContext["ui"]["theme"];
@@ -61,13 +61,26 @@ export interface AgentRecord {
    label: string;
    phase?: string;
    state: AgentState;
+   /** Named profile used to configure this agent. */
+   profile?: string;
+   provider?: string;
    model?: string;
+   /** Persistent child Pi session identifier, when available. */
+   sessionId?: string;
+   /** Persistent child Pi session file, when available. */
+   sessionFile?: string;
+   /** Working directory used by the child Pi session. */
+   cwd?: string;
+   /** Effective system prompt used by the child Pi session, when available. */
+   systemPrompt?: string;
    /** Context capacity of the active model used for this agent. */
    contextWindow?: number;
    startedAt: number;
    finishedAt?: number;
    error?: string;
    preview: string;
+   /** Final output or structured result returned by this agent, if available. */
+   result?: unknown;
    usage: AgentUsage;
    /** Normalized, serializable subagent conversation shown by /workflows. */
    transcript: TranscriptEntry[];
@@ -77,6 +90,8 @@ export interface WorkflowDetails {
    runId: string;
    /** Pi session that launched this run. */
    sessionId?: string;
+   /** Persisted parent session file that owns this run, when available. */
+   parentSessionFile?: string;
    name?: string;
    description?: string;
    background: boolean;
@@ -120,6 +135,13 @@ export function statusColor(status: WorkflowStatus): "success" | "warning" | "er
 export function shortenHome(p: string): string {
    const home = os.homedir();
    return p.startsWith(home) ? `~${p.slice(home.length)}` : p;
+}
+
+export function formatAgentModel(agent: Pick<AgentRecord, "provider" | "model">): string | undefined {
+   if (!agent.model) return agent.provider;
+   if (!agent.provider) return agent.model;
+   if (agent.model.startsWith(`${agent.provider}/`)) return agent.model;
+   return `${agent.provider}/${agent.model}`;
 }
 
 export function formatTokens(count: number): string {

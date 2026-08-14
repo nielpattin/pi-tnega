@@ -15,20 +15,20 @@ export const WORKFLOW_TOOL_DESCRIPTION = [
    "Run a multi-agent workflow from a JavaScript orchestration script you write inline. Use this when a task benefits from fanning work out across several isolated subagents in ordered phases (research fan-out, per-file review, verify-then-synthesize pipelines).",
    "The script runs as an async function body with these primitives:",
    "• export const meta = { name, description, phases: [{ title, detail? }] } — metadata for the progress UI. Declare all phases up front.",
-   "• phase(title) — mark the current phase at runtime (use titles from meta.phases).",
-   "• await agent(prompt, { label?, phase?, schema?, model?, provider?, effort? }) — run ONE subagent in an isolated context and wait for it. Always resolves to { ok, output, structured?, error? }. Check `ok` before using the result. When you pass a JSON `schema`, `structured` holds the validated object on success. `model`/`provider` override the session model; `effort` sets the thinking level (off|minimal|low|medium|high|xhigh|max). Children receive normal built-ins and trust-appropriate extensions, settings, skills, and AGENTS.md context, but cannot recursively orchestrate or ask the user.",
+   "• phase(title) — mark the current phase at runtime (use titles from meta.phases). Do not declare or call a phase without an agent assigned to it. For a one-agent workflow, use one phase and do not add an empty final summarize phase.",
+   "• await agent(prompt, { agent?, label?, phase?, schema? }) — run ONE subagent in an isolated context and wait for it. Every agent must finish with structured_output. The profile defaults to `good` and controls the model, thinking level, tools, and instructions. Always resolves to { ok, output, structured?, error? }. Check `ok` before using the result. A custom JSON `schema` controls structured; without one, structured uses { output: string }. Children receive built-in tools, settings, skills, and AGENTS.md context, but do not load workspace extensions, cannot recursively orchestrate, and cannot ask the user.",
    "• await parallel([() => agent(...), () => agent(...)], { concurrency? }) — run zero-argument agent thunks concurrently and return results in order. Concurrency is globally capped at 4 for the run.",
    "• args — the parsed value of the `args` tool parameter (or undefined).",
-   "Workflow JavaScript runs in a restricted, killable child with no imports, eval, timers, filesystem, network, or process APIs. A run may make at most 32 agent calls and has no overall deadline. Each agent must receive its first assistant response event within 45 seconds so silent provider requests fail clearly; after that, agent() has no wall-clock deadline. Each individual child tool call times out independently after 3 minutes, becomes an error tool result, and leaves the agent loop free to recover. Use map/filter/if/await/template strings to orchestrate, and `return` a JSON-serializable aggregate.",
-   "Pass a `schema` to agent() whenever a later step branches on the result, so you get typed fields instead of prose. There is no resume: a failed run is simply re-run. Artifacts are saved under ~/.pi/agent/workflows/<runId>/ for inspection.",
+   "Workflow JavaScript runs in a restricted, killable child with no imports, eval, timers, filesystem, network, or process APIs. A run may make at most 32 agent calls and has no overall deadline. Each provider turn must receive a real assistant response event within 45 seconds; the timeout is re-armed after each tool turn so stalled follow-up requests fail clearly. Each individual child tool call times out independently after 3 minutes, becomes an error tool result, and leaves the agent loop free to recover. Use map/filter/if/await/template strings to orchestrate, and `return` a JSON-serializable aggregate.",
+   "Pass a `schema` to agent() when a later step needs custom typed fields. Every agent still returns structured_output, using { output: string } when no schema is supplied. There is no resume: a failed run is simply re-run. Artifacts are saved under ~/.pi/agent/workflows/<runId>/ for inspection.",
    "Example:",
    "export const meta = { name: 'reliability-review', description: 'Review modules for reliability risks, then report', phases: [{ title: 'Scan' }, { title: 'Report' }] }",
    "const FINDINGS = { type: 'object', properties: { issues: { type: 'array', items: { type: 'string' } }, ok: { type: 'boolean' } }, required: ['issues', 'ok'] }",
    "phase('Scan')",
-   "const scans = await parallel(args.files.map((f) => () => agent(`Review ${f} for correctness and reliability risks.`, { label: `scan:${f}`, phase: 'Scan', schema: FINDINGS })))",
+   "const scans = await parallel(args.files.map((f) => () => agent(`Review ${f} for correctness and reliability risks.`, { agent: 'scout', label: `scan:${f}`, phase: 'Scan', schema: FINDINGS })))",
    "const findings = scans.filter((r) => r.ok).map((r) => r.structured)",
    "phase('Report')",
-   "const report = await agent(`Summarize these findings: ${JSON.stringify(findings)}`, { label: 'report', phase: 'Report' })",
+   "const report = await agent(`Summarize these findings: ${JSON.stringify(findings)}`, { agent: 'good', label: 'report', phase: 'Report' })",
    "return { findings, report: report.ok ? report.output : report.error }"
 ].join("\n");
 
@@ -39,21 +39,35 @@ export const WORKFLOW_PROMPT_SNIPPET =
 /** Guides the model on appropriate workflow fan-out and mandatory agent result checks. */
 export const WORKFLOW_PROMPT_GUIDELINES = [
    "Use workflow when a task needs several subagents with phase dependencies or dynamic fan-out; keep single small delegations in the main session.",
+   "Select a profile such as `fast`, `good`, `scout`, or `reviewer` instead of choosing a model, provider, or effort directly.",
    "In workflow scripts, agent() never throws — always check `.ok` on its result before using `.output`/`.structured`."
 ];
 
-/** Marks and forwards a workflow script's agent() task as an isolated child-model prompt. */
-export function buildWorkflowAgentPrompt(prompt: string) {
-   return prompt;
+/**
+ * Build the user-turn prompt sent to a workflow child agent.
+ *
+ * Every workflow agent uses structured completion. Agents with a custom schema
+ * receive that schema through the tool definition. Other agents use the default
+ * `{ output: string }` result shape.
+ */
+export function buildWorkflowAgentPrompt(
+   prompt: string,
+   options: { readonly requireStructuredOutput?: boolean } = {}
+): string {
+   const resultShape =
+      options.requireStructuredOutput === false
+         ? 'an object with an "output" string field'
+         : "an object matching the required schema";
+   return `${prompt}\n\n## WORKFLOW COMPLETION REQUIREMENT\nWhen the assignment is complete, call structured_output exactly once as your final action with ${resultShape}. Do not return the completed answer as assistant prose. Do not write any text after the tool call.`;
 }
 
-/** Instructs structured workflow children to terminate with exactly one structured_output call. */
-export const STRUCTURED_OUTPUT_SYSTEM_INSTRUCTION =
-   "When your task is complete, call the `structured_output` tool exactly once as your final action, with fields matching the required schema. Do not write any other text after it.";
+/** Legacy completion wording kept for prompt consumers; it is not appended to the system prompt. */
+export const STRUCTURED_OUTPUT_USER_INSTRUCTION =
+   "When your task is complete, call the `structured_output` tool exactly once as your final action, with fields matching the required schema. Do not call any other completion tool, and do not write any other text after it.";
 
 /** Describes the terminating structured_output tool and its final-action contract. */
 export const STRUCTURED_OUTPUT_TOOL_DESCRIPTION =
-   "Return your final result as structured data matching the required schema. Call this exactly once, as your last action; do not write any other text after it.";
+   "Return your final result as structured data matching the required schema. This is the only completion tool for this task. Call it exactly once as your last action; do not call any other completion tool or write any other text after it.";
 
 /** Builds the workflow completion report returned to the parent model. */
 export function buildWorkflowResultMessage(details: WorkflowDetails, runDir: string) {
@@ -74,6 +88,9 @@ export function buildWorkflowResultMessage(details: WorkflowDetails, runDir: str
             `- [${agent.label}]${agent.phase ? ` (${agent.phase})` : ""} ${status}` +
                (agent.error ? ` — ${agent.error}` : "")
          );
+         if (agent.state === "done" && agent.result !== undefined && details.result === undefined) {
+            lines.push(`  Response: ${resultJson(agent.result)}`);
+         }
       }
    }
    if (details.result !== undefined) lines.push("", "Result:", resultJson(details.result));

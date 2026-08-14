@@ -1,12 +1,10 @@
 import type { TranscriptEntry, WorkflowDetails } from "./model.ts";
-import { safeStringify, truncateUtf8, writeFileAtomic } from "./serialization.ts";
+import { safeStringify, truncateUtf8, writeFileAtomic } from "../shared/serialization.ts";
 import * as path from "node:path";
 
-const ARTIFACT_TRANSCRIPT_MAX_BYTES = 32 * 1024;
 const ARTIFACT_TRANSCRIPT_ENTRY_MAX_BYTES = 8 * 1024;
 export const WORKFLOW_CHECKPOINT_INTERVAL_MS = 500;
 const ENTRY_TRUNCATION_MARKER = "\n[entry truncated]";
-const TRANSCRIPT_TRUNCATION_MARKER = "[artifact transcript truncated: older entries omitted]";
 
 function textBytes(text: string) {
    return Buffer.byteLength(text, "utf8");
@@ -22,45 +20,46 @@ function boundEntry(entry: TranscriptEntry, maxBytes: number) {
    return { ...entry, text };
 }
 
-/** Keep the initial prompt plus the newest useful context within the artifact cap. */
-export function boundedArtifactTranscript(
-   transcript: TranscriptEntry[],
-   options: { maxBytes?: number; entryMaxBytes?: number } = {}
-) {
+/** Keep the full transcript while bounding any single oversized entry. */
+export function boundedArtifactTranscript(transcript: TranscriptEntry[], options: { entryMaxBytes?: number } = {}) {
    if (transcript.length === 0) return [];
-   const maxBytes = Math.max(256, options.maxBytes ?? ARTIFACT_TRANSCRIPT_MAX_BYTES);
-   const entryMaxBytes = Math.max(64, Math.min(maxBytes, options.entryMaxBytes ?? ARTIFACT_TRANSCRIPT_ENTRY_MAX_BYTES));
-   const bounded = transcript.map((entry) => boundEntry(entry, entryMaxBytes));
-   if (bounded.reduce((total, entry) => total + textBytes(entry.text), 0) <= maxBytes) {
-      return bounded;
-   }
-
-   const initialIndex = transcript.findIndex((entry) => entry.role === "user");
-   const initial = boundEntry(
-      transcript[initialIndex >= 0 ? initialIndex : 0],
-      Math.min(entryMaxBytes, maxBytes - textBytes(TRANSCRIPT_TRUNCATION_MARKER))
-   );
-   const marker: TranscriptEntry = {
-      role: "toolResult",
-      name: "transcript",
-      text: TRANSCRIPT_TRUNCATION_MARKER
-   };
-   let remaining = maxBytes - textBytes(initial.text) - textBytes(marker.text);
-   const tail: TranscriptEntry[] = [];
-
-   for (let index = transcript.length - 1; index >= 0 && remaining > 0; index--) {
-      if (index === initialIndex || (initialIndex < 0 && index === 0)) continue;
-      const entry = boundEntry(transcript[index], Math.min(entryMaxBytes, remaining));
-      tail.push(entry);
-      remaining -= textBytes(entry.text);
-   }
-
-   tail.reverse();
-   return [initial, marker, ...tail];
+   const entryMaxBytes = Math.max(64, options.entryMaxBytes ?? ARTIFACT_TRANSCRIPT_ENTRY_MAX_BYTES);
+   return transcript.map((entry) => boundEntry(entry, entryMaxBytes));
 }
 
 function writeRunFile(runDir: string, name: string, content: string) {
    writeFileAtomic(path.join(runDir, name), content);
+}
+
+/**
+ * Recover a persisted workflow that was running when its owner session ended.
+ *
+ * Recovery is observational. It records the interrupted state and never
+ * restarts provider work automatically.
+ *
+ * @param details - Persisted workflow details.
+ * @param recoveredAt - Timestamp used for deterministic recovery and tests.
+ * @returns Recovered details, or the original terminal details unchanged.
+ */
+export function recoverWorkflowDetails(details: WorkflowDetails, recoveredAt = Date.now()): WorkflowDetails {
+   if (details.status !== "running") return details;
+   const finishedAt = details.finishedAt ?? recoveredAt;
+   return {
+      ...details,
+      status: "aborted",
+      finishedAt,
+      error: details.error ?? "Recovered stale workflow that was not active",
+      agents: details.agents.map((agent) =>
+         agent.state !== "running"
+            ? agent
+            : {
+                 ...agent,
+                 state: "error",
+                 error: agent.error ?? "Run ended before this agent settled",
+                 finishedAt: agent.finishedAt ?? finishedAt
+              }
+      )
+   };
 }
 
 export function persistWorkflowJson(runDir: string, details: WorkflowDetails) {

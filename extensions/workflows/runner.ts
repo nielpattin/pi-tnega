@@ -2,9 +2,10 @@
  * Workflow subagent runner.
  *
  * Each `agent()` call in a workflow script becomes one isolated in-process
- * AgentSession created here: in-memory session, normal trust-aware resources
- * and extensions, recursive orchestration/user-prompt tools denied, and an
- * optional one-shot `structured_output` tool when a schema is supplied.
+ * AgentSession created here: persistent when the parent has a session file,
+ * trust-aware resources, built-in tools, recursive orchestration/user-prompt tools denied, and an optional
+ * one-shot `structured_output` tool for every Workflow Agent. Ambient workspace
+ * extensions are intentionally not bound to the child session.
  *
  * `runAgent()` never throws: every failure mode (session creation, provider
  * errors, aborts, missing structured output) settles into an `AgentOutcome`.
@@ -14,7 +15,6 @@ import {
    createAgentSession,
    DefaultResourceLoader,
    defineTool,
-   SessionManager,
    SettingsManager,
    type AgentSession,
    type AgentSessionEvent,
@@ -23,24 +23,39 @@ import {
    type ExtensionContext,
    type ToolDefinition
 } from "@earendil-works/pi-coding-agent";
+import { isContextOverflow } from "@earendil-works/pi-ai";
 import { Type, type TSchema } from "typebox";
+import { resolveAgentProfile, type AgentProfile } from "../shared/agent-profiles.ts";
 import {
-   bindChildSessionExtensions,
    childToolPolicy,
    createChildResources,
+   createChildSessionManager,
    shutdownAndDisposeChildSession
-} from "./shared/child-session.ts";
-import { createToolCallTimeoutGuard } from "./shared/tool-call-timeout.ts";
-import { emptyUsage, type AgentUsage, type TranscriptEntry } from "./model.ts";
-import {
-   buildWorkflowAgentPrompt,
-   STRUCTURED_OUTPUT_SYSTEM_INSTRUCTION,
-   STRUCTURED_OUTPUT_TOOL_DESCRIPTION
-} from "./prompt.ts";
-import { safeStringify, truncateUtf8 } from "./serialization.ts";
+} from "../shared/child-session.ts";
+import { createCompactionState, observeCompactionEvent, shouldDeferAgentEnd } from "../shared/compaction.ts";
+import { resolveProfileModel } from "../shared/model-resolution.ts";
+import { createToolCallTimeoutGuard } from "../shared/timeouts.ts";
+import { boundTranscript } from "../shared/transcript.ts";
+import { computeAssistantUsage, emptyUsage } from "../shared/usage.ts";
+import { type AgentUsage, type TranscriptEntry } from "./model.ts";
+import { buildWorkflowAgentPrompt, STRUCTURED_OUTPUT_TOOL_DESCRIPTION } from "./prompt.ts";
+import { safeStringify, truncateUtf8 } from "../shared/serialization.ts";
 
 const AGENT_OUTPUT_MAX_BYTES = 64 * 1024;
 export const FIRST_RESPONSE_TIMEOUT_MS = 45_000;
+
+/** Default result shape for agents that do not provide a custom schema. */
+export const DEFAULT_WORKFLOW_OUTPUT_SCHEMA = {
+   type: "object",
+   properties: {
+      output: {
+         type: "string",
+         description: "The concise final answer for the workflow assignment."
+      }
+   },
+   required: ["output"],
+   additionalProperties: false
+} as const;
 const TRANSCRIPT_ENTRY_MAX_BYTES = 16 * 1024;
 const TRANSCRIPT_TOTAL_MAX_BYTES = 256 * 1024;
 const TRANSCRIPT_MAX_ENTRIES = 200;
@@ -60,34 +75,52 @@ export interface AgentOutcome {
    ok: boolean;
    /** Final assistant text (may be empty when only structured output was produced). */
    output: string;
-   /** Captured structured_output payload when a schema was supplied. */
+   /** Captured structured_output payload from the agent's final action. */
    structured?: unknown;
    error?: string;
    aborted: boolean;
    usage: AgentUsage;
+   provider?: string;
    model?: string;
    contextWindow?: number;
+   /** Selected profile name for dashboard and recovery metadata. */
+   profile?: string;
+   /** Persistent child Pi session identifier, when available. */
+   sessionId?: string;
+   /** Persistent child Pi session file, when available. */
+   sessionFile?: string;
+   /** Effective system prompt used by the child Pi session, when available. */
+   systemPrompt?: string;
    transcript: TranscriptEntry[];
 }
 
 export interface AgentProgress {
    preview: string;
    usage: AgentUsage;
+   provider?: string;
    model?: string;
    contextWindow?: number;
+   profile?: string;
+   sessionId?: string;
+   sessionFile?: string;
+   /** Effective system prompt used by the child Pi session, when available. */
+   systemPrompt?: string;
    transcript: TranscriptEntry[];
 }
 
 export interface RunAgentOptions {
    prompt: string;
    schema?: unknown;
+   profile?: AgentProfile;
    model?: WorkflowModel;
    thinkingLevel?: ThinkingLevel;
    cwd: string;
+   parentSessionFile?: string;
    loader: DefaultResourceLoader;
    settingsManager: SettingsManager;
    modelRegistry: ExtensionContext["modelRegistry"];
    signal?: AbortSignal;
+   onSession?: (session: AgentSession) => void;
    onProgress?: (progress: AgentProgress) => void;
    /** Test-only override for the per-tool execution timeout. */
    toolCallTimeoutMs?: number;
@@ -95,12 +128,18 @@ export interface RunAgentOptions {
    firstResponseTimeoutMs?: number;
 }
 
-/** Build a fresh extension runtime for each concurrent workflow child. */
-export function createWorkflowResources(cwd: string, variant: "plain" | "structured", projectTrusted: boolean) {
+/** Build isolated resources for each concurrent workflow child. */
+export function createWorkflowResources(
+   cwd: string,
+   variant: "plain" | "structured",
+   projectTrusted: boolean,
+   profile?: AgentProfile
+) {
+   const appendSystemPrompt = profile?.systemPrompt ? [profile.systemPrompt] : [];
    return createChildResources({
       cwd,
       projectTrusted,
-      ...(variant === "structured" ? { appendSystemPrompt: [STRUCTURED_OUTPUT_SYSTEM_INSTRUCTION] } : {})
+      ...(appendSystemPrompt.length > 0 ? { appendSystemPrompt } : {})
    });
 }
 
@@ -153,10 +192,7 @@ function jsonSchemaToTypebox(schema: unknown): TSchema {
    return Type.Unsafe(schema);
 }
 
-/**
- * One-shot terminating tool injected when a schema is supplied: the subagent
- * calls it as its final action and we capture the validated object.
- */
+/** One-shot terminating tool used as the final action for every Workflow Agent. */
 function makeStructuredOutputTool(schema: unknown, capture: (value: unknown) => void): ToolDefinition {
    return defineTool({
       name: "structured_output",
@@ -166,7 +202,7 @@ function makeStructuredOutputTool(schema: unknown, capture: (value: unknown) => 
       async execute(_toolCallId, params) {
          capture(params);
          return {
-            content: [{ type: "text", text: "Recorded structured result." }],
+            content: [],
             details: params,
             terminate: true
          };
@@ -186,6 +222,12 @@ function finalOutput(messages: AgentMessage[]): string {
       if (text) return text;
    }
    return "";
+}
+
+function defaultWorkflowOutput(value: unknown): string | undefined {
+   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+   const output = (value as { output?: unknown }).output;
+   return typeof output === "string" ? output : undefined;
 }
 
 function safeJson(value: unknown): string {
@@ -287,46 +329,11 @@ export function transcriptFromMessages(
          ...toolMetadata(message.toolCallId, toolTimings)
       });
    }
-   const selected =
-      entries.length <= TRANSCRIPT_MAX_ENTRIES
-         ? entries
-         : [entries[0], ...entries.slice(-(TRANSCRIPT_MAX_ENTRIES - 1))];
-   const bounded: TranscriptEntry[] = [];
-   let totalBytes = 0;
-   for (const entry of selected) {
-      const remaining = TRANSCRIPT_TOTAL_MAX_BYTES - totalBytes;
-      if (remaining <= 0) break;
-      const text = truncateUtf8(entry.text, Math.min(TRANSCRIPT_ENTRY_MAX_BYTES, remaining));
-      totalBytes += Buffer.byteLength(text, "utf8");
-      bounded.push({
-         ...entry,
-         text: text === entry.text ? text : `${text}\n[transcript entry truncated]`
-      });
-   }
-   if (bounded.length < entries.length) {
-      bounded.push({
-         role: "toolResult",
-         name: "transcript",
-         text: `[transcript truncated: retained ${bounded.length} of ${entries.length} entries]`
-      });
-   }
-   return bounded;
+   return entries;
 }
 
 function computeUsage(messages: AgentMessage[]): AgentUsage {
-   const usage = emptyUsage();
-   for (const msg of messages) {
-      if (msg.role !== "assistant") continue;
-      usage.turns++;
-      const u = msg.usage;
-      if (!u) continue;
-      usage.input += u.input || 0;
-      usage.output += u.output || 0;
-      usage.cacheRead += u.cacheRead || 0;
-      usage.cacheWrite += u.cacheWrite || 0;
-      usage.cost += u.cost?.total || 0;
-   }
-   return usage;
+   return computeAssistantUsage(messages);
 }
 
 function errorText(error: unknown): string {
@@ -337,26 +344,38 @@ function formatTimeout(timeoutMs: number) {
    return timeoutMs % 1_000 === 0 ? `${timeoutMs / 1_000} seconds` : `${timeoutMs} ms`;
 }
 
-/** Abort a provider call that opens but never emits its first assistant event. */
+/**
+ * Abort a provider turn that does not produce a real assistant response.
+ * The timer can be re-armed for every provider turn in one agent prompt.
+ */
 export function createFirstResponseWatchdog(
    onTimeout: () => Promise<unknown>,
    options: { timeoutMs?: number; model?: string } = {}
 ) {
    const timeoutMs = options.timeoutMs ?? FIRST_RESPONSE_TIMEOUT_MS;
    let timer: ReturnType<typeof setTimeout> | undefined;
+   let rejectTimeout: ((reason: Error) => void) | undefined;
+   let active = false;
+   let timedOut = false;
    const timeout = new Promise<never>((_resolve, reject) => {
+      rejectTimeout = reject;
+   });
+
+   const arm = () => {
+      if (!active || timedOut) return;
+      if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
          timer = undefined;
+         timedOut = true;
          const model = options.model ? ` for ${options.model}` : "";
-         reject(
-            new Error(
-               `Agent received no assistant response event${model} within ${formatTimeout(timeoutMs)}; the provider request may be stalled. Retry the workflow.`
-            )
+         const error = new Error(
+            `Agent received no assistant response event${model} within ${formatTimeout(timeoutMs)}; the provider request may be stalled. Retry the workflow.`
          );
+         rejectTimeout?.(error);
          void onTimeout().catch(() => {});
       }, timeoutMs);
       timer.unref?.();
-   });
+   };
 
    const cancel = () => {
       if (timer) clearTimeout(timer);
@@ -364,49 +383,72 @@ export function createFirstResponseWatchdog(
    };
 
    return {
+      arm,
       markResponse: cancel,
       async waitFor<T>(operation: Promise<T>) {
+         active = true;
+         arm();
          try {
             return await Promise.race([operation, timeout]);
          } finally {
+            active = false;
             cancel();
          }
       }
    };
 }
 
-function isAssistantResponseEvent(event: AgentSessionEvent) {
-   return (
-      (event.type === "message_start" || event.type === "message_update" || event.type === "message_end") &&
-      event.message.role === "assistant"
-   );
+/**
+ * Identify a real assistant response for the response watchdog.
+ * Empty and thinking-only messages can be provider progress events and must
+ * not cancel the watchdog before the model produces usable output.
+ */
+export function isAssistantResponseEvent(event: AgentSessionEvent): boolean {
+   if (event.type !== "message_start" && event.type !== "message_update" && event.type !== "message_end") {
+      return false;
+   }
+   if (event.message.role !== "assistant") return false;
+   return event.message.content.some((part) => {
+      if (part.type === "text") return part.text.trim().length > 0;
+      return part.type === "toolCall";
+   });
 }
 
 export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> {
    let structured: unknown;
    let customTools: ToolDefinition[] | undefined;
    let session: AgentSession | undefined;
+   let sessionManager: ReturnType<typeof createChildSessionManager> | undefined;
    let unsubscribeToolTimeout: (() => void) | undefined;
+   const profile = options.profile ?? resolveAgentProfile(undefined);
+   const toolPolicy = childToolPolicy();
    try {
-      customTools =
-         options.schema !== undefined
-            ? [
-                 makeStructuredOutputTool(options.schema, (value) => {
-                    structured = value;
-                 })
-              ]
-            : undefined;
+      if (!profile) throw new Error("The default `good` agent profile is unavailable.");
+      customTools = [
+         makeStructuredOutputTool(options.schema ?? DEFAULT_WORKFLOW_OUTPUT_SCHEMA, (value) => {
+            structured = value;
+         })
+      ];
+      const model = profile.model
+         ? resolveProfileModel(
+              options.modelRegistry,
+              profile,
+              options.model ? { provider: options.model.provider, id: options.model.id } : undefined
+           )
+         : options.model;
+      const thinkingLevel = options.thinkingLevel ?? profile.thinking;
+      sessionManager = createChildSessionManager(options.cwd, options.parentSessionFile);
       ({ session } = await createAgentSession({
          cwd: options.cwd,
-         ...(options.model ? { model: options.model } : {}),
-         ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+         ...(model ? { model } : {}),
+         ...(thinkingLevel ? { thinkingLevel } : {}),
          resourceLoader: options.loader,
          settingsManager: options.settingsManager,
-         sessionManager: SessionManager.inMemory(options.cwd),
+         sessionManager,
          ...(customTools ? { customTools } : {}),
-         ...childToolPolicy()
+         tools: [...profile.tools, "structured_output"],
+         ...toolPolicy
       }));
-      await bindChildSessionExtensions(session);
       unsubscribeToolTimeout = guardWorkflowChildTools(session, options.toolCallTimeoutMs);
    } catch (error) {
       unsubscribeToolTimeout?.();
@@ -417,18 +459,30 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
          error: `Failed to create agent session: ${errorText(error)}`,
          aborted: false,
          usage: emptyUsage(),
+         provider: options.model?.provider,
          model: options.model?.id,
          contextWindow: options.model?.contextWindow,
+         profile: profile?.name,
+         sessionId: sessionManager?.getSessionId(),
+         sessionFile: sessionManager?.getSessionFile(),
          transcript: []
       };
    }
 
    const childSession = session;
+   options.onSession?.(childSession);
+   const profileName = profile?.name;
+   const sessionId = sessionManager?.getSessionId();
+   const sessionFile = sessionManager?.getSessionFile();
+   const rawSystemPrompt = childSession.systemPrompt;
+   const systemPrompt = typeof rawSystemPrompt === "string" && rawSystemPrompt.length > 0 ? rawSystemPrompt : undefined;
    let usage = emptyUsage();
+   let providerId = childSession.model?.provider ?? options.model?.provider;
    let modelId = childSession.model?.id ?? options.model?.id;
    let contextWindow = childSession.model?.contextWindow;
    let stopReason: string | undefined;
    let errorMessage: string | undefined;
+   let compactionState = createCompactionState();
    const toolTimings = new Map<string, ToolExecutionTiming>();
 
    const sync = () => {
@@ -436,6 +490,7 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
       usage = computeUsage(messages);
 
       const sessionModel = childSession.model;
+      providerId = sessionModel?.provider ?? providerId;
       modelId = sessionModel?.id ?? modelId;
       contextWindow = sessionModel?.contextWindow ?? contextWindow;
       const context = childSession.getContextUsage();
@@ -463,6 +518,7 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
             ? options.modelRegistry.find(msg.provider, reportedId)
             : undefined;
          if (reportedModel) {
+            providerId = reportedModel.provider ?? providerId;
             modelId = reportedModel.id;
             contextWindow = reportedModel.contextWindow;
          }
@@ -472,11 +528,31 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
       }
    };
 
-   let markFirstResponse = () => {};
+   sync();
+   options.onProgress?.({
+      preview: "",
+      usage,
+      provider: providerId,
+      model: modelId,
+      contextWindow,
+      profile: profileName,
+      sessionId,
+      sessionFile,
+      systemPrompt,
+      transcript: []
+   });
+
+   let responseWatchdog: ReturnType<typeof createFirstResponseWatchdog> | undefined;
    const unsubscribe = childSession.subscribe((event) => {
-      if (isAssistantResponseEvent(event)) markFirstResponse();
+      compactionState = observeCompactionEvent(compactionState, event);
+      if (event.type === "compaction_start") responseWatchdog?.markResponse();
+      if (event.type === "compaction_end" || event.type === "auto_retry_end") responseWatchdog?.arm();
+      if (event.type === "turn_start") responseWatchdog?.arm();
+      if (isAssistantResponseEvent(event)) responseWatchdog?.markResponse();
       if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
          recordToolExecutionTiming(toolTimings, event);
+      } else if (event.type === "agent_end" && shouldDeferAgentEnd(compactionState, event)) {
+         return;
       } else if (event.type !== "message_end" && event.type !== "compaction_end") {
          return;
       }
@@ -484,8 +560,13 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
       options.onProgress?.({
          preview: finalOutput(childSession.messages),
          usage,
+         provider: providerId,
          model: modelId,
          contextWindow,
+         profile: profileName,
+         sessionId,
+         sessionFile,
+         systemPrompt,
          transcript: transcriptFromMessages(childSession.messages, toolTimings)
       });
    });
@@ -509,8 +590,14 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
             timeoutMs: options.firstResponseTimeoutMs,
             model: modelId
          });
-         markFirstResponse = watchdog.markResponse;
-         await watchdog.waitFor(childSession.prompt(buildWorkflowAgentPrompt(options.prompt)));
+         responseWatchdog = watchdog;
+         await watchdog.waitFor(
+            childSession.prompt(
+               buildWorkflowAgentPrompt(options.prompt, {
+                  requireStructuredOutput: options.schema !== undefined
+               })
+            )
+         );
       }
    } catch (error) {
       errorMessage = errorMessage ?? errorText(error);
@@ -519,12 +606,32 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
       options.signal?.removeEventListener("abort", onAbort);
       if (abortPromise) await abortPromise;
       unsubscribe();
+      responseWatchdog = undefined;
       unsubscribeToolTimeout?.();
       sync();
-      output = truncateUtf8(finalOutput(childSession.messages), AGENT_OUTPUT_MAX_BYTES);
+      const finalText = !options.schema ? defaultWorkflowOutput(structured) : undefined;
+      output = truncateUtf8(finalText ?? finalOutput(childSession.messages), AGENT_OUTPUT_MAX_BYTES);
       transcript = transcriptFromMessages(childSession.messages, toolTimings);
       await shutdownAndDisposeChildSession(childSession);
    }
+
+   const lastAssistant = childSession.messages.toReversed().find((message) => message.role === "assistant");
+   if (lastAssistant && isContextOverflow(lastAssistant, contextWindow)) {
+      // Pi may have emitted an intermediate overflow message before compacting.
+      // Do not convert that recoverable event into a terminal provider failure.
+      stopReason = undefined;
+      errorMessage = undefined;
+   }
+
+   const sessionMetadata = {
+      profile: profileName,
+      sessionId,
+      sessionFile,
+      systemPrompt,
+      provider: providerId,
+      model: modelId,
+      contextWindow
+   };
 
    if (aborted || stopReason === "aborted") {
       return {
@@ -534,8 +641,7 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
          error: "Agent was aborted",
          aborted: true,
          usage,
-         model: modelId,
-         contextWindow,
+         ...sessionMetadata,
          transcript
       };
    }
@@ -549,21 +655,19 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
          error: errorMessage ?? "Agent failed",
          aborted: false,
          usage,
-         model: modelId,
-         contextWindow,
+         ...sessionMetadata,
          transcript
       };
    }
 
-   if (options.schema !== undefined && structured === undefined) {
+   if (structured === undefined) {
       return {
          ok: false,
          output,
          error: "Agent finished without calling structured_output; no structured result matching the schema was produced.",
          aborted: false,
          usage,
-         model: modelId,
-         contextWindow,
+         ...sessionMetadata,
          transcript
       };
    }
@@ -574,8 +678,7 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
       structured,
       aborted: false,
       usage,
-      model: modelId,
-      contextWindow,
+      ...sessionMetadata,
       transcript
    };
 }
