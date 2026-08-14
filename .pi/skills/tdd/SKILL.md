@@ -1,6 +1,6 @@
 ---
 name: tdd
-description: Local node:test scratch tests for this repo's extensions, run with `node tests/<file>.mjs`. TDD for verifying extension behavior: write the failing test first for new code, characterization-probe existing extension output. Tests live in the gitignored tests/ folder and are never committed.
+description: Local node:test scratch tests for this repo's extensions, run with `node tests/<file>.mjs`. TDD for verifying extension behavior, write the failing test first for new code, characterization-probe existing extension output. Tests live in the gitignored tests/ folder and are never committed.
 ---
 
 # Local Extension Tests (tests/)

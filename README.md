@@ -8,12 +8,14 @@ All extensions publish raw TypeScript source that Pi loads through jiti, so they
 
 ## Packages
 
-| Package                                                   | Role                                                                                                                                                                   | Install                           | npm                                                         | Version |
-| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- | ----------------------------------------------------------- | ------- |
-| [pi-permission-system](./extensions/pi-permission-system) | Central permission gates for tools, bash, MCP, skills, file paths, and subagents. Edit permission prompt is status-only; the diff lives in the chat via the edit tool. | `<NONE>`                          |                                                             | 0.2.2   |
-| [pi-reference](./extensions/pi-reference)                 | Project references: declare local dirs and Git repos as agent-accessible with @alias autocomplete.                                                                     | `<NONE>`                          |                                                             | 0.2.1   |
-| [pi-station](./extensions/pi-station)                     | Station bar, fixed editor layout, bash mode, stash, prompt history, undo/redo, hashline read/edit with in-chat diff preview, and configurable segments for the Pi TUI. | `pnpm add @nielpattin/pi-station` | [npm](https://www.npmjs.com/package/@nielpattin/pi-station) | 0.9.0   |
-| [pi-workers](./extensions/pi-workers)                     | Worker jobs, Agy/Pi harnesses, process supervision, inter-worker messaging, Vibe mode, and the `/workers` dashboard.                                                   | `<NONE>`                          |                                                             | 0.1.0   |
+| Package                                                   | Role                                                                                                                                                                                     | Install                           | npm                                                         | Version |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- | ----------------------------------------------------------- | ------- |
+| [pi-permission-system](./extensions/pi-permission-system) | Central permission gates for tools, bash, MCP, skills, file paths, and subagents. Edit permission prompt is status-only; the diff lives in the chat via the edit tool.                   | `<NONE>`                          |                                                             | 0.2.2   |
+| [pi-reference](./extensions/pi-reference)                 | Project references: declare local dirs and Git repos as agent-accessible with @alias autocomplete.                                                                                       | `<NONE>`                          |                                                             | 0.2.1   |
+| [pi-station](./extensions/pi-station)                     | Station bar, fixed editor layout, bash mode, stash, prompt history, undo/redo, hashline read/edit with in-chat diff preview, and configurable segments for the Pi TUI.                   | `pnpm add @nielpattin/pi-station` | [npm](https://www.npmjs.com/package/@nielpattin/pi-station) | 0.9.0   |
+| [workflows](./extensions/workflows)                       | Primary profile-configured multi-agent orchestration with phases, parallel fan-out, compaction-aware child sessions, structured output, profile editing, and the `/workflows` dashboard. | `<NONE>`                          |                                                             | 0.1.0   |
+| [pi-processes](./extensions/pi-processes)                 | Standalone retained process supervision, logs, readiness checks, lifecycle controls, and the `/processes` dashboard.                                                                     | `<NONE>`                          |                                                             | 0.1.0   |
+| [btw](./extensions/btw)                                   | Independent side-chat with explicit `/btw:inject` handoff.                                                                                                                               | `<NONE>`                          |                                                             | 0.1.0   |
 
 ## Prerequisites
 
@@ -50,7 +52,9 @@ agent-root/
 │   ├── pi-permission-system      # permission system extension
 │   ├── pi-reference              # project references extension
 │   ├── pi-station                # published npm extension
-│   └── pi-workers                # worker jobs and process supervision extension
+│   ├── workflows                 # primary multi-agent orchestration
+│   ├── pi-processes              # standalone process supervision
+│   └── btw                       # independent side-chat extension
 ├── scripts/                      # release and typecheck scripts
 ├── publish.sh                    # gh workflow dispatch helper
 ├── CHANGELOG.md                  # package changelog summary

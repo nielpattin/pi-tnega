@@ -13,7 +13,9 @@ This document provides the full contributor workflow for developing and publishi
     - [`pi-permission-system`](./extensions/pi-permission-system): Central permission gates for tools, bash, MCP, skills, file paths, and subagents.
     - [`pi-reference`](./extensions/pi-reference): Project reference declaration & resolution with `@alias` autocomplete.
     - [`pi-station`](./extensions/pi-station): Status bar, layout manager, bash mode, hashline editor with in-chat diff preview.
-    - [`pi-workers`](./extensions/pi-workers): Worker jobs, Agy/Pi harnesses, process supervision, inter-worker messaging, Vibe mode, and the `/workers` dashboard.
+    - [`workflows`](./extensions/workflows): Primary profile-configured multi-agent orchestration, persistent child sessions, structured results, the `/workflows` dashboard, and the `/agents` profile editor.
+    - [`pi-processes`](./extensions/pi-processes): Standalone retained process supervision and the `/processes` dashboard.
+    - [`btw`](./extensions/btw): Independent side-chat and explicit parent-session handoff.
 - **Workflow & Automation Tools**:
     - `.githooks/`: Versioned Git hooks (`pre-commit` runs `lint-staged`); `prepare` points Git at them via `core.hooksPath`.
     - `.github/workflows/publish.yml`: GitHub Actions manual tag-based package publish workflow.
