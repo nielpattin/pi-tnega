@@ -190,9 +190,12 @@ pi-mcp-adapter/
 agents/
 .pi/cortex
 **/target/
-*-sync.json
-pi-acks.json
-pi-codex-usage.json
 
 # Local scratch tests - never committed (see .pi/skills/tdd)
 tests/
+.ext-config/
+/*.json
+/*.jsonc
+!tsconfig.json
+!tsconfig.*.json
+!package.json
