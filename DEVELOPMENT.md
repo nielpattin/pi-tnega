@@ -13,7 +13,8 @@ This document provides the full contributor workflow for developing and publishi
     - [`pi-permission-system`](./extensions/pi-permission-system): Central permission gates for tools, bash, MCP, skills, file paths, and subagents.
     - [`pi-reference`](./extensions/pi-reference): Project reference declaration & resolution with `@alias` autocomplete.
     - [`pi-station`](./extensions/pi-station): Status bar, layout manager, bash mode, hashline editor with in-chat diff preview.
-    - [`workflows`](./extensions/workflows): Primary profile-configured multi-agent orchestration, persistent child sessions, structured results, the `/workflows` dashboard, and the `/agents` profile editor.
+    - [`workflows`](./extensions/workflows): Primary profile-configured multi-agent orchestration, persistent child sessions, structured results, background result cards, the `/wf` dashboard, and the `/agents` profile editor.
+    - [`pi-compact-pro`](./extensions/pi-compact-pro): Configurable auto-compaction, model context caps, summary model fallback chains, and structured summaries through `/compaction`.
     - [`pi-processes`](./extensions/pi-processes): Standalone retained process supervision and the `/processes` dashboard.
     - [`btw`](./extensions/btw): Independent side-chat and explicit parent-session handoff.
     - [`pi-constellation`](./extensions/pi-constellation): Deterministic zero-LLM compaction and incremental session transcript inspection (`session_inspect`).
@@ -39,6 +40,7 @@ agent-root/
 │   ├── pi-reference              # project references extension
 │   ├── pi-station                # published npm extension
 │   ├── workflows                 # primary multi-agent orchestration
+│   ├── pi-compact-pro            # configurable compaction and summary models
 │   ├── pi-processes              # standalone process supervision
 │   ├── btw                       # independent side-chat extension
 │   ├── pi-constellation          # deterministic compaction & session inspection
@@ -123,7 +125,7 @@ pnpm --dir extensions/pi-station typecheck
 
 ## 5. Editing an Existing Package
 
-- **Raw TypeScript Extensions** (`pi-permission-system`, `pi-reference`, `pi-station`, `workflows`, `pi-processes`, `btw`, `pi-constellation`, and others):
+- **Raw TypeScript Extensions** (`pi-permission-system`, `pi-reference`, `pi-station`, `workflows`, `pi-compact-pro`, `pi-processes`, `btw`, `pi-constellation`, and others):
     - Published directly as raw TypeScript source files (`.ts`).
     - Loaded by Pi harness at runtime via `jiti`. No `dist/` build step is required.
 - Ensure changes pass the applicable root checks (`pnpm lint`, `pnpm typecheck`, and `pnpm fmt`).
