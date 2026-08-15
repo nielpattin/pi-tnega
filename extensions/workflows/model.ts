@@ -1,6 +1,6 @@
 /**
  * Shared workflow run model + formatting helpers, used by the tool renderers
- * (index.ts) and the /workflows dashboard (dashboard.ts).
+ * (index.ts) and the /wf dashboard (dashboard.ts).
  */
 
 import * as os from "node:os";
@@ -35,7 +35,7 @@ export function emptyUsage(): AgentUsage {
    };
 }
 
-export type AgentState = "running" | "done" | "error";
+export type AgentState = "waiting" | "running" | "done" | "error";
 export type WorkflowStatus = "running" | "completed" | "failed" | "aborted";
 
 export type TranscriptRole = "user" | "assistant" | "thinking" | "tool" | "toolResult";
@@ -71,7 +71,7 @@ export interface AgentRecord {
    sessionFile?: string;
    /** Working directory used by the child Pi session. */
    cwd?: string;
-   /** Effective system prompt used by the child Pi session, when available. */
+   /** Effective system prompt used for this agent request, when available. */
    systemPrompt?: string;
    /** Context capacity of the active model used for this agent. */
    contextWindow?: number;
@@ -82,7 +82,7 @@ export interface AgentRecord {
    /** Final output or structured result returned by this agent, if available. */
    result?: unknown;
    usage: AgentUsage;
-   /** Normalized, serializable subagent conversation shown by /workflows. */
+   /** Normalized, serializable subagent conversation shown by /wf. */
    transcript: TranscriptEntry[];
 }
 
@@ -102,8 +102,6 @@ export interface WorkflowDetails {
    currentPhase?: string;
    agents: AgentRecord[];
    result?: unknown;
-   resultArtifact?: string;
-   transcriptArtifact?: string;
    error?: string;
 }
 
@@ -134,7 +132,8 @@ export function statusColor(status: WorkflowStatus): "success" | "warning" | "er
 
 export function shortenHome(p: string): string {
    const home = os.homedir();
-   return p.startsWith(home) ? `~${p.slice(home.length)}` : p;
+   const shortened = p.startsWith(home) ? `~${p.slice(home.length)}` : p;
+   return shortened.replaceAll("\\", "/");
 }
 
 export function formatAgentModel(agent: Pick<AgentRecord, "provider" | "model">): string | undefined {
@@ -237,11 +236,13 @@ export function resultJson(value: unknown): string {
               maxDepth: 16,
               maxNodes: 10_000
            });
-   const truncation = truncateHead(text ?? "", {
+   const bounded = truncateHead(text ?? "", {
       maxLines: RESULT_JSON_MAX_LINES,
       maxBytes: RESULT_JSON_MAX_BYTES
    });
-   return truncation.truncated
-      ? `${truncation.content}\n…[result truncated; bounded result artifact in result.json]`
-      : truncation.content;
+   return bounded.content;
+}
+
+export function displayPhaseTitle(title: string): string {
+   return title === "Summary" ? "summary" : title;
 }

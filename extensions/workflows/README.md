@@ -1,19 +1,23 @@
 # workflows
 
-`workflows` is Pi's primary multi-agent orchestration extension. It runs model-authored JavaScript workflows in a permission-restricted child process and exposes isolated profile-configured agents, phases, parallel fan-out, structured results, persistence, a profile editor, and a workflow dashboard.
+`workflows` is Pi's primary multi-agent orchestration extension. It runs model-authored JavaScript workflows in a permission-restricted child process and exposes isolated profile-configured work agents, phases, parallel fan-out, a mandatory final Summary phase, persistence, a profile editor, and a workflow dashboard.
 
 ## Features
 
 - Sandboxed inline JavaScript orchestration with `phase()`, `agent()`, `parallel()`, and `args`.
-- Bounded parallel execution with a maximum of four active agents and 32 calls per run.
-- Profile-based child agents. Workflow scripts select `fast`, `good`, `scout`, or `reviewer` instead of selecting models, providers, or thinking effort directly.
-- Profile settings control tools, instructions, model selection, and thinking level.
+- Bounded parallel execution with a maximum of four active agents and 32 total calls per run: up to 31 work agents plus the mandatory Summary.
+- Profile-based work agents. Workflow scripts select `fast`, `good`, `scout`, or `reviewer` instead of selecting models, providers, or thinking effort directly for work.
+- Profile settings control work-agent tools, instructions, model selection, and thinking level.
 - Schema-driven `structured_output` results with a hardened final-action prompt contract and the existing `{ ok, output, structured, error }` result contract.
+- Automatic final Summary agent with its own system prompt and no tools. Its waiting record appears when the run starts, then receives the immediately preceding phase's structured results, and its final assistant text is the workflow result.
+- The Summary transcript shows the actual system prompt, source data, and final assistant message.
+- Dashboard `s` settings UI for choosing the final Summary model and thinking level.
 - Compaction-aware child sessions that tolerate provider retries and recoverable context overflow.
 - Persistent Pi child sessions scoped to the parent Pi session when a parent session file exists.
-- Workflow artifacts under `~/.pi/agent/workflows/<runId>/` for scripts, arguments, results, transcripts, and recovery metadata.
-- Blocking and background runs with automatic follow-up delivery.
-- `/workflows` dashboard for phases, agents, transcripts, usage, and recovered runs.
+- Workflow metadata and results under `~/.pi/agent/workflows/<runId>/`; agent transcripts are read from their persisted child session files.
+- Blocking and background runs with automatic follow-up delivery. Background results render as collapsible cards: the collapsed view keeps the workflow summary and agent records visible, while `Ctrl+O` reveals the `Result` section.
+- Provider fallback retries only run after an agent has stopped before any tool execution starts. Tool activity blocks the retry, preventing duplicate `structured_output` calls.
+- `/wf` dashboard for phases, agents, transcripts, usage, and recovered runs.
 - `/agents` profile listing and fullscreen profile editor with save, toggle, create, delete, and prompt editing.
 
 ## Workflow DSL
@@ -57,25 +61,28 @@ const report = await agent(`Summarize these findings: ${JSON.stringify(findings)
     phase: "Report"
 });
 
-return {
-    findings,
-    report: report.ok ? report.output : report.error
-};
+// The runtime appends the mandatory Summary phase and returns its text.
+// The script return value is not the workflow result.
 ```
 
 `agent()` defaults to the `good` profile when `agent` is omitted. It never throws into the workflow script. Always inspect `result.ok` before using `result.output` or `result.structured`.
 
+The runtime always appends a reserved `Summary` phase after the declared phases. Do not declare or call a phase named `Summary`. It receives the structured results from the immediately preceding phase. It uses a dedicated system prompt, has no tools, and does not call `structured_output`; its assistant text becomes `WorkflowDetails.result` and the workflow tool's final result. Configure its model and thinking level by pressing `s` in the `/wf` dashboard. The setting is stored at `~/.pi/agent/.ext-config/workflows.json`.
+
 ## Persistence and recovery
 
-Workflow metadata is stored under `~/.pi/agent/workflows/<runId>/`. When the parent Pi session is persisted, each child agent also receives a persistent Pi session file in the parent-scoped child-session directory. The workflow dashboard can inspect recovered transcripts, usage, profile, model, and session metadata.
+Workflow metadata is stored under `~/.pi/agent/workflows/<runId>/`. When the parent Pi session is persisted, each child agent also receives a persistent Pi session file in the parent-scoped child-session directory. The workflow dashboard reads recovered transcripts from those session files.
 
 Recovery marks interrupted runs as aborted. It never silently resumes provider work.
 
+Background result cards normalize displayed paths to slash-separated forms such as `~/.pi/agent/workflows/<runId>`.
+
 ## Commands
 
-- `/workflows` opens the workflow run dashboard in a full-size screen. Regular TUI mode uses an alternate terminal buffer; fullscreen mode reuses Pi's existing alternate buffer without nesting one.
-- `/workflows <runId>` opens one run.
-- In an agent transcript, `s` copies the transcript, `y`/`p` copies the child session path, `t` toggles thinking, `Ctrl+S` toggles the system prompt, and the mouse wheel scrolls three lines per step.
+- `/wf` opens the workflow run dashboard in a full-size screen. Regular TUI mode uses an alternate terminal buffer; fullscreen mode reuses Pi's existing alternate buffer without nesting one.
+- `/wf <runId>` opens one run.
+- In the dashboard, `s` opens Summary settings, `r` saves a report, and `c` copies an agent transcript.
+- In an agent transcript, `y`/`p` copies the child session path, `t` toggles thinking, `Ctrl+S` toggles the system prompt, and the mouse wheel scrolls three lines per step.
 - `/agents` opens the profile editor in the TUI, or lists profiles in non-interactive mode.
 
 ## Safety limits
@@ -84,7 +91,7 @@ Recovery marks interrupted runs as aborted. It never silently resumes provider w
 - Maximum 32 agent calls per workflow.
 - Workflow source, arguments, IPC messages, and results are byte bounded.
 - Workflow scripts cannot import modules, evaluate dynamic code, access the filesystem, access the network, start processes, invoke interactive questions, or recursively start workflows.
-- Child tool calls and first responses have bounded timeouts.
+- Child tool calls have bounded timeouts.
 
 ## Installation
 

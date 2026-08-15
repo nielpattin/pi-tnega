@@ -1,34 +1,29 @@
-import type { TranscriptEntry, WorkflowDetails } from "./model.ts";
-import { safeStringify, truncateUtf8, writeFileAtomic } from "../shared/serialization.ts";
+import type { WorkflowDetails } from "./model.ts";
+import { safeStringify, writeFileAtomic } from "../shared/serialization.ts";
+import * as fs from "node:fs";
 import * as path from "node:path";
 
-const ARTIFACT_TRANSCRIPT_ENTRY_MAX_BYTES = 8 * 1024;
 export const WORKFLOW_CHECKPOINT_INTERVAL_MS = 500;
-const ENTRY_TRUNCATION_MARKER = "\n[entry truncated]";
-
-function textBytes(text: string) {
-   return Buffer.byteLength(text, "utf8");
-}
-
-function boundEntry(entry: TranscriptEntry, maxBytes: number) {
-   if (textBytes(entry.text) <= maxBytes) return { ...entry };
-   const markerBytes = textBytes(ENTRY_TRUNCATION_MARKER);
-   const text =
-      maxBytes > markerBytes
-         ? `${truncateUtf8(entry.text, maxBytes - markerBytes)}${ENTRY_TRUNCATION_MARKER}`
-         : truncateUtf8(ENTRY_TRUNCATION_MARKER, maxBytes);
-   return { ...entry, text };
-}
-
-/** Keep the full transcript while bounding any single oversized entry. */
-export function boundedArtifactTranscript(transcript: TranscriptEntry[], options: { entryMaxBytes?: number } = {}) {
-   if (transcript.length === 0) return [];
-   const entryMaxBytes = Math.max(64, options.entryMaxBytes ?? ARTIFACT_TRANSCRIPT_ENTRY_MAX_BYTES);
-   return transcript.map((entry) => boundEntry(entry, entryMaxBytes));
-}
 
 function writeRunFile(runDir: string, name: string, content: string) {
    writeFileAtomic(path.join(runDir, name), content);
+}
+
+type CompactWorkflowDetails = Omit<WorkflowDetails, "agents"> & {
+   agents: Array<Omit<WorkflowDetails["agents"][number], "transcript" | "preview">>;
+};
+
+/** Remove transcript payloads from workflow metadata while keeping the result inline. */
+export function compactWorkflowDetails(details: WorkflowDetails): CompactWorkflowDetails {
+   const { agents, ...metadata } = details;
+   return {
+      ...metadata,
+      agents: agents.map(({ transcript: _transcript, preview: _preview, ...agent }) => {
+         void _transcript;
+         void _preview;
+         return agent;
+      })
+   };
 }
 
 /**
@@ -50,7 +45,7 @@ export function recoverWorkflowDetails(details: WorkflowDetails, recoveredAt = D
       finishedAt,
       error: details.error ?? "Recovered stale workflow that was not active",
       agents: details.agents.map((agent) =>
-         agent.state !== "running"
+         agent.state !== "running" && agent.state !== "waiting"
             ? agent
             : {
                  ...agent,
@@ -63,20 +58,16 @@ export function recoverWorkflowDetails(details: WorkflowDetails, recoveredAt = D
 }
 
 export function persistWorkflowJson(runDir: string, details: WorkflowDetails) {
-   const transcripts = Object.fromEntries(
-      details.agents.map((agent) => [agent.index, boundedArtifactTranscript(agent.transcript)])
+   fs.rmSync(path.join(runDir, "transcripts.json"), { force: true });
+   fs.rmSync(path.join(runDir, "result.json"), { force: true });
+   writeRunFile(
+      runDir,
+      "workflow.json",
+      safeStringify(compactWorkflowDetails(details), {
+         maxBytes: 1024 * 1024,
+         maxStringBytes: 1024 * 1024
+      })
    );
-   writeRunFile(runDir, "transcripts.json", safeStringify(transcripts, { maxBytes: 2 * 1024 * 1024 }));
-   if (details.result !== undefined) {
-      writeRunFile(runDir, "result.json", safeStringify(details.result, { maxBytes: 1024 * 1024 }));
-   }
-   const compact: WorkflowDetails = {
-      ...details,
-      ...(details.result !== undefined ? { result: "[stored in result.json]", resultArtifact: "result.json" } : {}),
-      transcriptArtifact: "transcripts.json",
-      agents: details.agents.map((agent) => ({ ...agent, transcript: [] }))
-   };
-   writeRunFile(runDir, "workflow.json", safeStringify(compact, { maxBytes: 1024 * 1024 }));
 }
 
 /** Coalesce live checkpoints while keeping final persistence synchronous. */

@@ -1,7 +1,7 @@
 /// <reference lib="es2023" />
 
 /**
- * /workflows dashboard: a full-screen overlay with a run list and a per-run
+ * /wf dashboard: a full-screen overlay with a run list and a per-run
  * detail view (phases sidebar + agents panel), modeled after:
  *
  *   name                                             5/5 agents · 31m18s · done
@@ -10,13 +10,14 @@
  *   │ ❯ ■ Gather     3/3 │ │ ■ CodeRabbit feedback   gpt-5 · 7%/372k  5m37s│
  *   │   ■ Verify     1/1 │ │ ■ Other bot feedback    gpt-5 · 9%/372k  4m43s│
  *   ╰────────────────────╯ ╰─────────────────────────────────────────────────╯
- *   up/down select · esc back · s save report
+ *   up/down select · s settings · esc back
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
    copyToClipboard,
+   buildSessionContext,
    getAgentDir,
    type AgentSession,
    type ExtensionContext,
@@ -34,6 +35,7 @@ import {
    type TUI
 } from "@earendil-works/pi-tui";
 import { persistWorkflowJson, recoverWorkflowDetails } from "./artifacts.ts";
+import { transcriptFromMessages } from "./runner.ts";
 import {
    agentContext,
    countStates,
@@ -56,10 +58,16 @@ import {
 } from "./model.ts";
 
 const NOTICE_TTL_MS = 4000;
+const DOUBLE_X_ABORT_WINDOW_MS = 750;
 const MIN_HEIGHT = 10;
 const TRANSCRIPT_SCROLL_STEP = 20;
 const WHEEL_SCROLL_LINES = 3;
 const MOUSE_ENABLE = "\u001b[?1000h\u001b[?1002h\u001b[?1003h\u001b[?1004h\u001b[?1006h";
+
+function isAgentPending(agent: Pick<AgentRecord, "state">): boolean {
+   return agent.state === "waiting" || agent.state === "running";
+}
+
 const MOUSE_DISABLE = "\u001b[?1006l\u001b[?1004l\u001b[?1003l\u001b[?1002l\u001b[?1000l";
 const ALTERNATE_SCREEN_ENTER = `\u001b[?1049h\u001b[2J\u001b[H${MOUSE_ENABLE}`;
 const ALTERNATE_SCREEN_EXIT = `${MOUSE_DISABLE}\u001b[?1049l`;
@@ -249,6 +257,20 @@ function runsDir(): string {
    return path.join(getAgentDir(), "workflows");
 }
 
+export function loadSessionTranscript(sessionFile: string): TranscriptEntry[] {
+   try {
+      const entries = fs
+         .readFileSync(sessionFile, "utf8")
+         .split(/\r?\n/)
+         .filter(Boolean)
+         .map((line) => JSON.parse(line) as { type?: string; id?: string })
+         .filter((entry) => entry.type !== "session") as Parameters<typeof buildSessionContext>[0];
+      return transcriptFromMessages(buildSessionContext(entries, entries.at(-1)?.id).messages);
+   } catch {
+      return [];
+   }
+}
+
 export function normalizeTranscript(value: unknown): TranscriptEntry[] {
    if (!Array.isArray(value)) return [];
    const transcript: TranscriptEntry[] = [];
@@ -292,7 +314,14 @@ function normalizeDetails(runId: string, raw: unknown): WorkflowDetails | undefi
    for (const item of rawAgents) {
       if (!item || typeof item !== "object") continue;
       const a = item as Record<string, unknown>;
-      const state = a.state === "error" || a.state === "failed" ? "error" : a.state === "running" ? "running" : "done";
+      const state =
+         a.state === "error" || a.state === "failed"
+            ? "error"
+            : a.state === "waiting"
+              ? "waiting"
+              : a.state === "running"
+                ? "running"
+                : "done";
       agents.push({
          index: typeof a.index === "number" ? a.index : agents.length + 1,
          label: typeof a.label === "string" ? a.label : `agent-${agents.length + 1}`,
@@ -326,6 +355,10 @@ function normalizeDetails(runId: string, raw: unknown): WorkflowDetails | undefi
          },
          transcript: normalizeTranscript(a.transcript)
       });
+   }
+   const summaryAgents = agents.filter((agent) => agent.phase === "Summary");
+   if (summaryAgents.length > 0) {
+      agents.splice(0, agents.length, ...agents.filter((agent) => agent.phase !== "Summary"), ...summaryAgents);
    }
 
    const rawPhases = Array.isArray(record.phases) ? record.phases : Array.isArray(meta.phases) ? meta.phases : [];
@@ -367,8 +400,6 @@ function normalizeDetails(runId: string, raw: unknown): WorkflowDetails | undefi
       currentPhase: typeof record.currentPhase === "string" ? record.currentPhase : undefined,
       agents,
       result: record.result,
-      resultArtifact: typeof record.resultArtifact === "string" ? record.resultArtifact : undefined,
-      transcriptArtifact: typeof record.transcriptArtifact === "string" ? record.transcriptArtifact : undefined,
       error: typeof record.error === "string" ? record.error : undefined
    };
 }
@@ -410,26 +441,8 @@ export function loadRunEntries(
          const details = normalizeDetails(runId, raw);
          if (details && (details.sessionId === sessionId || referencedRunIds.has(runId))) {
             const runDir = path.join(runsDir(), runId);
-            if (details.resultArtifact) {
-               try {
-                  details.result = JSON.parse(
-                     fs.readFileSync(path.join(runDir, path.basename(details.resultArtifact)), "utf8")
-                  );
-               } catch {
-                  // Keep the compact compatibility marker from workflow.json.
-               }
-            }
-            if (details.transcriptArtifact) {
-               try {
-                  const transcripts = JSON.parse(
-                     fs.readFileSync(path.join(runDir, path.basename(details.transcriptArtifact)), "utf8")
-                  ) as Record<string, unknown>;
-                  for (const agent of details.agents) {
-                     agent.transcript = normalizeTranscript(transcripts[String(agent.index)]);
-                  }
-               } catch {
-                  // Older or partially written artifacts simply lack transcripts.
-               }
+            for (const agent of details.agents) {
+               if (agent.sessionFile) agent.transcript = loadSessionTranscript(agent.sessionFile);
             }
             const recovered = recoverWorkflowDetails(details);
             if (recovered !== details) {
@@ -451,11 +464,11 @@ export function loadRunEntries(
 function copiedTranscriptBody(transcript: ReadonlyArray<TranscriptEntry>): string {
    return transcript
       .map((entry) => {
-         if (entry.role === "user") return `USER:\n${entry.text}`;
-         if (entry.role === "assistant") return `ASSISTANT:\n${entry.text}`;
-         if (entry.role === "thinking") return `THINKING:\n${entry.text}`;
-         if (entry.role === "tool") return `TOOL ${entry.name ?? "unknown"}:\n${entry.text}`;
-         return `${entry.isError ? "ERROR" : "RESULT"} ${entry.name ?? "unknown"}:\n${entry.text}`;
+         if (entry.role === "user") return `User:\n${entry.text}`;
+         if (entry.role === "assistant") return `Assistant:\n${entry.text}`;
+         if (entry.role === "thinking") return `Thinking:\n${entry.text}`;
+         if (entry.role === "tool") return `Tool ${entry.name ?? "unknown"}:\n${entry.text}`;
+         return `${entry.isError ? "Error" : "Result"} ${entry.name ?? "unknown"}:\n${entry.text}`;
       })
       .join("\n\n");
 }
@@ -597,7 +610,14 @@ function buildReport(details: WorkflowDetails): string {
          continue;
       }
       for (const agent of group.agents) {
-         const status = agent.state === "done" ? "ok" : agent.state === "error" ? "FAILED" : "running";
+         const status =
+            agent.state === "done"
+               ? "ok"
+               : agent.state === "error"
+                 ? "failed"
+                 : agent.state === "waiting"
+                   ? "waiting"
+                   : "running";
          const stats = [
             agent.profile,
             formatAgentModel(agent),
@@ -634,6 +654,8 @@ export const WRAP_UP_STEER_PROMPT =
 export type GetActiveAgentSession = (runId: string, agentIndex: number) => AgentSession | undefined;
 
 export type AbortActiveAgent = (runId: string, agentIndex: number) => boolean;
+export type AbortWorkflow = (runId: string) => boolean;
+export type OpenWorkflowSettings = () => void | Promise<void>;
 export type GetAvailableModels = () => string[];
 
 export class WorkflowDashboard {
@@ -654,6 +676,7 @@ export class WorkflowDashboard {
    private current?: RunEntry;
    private notice?: string;
    private noticeAt = 0;
+   private lastAbortKeyAt = 0;
    private deletePendingRunId?: string;
    private disposed = false;
    private timer: ReturnType<typeof setInterval>;
@@ -663,6 +686,8 @@ export class WorkflowDashboard {
    private getActive: () => Map<string, WorkflowDetails>;
    private getActiveAgentSession?: GetActiveAgentSession;
    private abortActiveAgent?: AbortActiveAgent;
+   private abortWorkflow?: AbortWorkflow;
+   private openWorkflowSettings?: OpenWorkflowSettings;
    private getAvailableModels?: GetAvailableModels;
    private sessionId: string;
    private referencedRunIds: ReadonlySet<string>;
@@ -683,7 +708,9 @@ export class WorkflowDashboard {
       initialRunId?: string,
       getActiveAgentSession?: GetActiveAgentSession,
       abortActiveAgent?: AbortActiveAgent,
-      getAvailableModels?: GetAvailableModels
+      getAvailableModels?: GetAvailableModels,
+      abortWorkflow?: AbortWorkflow,
+      openWorkflowSettings?: OpenWorkflowSettings
    ) {
       this.tui = tui;
       this.theme = theme;
@@ -692,6 +719,8 @@ export class WorkflowDashboard {
       this.getActiveAgentSession = getActiveAgentSession;
       this.abortActiveAgent = abortActiveAgent;
       this.getAvailableModels = getAvailableModels;
+      this.abortWorkflow = abortWorkflow;
+      this.openWorkflowSettings = openWorkflowSettings;
       this.sessionId = sessionId;
       this.referencedRunIds = referencedRunIds;
       this.close = close;
@@ -759,6 +788,34 @@ export class WorkflowDashboard {
    private clampAgentIndex() {
       const agents = this.selectedGroup()?.agents ?? [];
       this.agentIndex = Math.min(this.agentIndex, Math.max(0, agents.length - 1));
+   }
+
+   private consumeDoubleXAbort(data: string): boolean {
+      const selected = this.view === "list" ? this.entries[this.listIndex] : undefined;
+      const running = selected?.details.status === "running" && selected.live;
+      if (!running || (data !== "x" && data !== "xx")) {
+         this.lastAbortKeyAt = 0;
+         return false;
+      }
+      if (data === "xx") {
+         this.lastAbortKeyAt = 0;
+         return true;
+      }
+      const now = Date.now();
+      const isDouble = now - this.lastAbortKeyAt <= DOUBLE_X_ABORT_WINDOW_MS;
+      this.lastAbortKeyAt = isDouble ? 0 : now;
+      return isDouble;
+   }
+
+   private abortCurrentWorkflow(): boolean {
+      const entry = this.view === "list" ? this.entries[this.listIndex] : this.current;
+      if (!entry || entry.details.status !== "running" || !entry.live) return false;
+      const ok = this.abortWorkflow?.(entry.runId) ?? false;
+      if (ok) {
+         this.notice = "aborted workflow";
+         this.noticeAt = Date.now();
+      }
+      return ok;
    }
 
    private requestDeleteSelectedRun() {
@@ -1066,6 +1123,12 @@ export class WorkflowDashboard {
          return;
       }
 
+      const doubleXAbort = this.consumeDoubleXAbort(data);
+      if (doubleXAbort) {
+         this.abortCurrentWorkflow();
+         return;
+      }
+
       if (this.view === "list") {
          if (up) {
             this.listIndex = wrapSelection(this.listIndex, -1, this.entries.length);
@@ -1077,6 +1140,10 @@ export class WorkflowDashboard {
             this.listIndex = Math.max(0, this.entries.length - 1);
          } else if (data === "d") {
             this.requestDeleteSelectedRun();
+         } else if (data === "X") {
+            this.abortCurrentWorkflow();
+         } else if (data === "s") {
+            void this.openWorkflowSettings?.();
          } else if (confirm) {
             const entry = this.entries[this.listIndex];
             if (entry) {
@@ -1128,13 +1195,17 @@ export class WorkflowDashboard {
             } else if (confirm && this.selectedAgent()) {
                this.transcriptScroll = 0;
                this.showThinking = true;
-               this.showSystemPrompt = false;
+               this.showSystemPrompt = this.selectedAgent()?.profile === "summary";
                this.followTail = true;
                this.view = "transcript";
             }
          }
          if (data === "s") {
+            void this.openWorkflowSettings?.();
+         } else if (data === "r") {
             this.saveReport();
+         } else if (data === "X") {
+            this.abortCurrentWorkflow();
          } else if (
             data === "x" &&
             this.current &&
@@ -1171,7 +1242,9 @@ export class WorkflowDashboard {
          const maxScroll = Math.max(0, this.transcriptRowCount - this.transcriptViewportSize);
          const scrollStep = data === "j" || data === "k" ? TRANSCRIPT_SCROLL_STEP : 1;
          const pageStep = Math.max(1, this.transcriptViewportSize - 2);
-         if (data === "w" && this.current && this.current.details.status === "running" && this.current.live) {
+         if (data === "X") {
+            this.abortCurrentWorkflow();
+         } else if (data === "w" && this.current && this.current.details.status === "running" && this.current.live) {
             const agent = this.selectedAgent();
             if (agent && agent.state === "running") {
                const activeSession = this.getActiveAgentSession?.(this.current.runId, agent.index);
@@ -1197,7 +1270,9 @@ export class WorkflowDashboard {
                this.modelFilterInput = "";
                this.modelSelectedIndex = 0;
             }
-         } else if (data === "s" && this.current) {
+         } else if (data === "s") {
+            void this.openWorkflowSettings?.();
+         } else if (data === "c" && this.current) {
             const agent = this.selectedAgent();
             if (agent) void this.copyAgentTranscript(this.current.details, agent);
          } else if ((data === "y" || data === "p") && this.current) {
@@ -1348,8 +1423,11 @@ export class WorkflowDashboard {
       );
       lines.push(header);
 
+      const selectedRun = this.entries[this.listIndex];
+      const workflowAbortHint =
+         selectedRun?.details.status === "running" && selectedRun.live ? " · xx abort workflow" : "";
       const hint = this.hintLines(
-         `${this.keys("tui.select.up")}/${this.keys("tui.select.down")} select · ${this.keys("tui.select.confirm")} open · d d delete · ${this.keys("tui.select.cancel")} close`,
+         `${this.keys("tui.select.up")}/${this.keys("tui.select.down")} select · ${this.keys("tui.select.confirm")} open${workflowAbortHint} · s settings · d d delete · ${this.keys("tui.select.cancel")} close`,
          width
       );
       const panelHeight = Math.max(2, height - 1 - hint.length);
@@ -1407,8 +1485,8 @@ export class WorkflowDashboard {
       const runningActions = isAgentRunning ? " · x abort · m swap model" : "";
       const hintText =
          this.detailFocus === "phases"
-            ? `select phase · l/${this.keys("tui.editor.cursorRight")}/${this.keys("tui.select.confirm")} agents · ${this.keys("tui.select.cancel")} back · s save report`
-            : `select agent · y/p copy path · h/${this.keys("tui.editor.cursorLeft")}/${this.keys("tui.select.cancel")} phases · ${this.keys("tui.select.confirm")} transcript${runningActions} · s save report`;
+            ? `select phase · l/${this.keys("tui.editor.cursorRight")}/${this.keys("tui.select.confirm")} agents · ${this.keys("tui.select.cancel")} back · s settings · r save report`
+            : `select agent · y/p copy path · h/${this.keys("tui.editor.cursorLeft")}/${this.keys("tui.select.cancel")} phases · ${this.keys("tui.select.confirm")} transcript${runningActions} · s settings · r save report`;
       const hint = this.hintLines(hintText, width);
       const panelHeight = Math.max(2, height - 2 - hint.length);
       const bodyHeight = Math.max(0, panelHeight - 2);
@@ -1422,7 +1500,7 @@ export class WorkflowDashboard {
          const index = phaseWindow.offset + i;
          const selected = index === this.phaseIndex;
          const marker = selected ? theme.fg(this.detailFocus === "phases" ? "accent" : "muted", "❯") : " ";
-         const groupDone = group.agents.filter((a) => a.state !== "running").length;
+         const groupDone = group.agents.filter((a) => !isAgentPending(a)).length;
          const square = groupSquare(group, theme);
          const title =
             selected && this.detailFocus === "phases" ? theme.fg("accent", group.title) : theme.fg("text", group.title);
@@ -1442,7 +1520,14 @@ export class WorkflowDashboard {
             const index = agentWindow.offset + visibleIndex;
             const selected = index === this.agentIndex;
             const marker = selected && this.detailFocus === "agents" ? theme.fg("accent", "❯") : " ";
-            const stats = [agent.profile, formatAgentModel(agent), agentContext(agent)].filter(Boolean).join(" · ");
+            const stats = [
+               agent.state === "waiting" ? "waiting" : undefined,
+               agent.profile,
+               formatAgentModel(agent),
+               agentContext(agent)
+            ]
+               .filter(Boolean)
+               .join(" · ");
             const label =
                selected && this.detailFocus === "agents"
                   ? theme.fg("accent", agent.label.padEnd(Math.min(maxLabel, 40)))
@@ -1451,7 +1536,8 @@ export class WorkflowDashboard {
             const elapsed = theme.fg("dim", `${formatElapsed(agent.startedAt, agent.finishedAt)} `);
             agentRows.push(this.split(left, elapsed, agentsInner));
             if (agent.error) {
-               agentRows.push(truncateToWidth(`       ${theme.fg("error", agent.error)}`, agentsInner, "…"));
+               const errorLines = wrapTextWithAnsi(`       ${theme.fg("error", agent.error)}`, agentsInner);
+               agentRows.push(...errorLines);
             }
          }
          if (selectedGroup.agents.length === 0) {
@@ -1460,7 +1546,11 @@ export class WorkflowDashboard {
       }
       if (d.error) {
          agentRows.push("");
-         agentRows.push(truncateToWidth(` ${theme.fg("error", `workflow error: ${d.error}`)}`, agentsInner, "…"));
+         const workflowErrorLines = wrapTextWithAnsi(
+            ` ${theme.fg("error", `workflow error: ${d.error}`)}`,
+            agentsInner
+         );
+         agentRows.push(...workflowErrorLines);
       }
 
       const agentCount = selectedGroup?.agents.length ?? 0;
@@ -1481,14 +1571,15 @@ export class WorkflowDashboard {
       const theme = this.theme;
       const rows: string[] = [];
       const contentWidth = Math.max(8, width - 5);
+      const systemPrompt = agent.systemPrompt;
 
-      if (agent.systemPrompt) {
+      if (systemPrompt) {
          const systemPromptLabel = this.showSystemPrompt
-            ? "[SYSTEM_PROMPT] (Ctrl+S to collapse)"
-            : "[SYSTEM_PROMPT] (Ctrl+S to expand)";
+            ? "[System prompt] (Ctrl+S to collapse)"
+            : "[System prompt] (Ctrl+S to expand)";
          rows.push(theme.fg("accent", theme.bold(systemPromptLabel)));
          if (this.showSystemPrompt) {
-            const styledPrompt = theme.fg("dim", systemPromptForDisplay(agent.systemPrompt));
+            const styledPrompt = theme.fg("dim", systemPrompt);
             for (const line of wrapTextWithAnsi(styledPrompt, contentWidth)) rows.push(line);
          }
          rows.push(theme.fg("border", "─".repeat(Math.max(1, width - 2))));
@@ -1582,10 +1673,10 @@ export class WorkflowDashboard {
          )
       );
 
-      const isLiveRunning = details.status === "running" && agent.state === "running";
+      const isLiveRunning = details.status === "running" && this.current?.live;
       const runningActions = isLiveRunning ? "w wrap up · x abort · m swap model · " : "";
       const hint = this.hintLines(
-         `${runningActions}s copy transcript · y/p copy path · t ${this.showThinking ? "collapse" : "expand"} thinking · ctrl-s system prompt · ${this.keys("tui.altScreen.pageUp")}/${this.keys("tui.altScreen.pageDown")} page · g/G top/bottom · h/left/esc back`,
+         `${runningActions}s settings · c copy transcript · y/p copy path · t ${this.showThinking ? "collapse" : "expand"} thinking · ctrl-s system prompt · ${this.keys("tui.altScreen.pageUp")}/${this.keys("tui.altScreen.pageDown")} page · g/G top/bottom · h/left/esc back`,
          width
       );
       const panelHeight = Math.max(2, height - 2 - hint.length);
@@ -1610,18 +1701,12 @@ export class WorkflowDashboard {
    }
 }
 
-const SYSTEM_PROMPT_TRUNCATION_SUFFIX = /\n?\[truncated: string limit\]$/;
-
-function systemPromptForDisplay(systemPrompt: string): string {
-   return systemPrompt.replace(SYSTEM_PROMPT_TRUNCATION_SUFFIX, "");
-}
-
 function transcriptLabel(entry: TranscriptEntry): string {
-   if (entry.role === "user") return "USER";
-   if (entry.role === "assistant") return "ASSISTANT";
-   if (entry.role === "thinking") return "THINKING";
-   if (entry.role === "tool") return `TOOL ${entry.name ?? "unknown"}`;
-   return `RESULT ${entry.name ?? "unknown"}`;
+   if (entry.role === "user") return "User";
+   if (entry.role === "assistant") return "Assistant";
+   if (entry.role === "thinking") return "Thinking";
+   if (entry.role === "tool") return `Tool ${entry.name ?? "unknown"}`;
+   return `Result ${entry.name ?? "unknown"}`;
 }
 
 function transcriptColor(entry: TranscriptEntry): "accent" | "success" | "dim" | "warning" | "error" | "muted" {
@@ -1639,7 +1724,7 @@ function statusSquareFor(details: WorkflowDetails, theme: Theme): string {
 
 function groupSquare(group: PhaseGroup, theme: Theme): string {
    if (group.agents.length === 0) return theme.fg("dim", SQUARE);
-   if (group.agents.some((a) => a.state === "running")) return theme.fg("warning", SQUARE);
+   if (group.agents.some(isAgentPending)) return theme.fg("warning", SQUARE);
    if (group.agents.some((a) => a.state === "error")) return theme.fg("error", SQUARE);
    return theme.fg("success", SQUARE);
 }
@@ -1651,7 +1736,9 @@ export async function showWorkflowDashboard(
    initialRunId?: string,
    getActiveAgentSession?: GetActiveAgentSession,
    abortActiveAgent?: AbortActiveAgent,
-   getAvailableModels?: GetAvailableModels
+   getAvailableModels?: GetAvailableModels,
+   abortWorkflow?: AbortWorkflow,
+   openWorkflowSettings?: OpenWorkflowSettings
 ): Promise<void> {
    await ctx.ui.custom<void>(
       (tui, theme, keybindings, done) => {
@@ -1669,7 +1756,9 @@ export async function showWorkflowDashboard(
             initialRunId,
             getActiveAgentSession,
             abortActiveAgent,
-            getAvailableModels
+            getAvailableModels,
+            abortWorkflow,
+            openWorkflowSettings
          );
          const releaseAlternateScreen = enterWorkflowAlternateScreen(tui, keybindings, dashboard);
          return {

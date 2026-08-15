@@ -11,6 +11,8 @@
  * errors, aborts, missing structured output) settles into an `AgentOutcome`.
  */
 
+import { contentText, isContextOverflow } from "@earendil-works/pi-ai";
+import { completeSimple } from "@earendil-works/pi-ai/compat";
 import {
    createAgentSession,
    DefaultResourceLoader,
@@ -23,7 +25,6 @@ import {
    type ExtensionContext,
    type ToolDefinition
 } from "@earendil-works/pi-coding-agent";
-import { isContextOverflow } from "@earendil-works/pi-ai";
 import { Type, type TSchema } from "typebox";
 import { resolveAgentProfile, type AgentProfile } from "../shared/agent-profiles.ts";
 import {
@@ -38,11 +39,16 @@ import { createToolCallTimeoutGuard } from "../shared/timeouts.ts";
 import { boundTranscript } from "../shared/transcript.ts";
 import { computeAssistantUsage, emptyUsage } from "../shared/usage.ts";
 import { type AgentUsage, type TranscriptEntry } from "./model.ts";
-import { buildWorkflowAgentPrompt, STRUCTURED_OUTPUT_TOOL_DESCRIPTION } from "./prompt.ts";
+import {
+   buildWorkflowAgentPrompt,
+   buildWorkflowSummaryTranscript,
+   SUMMARY_SYSTEM_PROMPT,
+   STRUCTURED_OUTPUT_SYSTEM_INSTRUCTION,
+   STRUCTURED_OUTPUT_TOOL_DESCRIPTION
+} from "./prompt.ts";
 import { safeStringify, truncateUtf8 } from "../shared/serialization.ts";
 
 const AGENT_OUTPUT_MAX_BYTES = 64 * 1024;
-export const FIRST_RESPONSE_TIMEOUT_MS = 45_000;
 
 /** Default result shape for agents that do not provide a custom schema. */
 export const DEFAULT_WORKFLOW_OUTPUT_SCHEMA = {
@@ -124,8 +130,24 @@ export interface RunAgentOptions {
    onProgress?: (progress: AgentProgress) => void;
    /** Test-only override for the per-tool execution timeout. */
    toolCallTimeoutMs?: number;
-   /** Test-only override for the first assistant response-event timeout. */
-   firstResponseTimeoutMs?: number;
+   /** Configured fallback model IDs to swap to and retry when the agent fails. */
+   fallbackModels?: string[];
+}
+
+/** Options for the mandatory final summary request. */
+export interface RunWorkflowSummaryOptions {
+   /** Summary source data from the previous phase. */
+   prompt: string;
+   /** Model used for the summary request. */
+   model: WorkflowModel;
+   /** Optional reasoning level. The summary request never inherits profile tools or prompts. */
+   thinkingLevel?: ThinkingLevel;
+   modelRegistry: ExtensionContext["modelRegistry"];
+   signal: AbortSignal;
+   /** Maximum output tokens for the final summary. */
+   maxTokens?: number;
+   /** Provider completion implementation, injectable for alternate runtimes and tests. */
+   completeFn?: typeof completeSimple;
 }
 
 /** Build isolated resources for each concurrent workflow child. */
@@ -135,7 +157,10 @@ export function createWorkflowResources(
    projectTrusted: boolean,
    profile?: AgentProfile
 ) {
-   const appendSystemPrompt = profile?.systemPrompt ? [profile.systemPrompt] : [];
+   const appendSystemPrompt = [
+      ...(profile?.systemPrompt ? [profile.systemPrompt] : []),
+      ...(variant === "structured" ? [STRUCTURED_OUTPUT_SYSTEM_INSTRUCTION] : [])
+   ];
    return createChildResources({
       cwd,
       projectTrusted,
@@ -340,78 +365,124 @@ function errorText(error: unknown): string {
    return (error instanceof Error ? error.message : String(error)).slice(0, 16 * 1024);
 }
 
-function formatTimeout(timeoutMs: number) {
-   return timeoutMs % 1_000 === 0 ? `${timeoutMs / 1_000} seconds` : `${timeoutMs} ms`;
-}
-
 /**
- * Abort a provider turn that does not produce a real assistant response.
- * The timer can be re-armed for every provider turn in one agent prompt.
+ * Run the mandatory final summary as a direct text completion.
+ *
+ * This intentionally bypasses AgentSession: it supplies the Summary system
+ * prompt directly, binds no tools, and does not use structured_output. The
+ * assistant's final text is the workflow result.
  */
-export function createFirstResponseWatchdog(
-   onTimeout: () => Promise<unknown>,
-   options: { timeoutMs?: number; model?: string } = {}
-) {
-   const timeoutMs = options.timeoutMs ?? FIRST_RESPONSE_TIMEOUT_MS;
-   let timer: ReturnType<typeof setTimeout> | undefined;
-   let rejectTimeout: ((reason: Error) => void) | undefined;
-   let active = false;
-   let timedOut = false;
-   const timeout = new Promise<never>((_resolve, reject) => {
-      rejectTimeout = reject;
+export async function runWorkflowSummary(options: RunWorkflowSummaryOptions): Promise<AgentOutcome> {
+   const metadata = {
+      provider: options.model.provider,
+      model: options.model.id,
+      contextWindow: options.model.contextWindow,
+      systemPrompt: SUMMARY_SYSTEM_PROMPT
+   };
+   const emptyResult = (error: string, aborted = false): AgentOutcome => ({
+      ok: false,
+      output: "",
+      error,
+      aborted,
+      usage: emptyUsage(),
+      ...metadata,
+      transcript: []
    });
 
-   const arm = () => {
-      if (!active || timedOut) return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-         timer = undefined;
-         timedOut = true;
-         const model = options.model ? ` for ${options.model}` : "";
-         const error = new Error(
-            `Agent received no assistant response event${model} within ${formatTimeout(timeoutMs)}; the provider request may be stalled. Retry the workflow.`
-         );
-         rejectTimeout?.(error);
-         void onTimeout().catch(() => {});
-      }, timeoutMs);
-      timer.unref?.();
-   };
+   if (options.signal.aborted) return emptyResult("Final summary was aborted", true);
 
-   const cancel = () => {
-      if (timer) clearTimeout(timer);
-      timer = undefined;
-   };
-
-   return {
-      arm,
-      markResponse: cancel,
-      async waitFor<T>(operation: Promise<T>) {
-         active = true;
-         arm();
-         try {
-            return await Promise.race([operation, timeout]);
-         } finally {
-            active = false;
-            cancel();
+   try {
+      const auth = await options.modelRegistry.getApiKeyAndHeaders?.(options.model);
+      const maxTokens = Math.max(
+         1,
+         Math.min(
+            options.maxTokens ?? 8_192,
+            options.model.maxTokens > 0 ? options.model.maxTokens : Number.POSITIVE_INFINITY
+         )
+      );
+      const reasoning = options.thinkingLevel === "off" ? undefined : options.thinkingLevel;
+      const complete = options.completeFn ?? completeSimple;
+      const response = await complete(
+         options.model,
+         {
+            systemPrompt: SUMMARY_SYSTEM_PROMPT,
+            messages: [
+               {
+                  role: "user",
+                  content: options.prompt,
+                  timestamp: Date.now()
+               }
+            ]
+         },
+         {
+            ...(auth?.ok ? { apiKey: auth.apiKey, headers: auth.headers } : {}),
+            ...(reasoning ? { reasoning } : {}),
+            signal: options.signal,
+            maxTokens,
+            cacheRetention: "none"
          }
+      );
+
+      if (options.signal.aborted || response.stopReason === "aborted") {
+         return emptyResult("Final summary was aborted", true);
       }
-   };
+      if (response.stopReason === "error") {
+         return emptyResult(response.errorMessage ?? "Final summary failed");
+      }
+
+      const output = contentText(response.content).trim();
+      if (!output) return emptyResult("Final summary returned no text");
+
+      return {
+         ok: true,
+         output,
+         aborted: false,
+         usage: computeAssistantUsage([{ role: "assistant", usage: response.usage }]),
+         ...metadata,
+         transcript: buildWorkflowSummaryTranscript({ prompt: options.prompt, output })
+      };
+   } catch (error) {
+      return emptyResult(errorText(error), options.signal.aborted);
+   }
 }
 
-/**
- * Identify a real assistant response for the response watchdog.
- * Empty and thinking-only messages can be provider progress events and must
- * not cancel the watchdog before the model produces usable output.
- */
-export function isAssistantResponseEvent(event: AgentSessionEvent): boolean {
-   if (event.type !== "message_start" && event.type !== "message_update" && event.type !== "message_end") {
-      return false;
+export function shouldRetryWorkflowFallback(options: {
+   signalAborted: boolean;
+   aborted: boolean;
+   structuredOutput: unknown;
+   structuredOutputStarted: boolean;
+   agentWorking: boolean;
+   activeToolCalls: number;
+   toolCallsStarted: boolean;
+}): boolean {
+   return (
+      !options.signalAborted &&
+      !options.aborted &&
+      options.structuredOutput === undefined &&
+      !options.structuredOutputStarted &&
+      !options.agentWorking &&
+      options.activeToolCalls === 0 &&
+      !options.toolCallsStarted
+   );
+}
+
+export function resolveModelById(
+   registry: ExtensionContext["modelRegistry"],
+   modelId: string
+): WorkflowModel | undefined {
+   if (!registry || !modelId) return undefined;
+   const slash = modelId.indexOf("/");
+   if (slash > 0) {
+      const provider = modelId.slice(0, slash);
+      const id = modelId.slice(slash + 1);
+      return registry.find(provider, id);
    }
-   if (event.message.role !== "assistant") return false;
-   return event.message.content.some((part) => {
-      if (part.type === "text") return part.text.trim().length > 0;
-      return part.type === "toolCall";
-   });
+   const all = registry.getAll?.() ?? [];
+   const matches = all.filter((m) => m.id === modelId);
+   if (matches.length > 0) {
+      return registry.find(matches[0].provider, matches[0].id);
+   }
+   return undefined;
 }
 
 export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> {
@@ -483,6 +554,10 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
    let stopReason: string | undefined;
    let errorMessage: string | undefined;
    let compactionState = createCompactionState();
+   let agentWorking = false;
+   let structuredOutputStarted = false;
+   let toolCallsStarted = false;
+   const activeToolCalls = new Set<string>();
    const toolTimings = new Map<string, ToolExecutionTiming>();
 
    const sync = () => {
@@ -542,17 +617,23 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
       transcript: []
    });
 
-   let responseWatchdog: ReturnType<typeof createFirstResponseWatchdog> | undefined;
    const unsubscribe = childSession.subscribe((event) => {
       compactionState = observeCompactionEvent(compactionState, event);
-      if (event.type === "compaction_start") responseWatchdog?.markResponse();
-      if (event.type === "compaction_end" || event.type === "auto_retry_end") responseWatchdog?.arm();
-      if (event.type === "turn_start") responseWatchdog?.arm();
-      if (isAssistantResponseEvent(event)) responseWatchdog?.markResponse();
-      if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
-         recordToolExecutionTiming(toolTimings, event);
+      if (event.type === "agent_start") {
+         agentWorking = true;
       } else if (event.type === "agent_end" && shouldDeferAgentEnd(compactionState, event)) {
          return;
+      } else if (event.type === "agent_end") {
+         agentWorking = false;
+      } else if (event.type === "tool_execution_start") {
+         toolCallsStarted = true;
+         activeToolCalls.add(event.toolCallId);
+         if (event.toolName === "structured_output") structuredOutputStarted = true;
+      } else if (event.type === "tool_execution_end") {
+         activeToolCalls.delete(event.toolCallId);
+      }
+      if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
+         recordToolExecutionTiming(toolTimings, event);
       } else if (event.type !== "message_end" && event.type !== "compaction_end") {
          return;
       }
@@ -586,18 +667,58 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
    let transcript: TranscriptEntry[] = [];
    try {
       if (!aborted) {
-         const watchdog = createFirstResponseWatchdog(() => childSession.abort(), {
-            timeoutMs: options.firstResponseTimeoutMs,
-            model: modelId
-         });
-         responseWatchdog = watchdog;
-         await watchdog.waitFor(
-            childSession.prompt(
+         try {
+            await childSession.prompt(
                buildWorkflowAgentPrompt(options.prompt, {
                   requireStructuredOutput: options.schema !== undefined
                })
-            )
-         );
+            );
+         } catch (error) {
+            errorMessage = errorText(error);
+            stopReason = "error";
+         }
+         sync();
+
+         const shouldFallback = shouldRetryWorkflowFallback({
+            signalAborted: options.signal?.aborted === true,
+            aborted,
+            structuredOutput: structured,
+            structuredOutputStarted,
+            agentWorking,
+            activeToolCalls: activeToolCalls.size,
+            toolCallsStarted
+         });
+
+         if (shouldFallback && options.fallbackModels && options.fallbackModels.length > 0) {
+            for (const fallbackModelId of options.fallbackModels) {
+               if (options.signal?.aborted || aborted) break;
+               const resolvedFallback = resolveModelById(options.modelRegistry, fallbackModelId);
+               if (!resolvedFallback) continue;
+               try {
+                  if (toolCallsStarted || activeToolCalls.size > 0 || agentWorking) break;
+                  // eslint-disable-next-line no-await-in-loop
+                  await childSession.setModel(resolvedFallback);
+                  providerId = resolvedFallback.provider;
+                  modelId = resolvedFallback.id;
+                  contextWindow = resolvedFallback.contextWindow;
+                  errorMessage = undefined;
+                  stopReason = undefined;
+
+                  // eslint-disable-next-line no-await-in-loop
+                  await childSession.prompt(
+                     "Continue the unfinished task from the existing session and call structured_output when complete."
+                  );
+                  sync();
+                  if (structured !== undefined && stopReason !== "error" && errorMessage === undefined) {
+                     break;
+                  }
+                  if (toolCallsStarted || activeToolCalls.size > 0 || agentWorking) break;
+               } catch (fallbackError) {
+                  errorMessage = errorText(fallbackError);
+                  stopReason = "error";
+               }
+            }
+         }
       }
    } catch (error) {
       errorMessage = errorMessage ?? errorText(error);
@@ -606,7 +727,6 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
       options.signal?.removeEventListener("abort", onAbort);
       if (abortPromise) await abortPromise;
       unsubscribe();
-      responseWatchdog = undefined;
       unsubscribeToolTimeout?.();
       sync();
       const finalText = !options.schema ? defaultWorkflowOutput(structured) : undefined;

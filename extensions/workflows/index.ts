@@ -6,19 +6,21 @@
  * isolated subagents:
  *
  *   export const meta = { name, description, phases: [{ title, detail? }] }
- *   phase(title)                                  // mark runtime phase progression
+ *   phase(title)                                  // mark runtime work phase progression
  *   await agent(prompt, { agent?, label?, phase?, schema? })
  *   await parallel([() => agent(...), ...], { concurrency? })
  *   args                                          // parsed JSON args passed with the tool call
  *
  * `agent()` always resolves to `{ ok, output, structured?, error? }` — it
- * never throws into the script. Scripts branch on `ok` explicitly.
+ * never throws into the script. Scripts branch on `ok` explicitly. The runtime
+ * appends one no-tools `Summary` phase after the work phases; its assistant
+ * text is the workflow result.
  *
  * Runs are blocking by default (live progress in the tool block). Pass
  * `background: true` to return immediately and get a follow-up message when
  * the run finishes. Run artifacts (script, args, statuses, result) are saved
- * under `~/.pi/agent/workflows/<runId>/` for inspection; result and bounded
- * transcripts use separate artifacts, and there is no resume.
+ * under `~/.pi/agent/workflows/<runId>/` for inspection; child session files
+ * provide agent transcripts, and there is no resume.
  */
 
 import { randomBytes } from "node:crypto";
@@ -27,24 +29,27 @@ import * as path from "node:path";
 import {
    getAgentDir,
    getMarkdownTheme,
+   getSelectListTheme,
    keyHint,
    type AgentSession,
    type ExtensionAPI,
    type ExtensionContext
 } from "@earendil-works/pi-coding-agent";
-import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
+import { Box, Container, Input, Markdown, SelectList, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type, type Static } from "typebox";
 import { listAgentProfiles, resolveAgentProfile } from "../shared/agent-profiles.ts";
+import { resolveProfileModel } from "../shared/model-resolution.ts";
 import { formatActivityStatus } from "./activity-status.ts";
 import { createWorkflowPersistence, persistWorkflowJson, recoverWorkflowDetails } from "./artifacts.ts";
-import { RunController } from "./controller.ts";
+import { MAX_AGENT_CALLS, RunController } from "./controller.ts";
 import { sessionWorkflowRunIds, showWorkflowDashboard } from "./dashboard.ts";
-import { extractMeta, prepareWorkflowScript, type WorkflowMeta } from "./meta.ts";
+import { prepareWorkflowScript } from "./meta.ts";
 import { openAgentsPanel } from "./agents-panel.ts";
 import {
    agentContext,
    aggregateUsage,
    countStates,
+   displayPhaseTitle,
    emptyUsage,
    formatAgentModel,
    formatElapsed,
@@ -59,20 +64,79 @@ import {
    type WorkflowDetails
 } from "./model.ts";
 import {
+   appendSummaryPhase,
    buildBackgroundWorkflowFollowUp,
    buildBackgroundWorkflowLaunchResult,
    buildWorkflowResultMessage,
+   buildWorkflowSummaryPrompt,
+   buildWorkflowSummaryTranscript,
+   collectPreviousPhaseResults,
+   createSummaryAgentRecord,
+   SUMMARY_PHASE_TITLE,
    WORKFLOW_PARAMETER_DESCRIPTIONS,
    WORKFLOW_PROMPT_GUIDELINES,
    WORKFLOW_PROMPT_SNIPPET,
    WORKFLOW_TOOL_DESCRIPTION
 } from "./prompt.ts";
-import { createWorkflowResources, runAgent } from "./runner.ts";
+import { createWorkflowResources, runAgent, runWorkflowSummary, type AgentOutcome } from "./runner.ts";
+import {
+   DEFAULT_WORKFLOW_SETTINGS,
+   readWorkflowSettings,
+   type WorkflowSettings,
+   type WorkflowThinkingLevel,
+   WORKFLOW_THINKING_LEVELS,
+   writeWorkflowSettings
+} from "./settings.ts";
 import { runWorkflowSandbox } from "./sandbox.ts";
 import { safeStringify, writeFileAtomic } from "../shared/serialization.ts";
 
 export const WORKFLOW_TOOL_EMIT_INTERVAL_MS = 500;
+export const WORKFLOW_BACKGROUND_RESULT_MESSAGE_TYPE = "workflow-background-result";
 const PREVIEW_LENGTH = 200;
+
+export function renderBackgroundWorkflowMessage(
+   message: { content: unknown; details?: unknown },
+   options: { expanded: boolean },
+   theme: ExtensionContext["ui"]["theme"]
+) {
+   const content =
+      typeof message.content === "string"
+         ? message.content
+         : Array.isArray(message.content)
+           ? message.content
+                .map((part) => (part && typeof part === "object" && "text" in part ? String(part.text) : ""))
+                .join("")
+           : "";
+   const [marker, ...bodyLines] = content.split(/\r?\n/);
+   const details =
+      message.details && typeof message.details === "object" ? (message.details as Record<string, unknown>) : {};
+   const markerMatch = marker?.match(/^\[Background workflow (\S+) (\S+)\]$/);
+   const runId = typeof details.runId === "string" ? details.runId : (markerMatch?.[1] ?? "unknown");
+   const status = typeof details.status === "string" ? details.status : (markerMatch?.[2] ?? "completed");
+   const header = theme.fg("customMessageLabel", `[Background workflow ${runId} ${status}]`);
+   const body = bodyLines.join("\n").replaceAll("\\", "/").trim();
+   const bodyRows = body ? body.split("\n") : [];
+   const resultRow = bodyRows.findIndex((row) => row.trim() === "Result:");
+   const hasCollapsedResult = resultRow >= 0;
+   const previewRows = hasCollapsedResult ? bodyRows.slice(0, resultRow) : bodyRows;
+   const visibleBodyRows = options.expanded ? bodyRows : previewRows;
+   const renderedBody = visibleBodyRows.join("\n");
+   const box = new Box(1, 1, (text) => theme.bg(status === "completed" ? "toolSuccessBg" : "toolErrorBg", text));
+   box.addChild(new Text(header, 0, 0));
+   if (renderedBody) {
+      box.addChild(new Spacer(1));
+      box.addChild(
+         new Markdown(renderedBody, 0, 0, getMarkdownTheme(), {
+            color: (text) => theme.fg("customMessageText", text)
+         })
+      );
+   }
+   if (!options.expanded && hasCollapsedResult) {
+      box.addChild(new Spacer(1));
+      box.addChild(new Text(theme.fg("muted", "(ctrl+o to view result)"), 0, 0));
+   }
+   return box;
+}
 
 function formatCleanSections(sections: string[][], theme: ExtensionContext["ui"]["theme"], width = 60): string {
    const divider = theme.fg("muted", "─".repeat(width));
@@ -88,10 +152,10 @@ function formatCleanSections(sections: string[][], theme: ExtensionContext["ui"]
 }
 
 function statusBadge(status: WorkflowDetails["status"], theme: ExtensionContext["ui"]["theme"]): string {
-   if (status === "completed") return theme.fg("success", "✓ DONE");
-   if (status === "running") return theme.fg("warning", "● RUNNING");
-   if (status === "aborted") return theme.fg("error", "✗ ABORTED");
-   return theme.fg("error", "✗ FAILED");
+   if (status === "completed") return theme.fg("success", "✓ done");
+   if (status === "running") return theme.fg("warning", "● running");
+   if (status === "aborted") return theme.fg("error", "✗ aborted");
+   return theme.fg("error", "✗ failed");
 }
 
 function agentBadge(state: AgentRecord["state"], theme: ExtensionContext["ui"]["theme"]): string {
@@ -137,12 +201,454 @@ function errorText(error: unknown): string {
    return (error instanceof Error ? error.message : String(error)).slice(0, 16 * 1024);
 }
 
+function resolveSummaryModel(settings: WorkflowSettings, ctx: ExtensionContext) {
+   if (!settings.summaryModel) return ctx.model;
+   return resolveProfileModel(
+      ctx.modelRegistry,
+      { model: settings.summaryModel },
+      ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined
+   );
+}
+
+function appendError(existing: string | undefined, next: string): string {
+   return existing ? `${existing}; ${next}` : next;
+}
+
+type WorkflowModelOption = { label: string; value?: string };
+const ACTIVE_WORKFLOW_MODEL = "__active_session_model__";
+
+function workflowModelOptions(ctx: ExtensionContext, currentModel?: string): WorkflowModelOption[] {
+   const options: Array<{ label: string; value?: string }> = [{ label: "Active session model" }];
+   const values = new Set<string>();
+   try {
+      for (const model of ctx.modelRegistry.getAvailable()) {
+         const value = `${model.provider}/${model.id}`;
+         if (values.has(value)) continue;
+         values.add(value);
+         options.push({ label: value, value });
+      }
+   } catch {
+      // Keep the active-model option if the registry is temporarily unavailable.
+   }
+   if (currentModel && !values.has(currentModel)) {
+      options.splice(1, 0, { label: `${currentModel} (saved, unavailable)`, value: currentModel });
+   }
+   return options;
+}
+
+export function filterWorkflowModelOptions<T extends WorkflowModelOption>(options: readonly T[], query: string): T[] {
+   const normalized = query.trim().toLowerCase();
+   if (!normalized) return [...options];
+   return options.filter((option) => `${option.label} ${option.value ?? ""}`.toLowerCase().includes(normalized));
+}
+
+type WorkflowSettingsPickerItem = {
+   value: string;
+   label: string;
+   description?: string;
+};
+
+type WorkflowSettingsView =
+   | "menu"
+   | "model"
+   | "thinking"
+   | "fallbacks"
+   | "add_fallback"
+   | "edit_fallback"
+   | "replace_fallback";
+
+class WorkflowSettingsPanel {
+   private settings: WorkflowSettings;
+   private view: WorkflowSettingsView = "menu";
+   private selectList!: SelectList;
+   private filterInput?: Input;
+   private items: WorkflowSettingsPickerItem[] = [];
+   private selectedFallbackIndex = -1;
+
+   constructor(
+      private ctx: ExtensionContext,
+      private tui: { requestRender: () => void },
+      private theme: ExtensionContext["ui"]["theme"],
+      private done: (result: void) => void
+   ) {
+      this.settings = readWorkflowSettings();
+      this.setMenu();
+   }
+
+   private save(next: WorkflowSettings): void {
+      try {
+         writeWorkflowSettings(next);
+         this.settings = next;
+         this.ctx.ui.notify("Workflow settings saved.", "info");
+      } catch (error) {
+         this.ctx.ui.notify(`Could not save Workflow settings: ${errorText(error)}`, "error");
+      }
+   }
+
+   private setItems(items: WorkflowSettingsPickerItem[], selectedValue?: string): void {
+      this.items = items;
+      this.selectList = new SelectList(items, Math.min(items.length, 12), getSelectListTheme());
+      const selectedIndex = selectedValue === undefined ? -1 : items.findIndex((item) => item.value === selectedValue);
+      if (selectedIndex >= 0) this.selectList.setSelectedIndex(selectedIndex);
+      this.selectList.onSelect = (item) => this.select(item.value);
+      this.selectList.onCancel = () => this.cancelPicker();
+   }
+
+   private setMenu(): void {
+      this.view = "menu";
+      this.filterInput = undefined;
+      const fallbackCount = this.settings.fallbackModels?.length ?? 0;
+      const fallbackLabel = fallbackCount === 0 ? "none" : `${fallbackCount} configured`;
+      this.setItems(
+         [
+            {
+               value: "model",
+               label: `Summary model: ${this.settings.summaryModel ?? "Active session model"}`
+            },
+            {
+               value: "thinking",
+               label: `Summary thinking: ${this.settings.summaryThinking ?? "Inherit active level"}`
+            },
+            {
+               value: "fallbacks",
+               label: `Fallback models: ${fallbackLabel}`
+            },
+            { value: "reset", label: "Reset to active defaults" },
+            { value: "done", label: "Done" }
+         ],
+         "model"
+      );
+      this.tui.requestRender();
+   }
+
+   private setModelPicker(): void {
+      this.view = "model";
+      this.filterInput = new Input();
+      this.filterInput.focused = true;
+      const options = workflowModelOptions(this.ctx, this.settings.summaryModel);
+      const items = options.map((option) => ({
+         value: option.value ?? ACTIVE_WORKFLOW_MODEL,
+         label: option.label
+      }));
+      this.setItems(items, this.settings.summaryModel ?? ACTIVE_WORKFLOW_MODEL);
+      this.tui.requestRender();
+   }
+
+   private setThinkingPicker(): void {
+      this.view = "thinking";
+      this.filterInput = undefined;
+      this.setItems(
+         [
+            { value: "__inherit__", label: "Inherit active level" },
+            ...WORKFLOW_THINKING_LEVELS.map((level) => ({ value: level, label: level }))
+         ],
+         this.settings.summaryThinking ?? "__inherit__"
+      );
+      this.tui.requestRender();
+   }
+
+   private setFallbacksView(): void {
+      this.view = "fallbacks";
+      this.filterInput = undefined;
+      const fallbacks = this.settings.fallbackModels ?? [];
+      const items: WorkflowSettingsPickerItem[] = [
+         { value: "add", label: "+ Add fallback model" },
+         ...fallbacks.map((model, idx) => ({
+            value: `item:${idx}`,
+            label: `#${idx + 1}: ${model}`
+         }))
+      ];
+      if (fallbacks.length > 0) {
+         items.push({ value: "clear", label: "Clear all fallback models" });
+      }
+      items.push({ value: "back", label: "Back" });
+      this.setItems(items, "add");
+      this.tui.requestRender();
+   }
+
+   private setAddFallbackPicker(): void {
+      this.view = "add_fallback";
+      this.filterInput = new Input();
+      this.filterInput.focused = true;
+      const options = workflowModelOptions(this.ctx);
+      const filteredOptions = options.filter((opt) => opt.value !== undefined && opt.value !== ACTIVE_WORKFLOW_MODEL);
+      const items = filteredOptions.map((opt) => ({
+         value: opt.value!,
+         label: opt.label
+      }));
+      this.setItems(items);
+      this.tui.requestRender();
+   }
+
+   private setReplaceFallbackPicker(): void {
+      this.view = "replace_fallback";
+      this.filterInput = new Input();
+      this.filterInput.focused = true;
+      const options = workflowModelOptions(this.ctx);
+      const filteredOptions = options.filter((opt) => opt.value !== undefined && opt.value !== ACTIVE_WORKFLOW_MODEL);
+      const items = filteredOptions.map((opt) => ({
+         value: opt.value!,
+         label: opt.label
+      }));
+      this.setItems(items);
+      this.tui.requestRender();
+   }
+
+   private setEditFallbackView(index: number): void {
+      this.selectedFallbackIndex = index;
+      this.view = "edit_fallback";
+      this.filterInput = undefined;
+      const fallbacks = this.settings.fallbackModels ?? [];
+      const currentModel = fallbacks[index] ?? `Model #${index + 1}`;
+      const items: WorkflowSettingsPickerItem[] = [
+         { value: "remove", label: `Remove ${currentModel}` },
+         { value: "replace", label: `Replace ${currentModel}` }
+      ];
+      if (index > 0) items.push({ value: "move_up", label: "Move up" });
+      if (index < fallbacks.length - 1) items.push({ value: "move_down", label: "Move down" });
+      items.push({ value: "back", label: "Back" });
+      this.setItems(items, "remove");
+      this.tui.requestRender();
+   }
+
+   private updateModelFilter(): void {
+      if (!this.filterInput) return;
+      const isFallbackSearch = this.view === "add_fallback" || this.view === "replace_fallback";
+      const options = workflowModelOptions(this.ctx, isFallbackSearch ? undefined : this.settings.summaryModel);
+      const candidates = isFallbackSearch
+         ? options.filter((opt) => opt.value !== undefined && opt.value !== ACTIVE_WORKFLOW_MODEL)
+         : options;
+      const filtered = filterWorkflowModelOptions(candidates, this.filterInput.getValue()).map((option) => ({
+         value: option.value ?? ACTIVE_WORKFLOW_MODEL,
+         label: option.label
+      }));
+      const internals = this.selectList as unknown as {
+         items: WorkflowSettingsPickerItem[];
+         filteredItems: WorkflowSettingsPickerItem[];
+         selectedIndex: number;
+      };
+      internals.items = filtered;
+      internals.filteredItems = filtered;
+      internals.selectedIndex = 0;
+      this.items = filtered;
+   }
+
+   private cancelPicker(): void {
+      if (this.view === "menu") this.done(undefined);
+      else if (this.view === "add_fallback" || this.view === "edit_fallback" || this.view === "replace_fallback") {
+         this.setFallbacksView();
+      } else this.setMenu();
+   }
+
+   private select(value: string): void {
+      if (this.view === "menu") {
+         if (value === "model") this.setModelPicker();
+         else if (value === "thinking") this.setThinkingPicker();
+         else if (value === "fallbacks") this.setFallbacksView();
+         else if (value === "reset") {
+            this.save({ ...DEFAULT_WORKFLOW_SETTINGS });
+            this.setMenu();
+         } else this.done(undefined);
+         return;
+      }
+
+      if (this.view === "fallbacks") {
+         if (value === "add") {
+            this.setAddFallbackPicker();
+         } else if (value === "clear") {
+            this.save({ ...this.settings, fallbackModels: undefined });
+            this.setFallbacksView();
+         } else if (value === "back") {
+            this.setMenu();
+         } else if (value.startsWith("item:")) {
+            const idx = Number.parseInt(value.slice(5), 10);
+            this.setEditFallbackView(idx);
+         }
+         return;
+      }
+
+      if (this.view === "add_fallback") {
+         const current = this.settings.fallbackModels ?? [];
+         this.save({ ...this.settings, fallbackModels: [...current, value] });
+         this.setFallbacksView();
+         return;
+      }
+
+      if (this.view === "replace_fallback") {
+         const current = [...(this.settings.fallbackModels ?? [])];
+         if (this.selectedFallbackIndex >= 0 && this.selectedFallbackIndex < current.length) {
+            current[this.selectedFallbackIndex] = value;
+            this.save({ ...this.settings, fallbackModels: current });
+         }
+         this.setFallbacksView();
+         return;
+      }
+
+      if (this.view === "edit_fallback") {
+         const current = [...(this.settings.fallbackModels ?? [])];
+         const idx = this.selectedFallbackIndex;
+         if (value === "remove") {
+            if (idx >= 0 && idx < current.length) {
+               current.splice(idx, 1);
+               this.save({ ...this.settings, fallbackModels: current.length > 0 ? current : undefined });
+            }
+            this.setFallbacksView();
+         } else if (value === "replace") {
+            this.setReplaceFallbackPicker();
+         } else if (value === "move_up") {
+            if (idx > 0 && idx < current.length) {
+               const temp = current[idx - 1];
+               current[idx - 1] = current[idx];
+               current[idx] = temp;
+               this.save({ ...this.settings, fallbackModels: current });
+            }
+            this.setFallbacksView();
+         } else if (value === "move_down") {
+            if (idx >= 0 && idx < current.length - 1) {
+               const temp = current[idx + 1];
+               current[idx + 1] = current[idx];
+               current[idx] = temp;
+               this.save({ ...this.settings, fallbackModels: current });
+            }
+            this.setFallbacksView();
+         } else {
+            this.setFallbacksView();
+         }
+         return;
+      }
+
+      if (this.view === "model") {
+         this.save({ ...this.settings, summaryModel: value === ACTIVE_WORKFLOW_MODEL ? undefined : value });
+      } else {
+         this.save({
+            ...this.settings,
+            summaryThinking: value === "__inherit__" ? undefined : (value as WorkflowThinkingLevel)
+         });
+      }
+      this.setMenu();
+   }
+
+   handleInput(data: string): void {
+      if (data === "\x1b") {
+         this.cancelPicker();
+         return;
+      }
+
+      const isSearch = this.view === "model" || this.view === "add_fallback" || this.view === "replace_fallback";
+      if (isSearch && this.filterInput) {
+         const navigation = data === "\r" || data === "\n" || data === "\x1b[A" || data === "\x1b[B";
+         if (navigation) this.selectList.handleInput(data);
+         else {
+            this.filterInput.handleInput(data);
+            this.updateModelFilter();
+         }
+      } else {
+         this.selectList.handleInput(data);
+      }
+      this.tui.requestRender();
+   }
+
+   render(width: number): string[] {
+      const title =
+         this.view === "menu"
+            ? "Workflow Settings"
+            : this.view === "model"
+              ? "Summary model"
+              : this.view === "thinking"
+                ? "Summary thinking"
+                : this.view === "fallbacks"
+                  ? "Fallback models"
+                  : this.view === "add_fallback"
+                    ? "Add fallback model"
+                    : this.view === "replace_fallback"
+                      ? "Replace fallback model"
+                      : "Edit fallback model";
+      const description =
+         this.view === "fallbacks" ||
+         this.view === "add_fallback" ||
+         this.view === "edit_fallback" ||
+         this.view === "replace_fallback"
+            ? "Configure fallback models to swap to and retry from the last message when an agent fails."
+            : "Configure workflow summary and agent execution settings.";
+      const lines = [this.theme.bold(this.theme.fg("accent", title)), this.theme.fg("muted", description), ""];
+      const isSearch = this.view === "model" || this.view === "add_fallback" || this.view === "replace_fallback";
+      if (isSearch && this.filterInput) {
+         lines.push(this.theme.fg("muted", "Search models by provider or model id:"));
+         lines.push(...this.filterInput.render(width));
+         lines.push("");
+      }
+      lines.push(...this.selectList.render(width));
+      lines.push(
+         this.theme.fg(
+            "dim",
+            isSearch
+               ? "Type to filter · ↑/↓ navigate · Enter select · Esc back"
+               : "↑/↓ navigate · Enter select · Esc back"
+         )
+      );
+      return lines;
+   }
+
+   invalidate(): void {
+      this.selectList.invalidate();
+   }
+}
+
+async function openWorkflowSettings(ctx: ExtensionContext): Promise<void> {
+   await ctx.ui.custom<void>((tui, theme, _keybindings, done) => new WorkflowSettingsPanel(ctx, tui, theme, done), {
+      overlay: true,
+      overlayOptions: { width: "80%", maxHeight: "80%", margin: 1 }
+   });
+}
+
 function summaryLine(details: WorkflowDetails): string {
    const { done, failed } = countStates(details);
    const settled = done + failed;
    return `workflow ${details.name ?? details.runId}: ${settled}/${details.agents.length} agents${
-      details.currentPhase ? ` · ${details.currentPhase}` : ""
+      details.currentPhase ? ` · ${displayPhaseTitle(details.currentPhase)}` : ""
    }`;
+}
+
+export function insertWorkflowAgentBeforeSummary(agents: AgentRecord[], record: AgentRecord): void {
+   const summaryIndex = agents.findIndex((agent) => agent.phase === SUMMARY_PHASE_TITLE);
+   if (summaryIndex < 0) agents.push(record);
+   else agents.splice(summaryIndex, 0, record);
+}
+
+function renderAbortedWorkflowResult(
+   details: WorkflowDetails,
+   expanded: boolean,
+   theme: ExtensionContext["ui"]["theme"],
+   previous: unknown
+) {
+   const { done, failed } = countStates(details);
+   const settled = done + failed;
+   const title = `${theme.fg("error", theme.bold("workflow aborted"))}  ${theme.fg("accent", details.name ?? details.runId)}`;
+   const sections = [
+      [title],
+      [
+         theme.fg("error", "the workflow was stopped before completion."),
+         theme.fg("dim", `run id: ${details.runId} · ${settled}/${details.agents.length} agents settled`)
+      ],
+      ...(details.error
+         ? [[theme.bold(theme.fg("error", "abort details")), `  ${theme.fg("error", details.error)}`]]
+         : [])
+   ];
+   const text = formatCleanSections(sections, theme);
+   if (!expanded) {
+      const component = previous instanceof Text ? previous : new Text("", 0, 0);
+      component.setText(text);
+      return component;
+   }
+   const container = previous instanceof Container ? previous : new Container();
+   container.clear();
+   container.addChild(new Text(text, 0, 0));
+   if (failed > 0) {
+      container.addChild(
+         new Text(theme.fg("error", `${failed} agent${failed === 1 ? "" : "s"} failed before abort.`), 0, 0)
+      );
+   }
+   return container;
 }
 
 export function workflowProgressUpdate(details: WorkflowDetails) {
@@ -156,7 +662,7 @@ function writeRunFile(runDir: string, name: string, content: string) {
    writeFileAtomic(path.join(runDir, name), content);
 }
 
-function compactToolDetails(details: WorkflowDetails): WorkflowDetails {
+function compactToolDetails(details: WorkflowDetails) {
    return {
       ...details,
       ...(details.result !== undefined
@@ -164,7 +670,11 @@ function compactToolDetails(details: WorkflowDetails): WorkflowDetails {
               result: JSON.parse(safeStringify(details.result, { maxBytes: 64 * 1024 }))
            }
          : {}),
-      agents: details.agents.map((agent) => ({ ...agent, transcript: [] }))
+      agents: details.agents.map(({ transcript: _transcript, preview: _preview, ...agent }) => {
+         void _transcript;
+         void _preview;
+         return agent;
+      })
    };
 }
 
@@ -182,15 +692,6 @@ function loadPersistedWorkflowDetails(runId: string): WorkflowDetails | undefine
    const runDir = path.join(getAgentDir(), "workflows", runId);
    try {
       const details = JSON.parse(fs.readFileSync(path.join(runDir, "workflow.json"), "utf8")) as WorkflowDetails;
-      if (typeof details.resultArtifact === "string") {
-         try {
-            details.result = JSON.parse(
-               fs.readFileSync(path.join(runDir, path.basename(details.resultArtifact)), "utf8")
-            );
-         } catch {
-            // Keep the compact compatibility marker when the result artifact is unavailable.
-         }
-      }
       const recovered = recoverWorkflowDetails(details);
       if (recovered !== details) {
          try {
@@ -259,7 +760,9 @@ function runDetailText(run: RunSummary, activeRuns: Map<string, WorkflowDetails>
 }
 
 export default function workflows(pi: ExtensionAPI) {
-   /** Live background runs, for /workflows and shutdown cleanup. */
+   pi.registerMessageRenderer?.(WORKFLOW_BACKGROUND_RESULT_MESSAGE_TYPE, renderBackgroundWorkflowMessage);
+
+   /** Live background runs, for /wf and shutdown cleanup. */
    const activeRuns = new Map<
       string,
       {
@@ -352,8 +855,8 @@ export default function workflows(pi: ExtensionAPI) {
       }
    });
 
-   pi.registerCommand("workflows", {
-      description: "List workflow runs (`/workflows <runId>` for one run's detail)",
+   pi.registerCommand("wf", {
+      description: "List workflow runs",
       handler: async (rawArgs, ctx) => {
          const arg = rawArgs.trim();
          const getActiveAgentSession = (runId: string, agentIndex: number): AgentSession | undefined => {
@@ -366,6 +869,12 @@ export default function workflows(pi: ExtensionAPI) {
                return true;
             }
             return false;
+         };
+         const abortWorkflow = (runId: string): boolean => {
+            const run = activeRuns.get(runId);
+            if (!run || run.details.status !== "running") return false;
+            run.controller.abort("Workflow aborted by user");
+            return true;
          };
 
          const getAvailableModels = (): string[] => {
@@ -401,7 +910,9 @@ export default function workflows(pi: ExtensionAPI) {
                arg || undefined,
                getActiveAgentSession,
                abortActiveAgent,
-               getAvailableModels
+               getAvailableModels,
+               abortWorkflow,
+               () => openWorkflowSettings(ctx)
             );
             // Opening the dashboard acknowledges finished runs.
             completedRuns = 0;
@@ -463,6 +974,7 @@ export default function workflows(pi: ExtensionAPI) {
          }
 
          const meta = prepared.meta;
+         const workflowSettings = readWorkflowSettings();
          const runId = `wf_${randomBytes(6).toString("hex")}`;
          const runDir = path.join(getAgentDir(), "workflows", runId);
          const background = (params.background ?? false) && ctx.hasUI;
@@ -478,9 +990,15 @@ export default function workflows(pi: ExtensionAPI) {
             background,
             status: "running",
             startedAt: Date.now(),
-            phases: [...meta.phases],
+            phases: appendSummaryPhase(meta.phases),
             agents: []
          };
+         const summaryRecord = createSummaryAgentRecord({
+            index: MAX_AGENT_CALLS,
+            startedAt: details.startedAt,
+            model: ctx.model
+         });
+         details.agents.push(summaryRecord);
 
          writeRunFile(runDir, "script.js", params.script);
          if (params.args !== undefined) writeRunFile(runDir, "args.json", params.args);
@@ -498,7 +1016,7 @@ export default function workflows(pi: ExtensionAPI) {
             createWorkflowResources(ctx.cwd, "structured", projectTrusted, profile);
 
          // Throttled progress: tool-block updates when blocking. Background
-         // runs are covered by the below-editor indicator and /workflows.
+         // runs are covered by the below-editor indicator and /wf.
          let emitTimer: ReturnType<typeof setTimeout> | undefined;
          let lastEmit = 0;
          const flush = () => {
@@ -529,6 +1047,13 @@ export default function workflows(pi: ExtensionAPI) {
             optsValue: unknown = {},
             parentInvocationSignal?: AbortSignal
          ): Promise<ScriptAgentResult> => {
+            if (controller.calls >= MAX_AGENT_CALLS - 1) {
+               return {
+                  ok: false,
+                  output: "",
+                  error: "Workflow reached the regular-agent limit; one call is reserved for the mandatory Summary phase"
+               };
+            }
             const index = ++agentCounter;
             const opts: AgentCallOptions =
                optsValue && typeof optsValue === "object" ? (optsValue as AgentCallOptions) : {};
@@ -551,7 +1076,7 @@ export default function workflows(pi: ExtensionAPI) {
                usage: emptyUsage(),
                transcript: []
             };
-            details.agents.push(record);
+            insertWorkflowAgentBeforeSummary(details.agents, record);
             persistence.checkpoint({ immediate: true });
             emit(false);
 
@@ -588,7 +1113,6 @@ export default function workflows(pi: ExtensionAPI) {
                return fail(`Unknown agent profile "${requested}".`);
             }
             if (controller.signal.aborted) return fail("Workflow was aborted before this agent started");
-
             return controller
                .schedule(async (runSignal) => {
                   // Profiles own model, tool, and thinking-level selection.
@@ -611,6 +1135,7 @@ export default function workflows(pi: ExtensionAPI) {
                      settingsManager: resources.settingsManager,
                      model: ctx.model,
                      modelRegistry: ctx.modelRegistry,
+                     fallbackModels: workflowSettings.fallbackModels,
                      signal: runSignal,
                      onSession: (session) => {
                         childSessions.set(record.index, session);
@@ -672,10 +1197,89 @@ export default function workflows(pi: ExtensionAPI) {
                .catch((error) => fail(errorText(error)));
          };
 
+         const runFinalSummary = async () => {
+            phaseFn(SUMMARY_PHASE_TITLE);
+            const previous = collectPreviousPhaseResults(details.agents);
+            const prompt = buildWorkflowSummaryPrompt(previous);
+            let summaryModel: ExtensionContext["model"];
+            let modelError: string | undefined;
+            try {
+               summaryModel = resolveSummaryModel(workflowSettings, ctx);
+            } catch (error) {
+               modelError = errorText(error);
+            }
+
+            const record = summaryRecord;
+            record.state = "running";
+            record.preview = "";
+            if (summaryModel) {
+               record.provider = summaryModel.provider;
+               record.model = summaryModel.id;
+               record.contextWindow = summaryModel.contextWindow;
+            }
+            record.transcript = buildWorkflowSummaryTranscript({ prompt });
+            persistence.checkpoint({ immediate: true });
+            emit(false);
+
+            const summaryFailure = (error: string, aborted = false): AgentOutcome => ({
+               ok: false,
+               output: "",
+               error,
+               aborted,
+               usage: emptyUsage(),
+               transcript: []
+            });
+
+            let outcome: AgentOutcome;
+            if (modelError) {
+               outcome = summaryFailure(modelError);
+            } else if (!summaryModel) {
+               outcome = summaryFailure("Final Summary requires an active model or Workflow Summary settings");
+            } else {
+               try {
+                  outcome = await controller.schedule(
+                     (runSignal) =>
+                        runWorkflowSummary({
+                           prompt,
+                           model: summaryModel,
+                           thinkingLevel: workflowSettings.summaryThinking ?? pi.getThinkingLevel(),
+                           modelRegistry: ctx.modelRegistry,
+                           signal: runSignal
+                        }),
+                     controller.signal
+                  );
+               } catch (error) {
+                  outcome = summaryFailure(errorText(error), controller.signal.aborted);
+               }
+            }
+
+            record.finishedAt = Date.now();
+            record.state = outcome.ok ? "done" : "error";
+            record.usage = outcome.usage;
+            record.preview = outcome.output.slice(0, PREVIEW_LENGTH);
+            record.provider = outcome.provider ?? record.provider;
+            record.model = outcome.model ?? record.model;
+            record.contextWindow = outcome.contextWindow ?? record.contextWindow;
+            record.transcript = buildWorkflowSummaryTranscript({
+               prompt,
+               ...(outcome.ok ? { output: outcome.output } : {})
+            });
+            if (outcome.ok) {
+               delete record.error;
+               record.result = outcome.output;
+               details.result = outcome.output;
+            } else {
+               record.error = outcome.error ?? "Final Summary failed";
+            }
+            emit();
+
+            if (!outcome.ok) throw new Error(record.error ?? "Final Summary failed");
+         };
+
          const runScript = async () => {
             let status: WorkflowDetails["status"] = "completed";
             try {
-               details.result = await runWorkflowSandbox({
+               await runWorkflowSandbox({
                   source: prepared.source,
                   args,
                   cwd: ctx.cwd,
@@ -686,20 +1290,27 @@ export default function workflows(pi: ExtensionAPI) {
             } catch (error) {
                details.error = errorText(error);
                status = controller.signal.aborted ? "aborted" : "failed";
-               controller.abort("Workflow script failed");
             }
 
+            if (status !== "aborted") {
+               try {
+                  await runFinalSummary();
+               } catch (error) {
+                  status = controller.signal.aborted ? "aborted" : "failed";
+                  details.error = appendError(details.error, errorText(error));
+               }
+            }
+
+            if (status !== "completed") controller.abort("Workflow completed with errors");
             const settled = await controller.settle({
                abort: status !== "completed"
             });
             if (!settled) {
                status = "failed";
-               details.error = details.error
-                  ? `${details.error}; agent shutdown deadline exceeded`
-                  : "Agent shutdown deadline exceeded";
+               details.error = appendError(details.error, "Agent shutdown deadline exceeded");
             }
             for (const record of details.agents) {
-               if (record.state !== "running") continue;
+               if (record.state !== "running" && record.state !== "waiting") continue;
                record.state = "error";
                record.error = record.error ?? "Agent did not settle before run cleanup";
                record.finishedAt = Date.now();
@@ -717,7 +1328,7 @@ export default function workflows(pi: ExtensionAPI) {
             }
          };
 
-         // Registered for /workflows visibility and session_shutdown abort;
+         // Registered for /wf visibility and session_shutdown abort;
          // blocking runs are watchable live from the dashboard too.
          const childSessions = new Map<number, AgentSession>();
          const abortControllers = new Map<number, AbortController>();
@@ -747,13 +1358,19 @@ export default function workflows(pi: ExtensionAPI) {
                   recordSettledRun(details.status);
                   updateIndicator();
                   try {
-                     pi.sendUserMessage(
-                        buildBackgroundWorkflowFollowUp({
-                           runId,
-                           status: details.status,
-                           result: buildWorkflowResultMessage(details, runDir)
-                        }),
-                        { deliverAs: "followUp" }
+                     const followUp = buildBackgroundWorkflowFollowUp({
+                        runId,
+                        status: details.status,
+                        result: buildWorkflowResultMessage(details, runDir)
+                     });
+                     pi.sendMessage(
+                        {
+                           customType: WORKFLOW_BACKGROUND_RESULT_MESSAGE_TYPE,
+                           content: followUp,
+                           display: true,
+                           details: { runId, status: details.status }
+                        },
+                        { deliverAs: "followUp", triggerTurn: true }
                      );
                   } catch {
                      // Session may be shutting down.
@@ -782,9 +1399,15 @@ export default function workflows(pi: ExtensionAPI) {
             updateIndicator();
          }
          if (details.status !== "completed") {
-            // Pi marks tool failures only when execute throws; returning isError is
-            // ignored by the extension API.
-            throw new Error(buildWorkflowResultMessage(details, runDir));
+            const message = buildWorkflowResultMessage(details, runDir);
+            if (details.status === "aborted") {
+               return {
+                  content: [{ type: "text", text: message }],
+                  isError: true,
+                  details: compactToolDetails(details)
+               };
+            }
+            throw new Error(message);
          }
          return {
             content: [
@@ -804,6 +1427,7 @@ export default function workflows(pi: ExtensionAPI) {
          if (
             context?.executionStarted ||
             context?.argsComplete ||
+            context?.isPartial === false ||
             (typeof args.script === "string" && args.script.length > 0 && context?.argsComplete !== false)
          ) {
             component.setText("");
@@ -828,6 +1452,9 @@ export default function workflows(pi: ExtensionAPI) {
             component.setText(first?.type === "text" ? first.text : "(no output)");
             return component;
          }
+         if (details.status === "aborted") {
+            return renderAbortedWorkflowResult(details, expanded, theme, previous);
+         }
 
          const { done, failed } = countStates(details);
          const settled = done + failed;
@@ -836,29 +1463,29 @@ export default function workflows(pi: ExtensionAPI) {
          const badge = statusBadge(details.status, theme);
 
          if (!expanded) {
-            const titleLine = `${theme.fg("toolTitle", theme.bold("WORKFLOW  "))}${theme.fg("accent", details.name ?? details.runId)}  ${badge}`;
+            const titleLine = `${theme.fg("toolTitle", theme.bold("workflow  "))}${theme.fg("accent", details.name ?? details.runId)}  ${badge}`;
             const headerSection: string[] = [titleLine];
             if (details.description) {
                headerSection.push(theme.fg("dim", details.description));
             }
             let collapsedSummaryLine = theme.fg(
                "dim",
-               `Agents: ${settled}/${details.agents.length} settled · ${elapsed}`
+               `agents: ${settled}/${details.agents.length} settled · ${elapsed}`
             );
             if (failed) collapsedSummaryLine += theme.fg("error", ` · ${failed} failed`);
             if (details.background) collapsedSummaryLine += theme.fg("dim", " · (background)");
             if (details.status === "running" && details.currentPhase) {
-               collapsedSummaryLine += theme.fg("muted", ` · Active Phase: ${details.currentPhase}`);
+               collapsedSummaryLine += theme.fg("muted", ` · active phase: ${displayPhaseTitle(details.currentPhase)}`);
             }
             headerSection.push(collapsedSummaryLine);
 
             const agentSection: string[] = [];
             if (details.agents.length > 0) {
-               agentSection.push(theme.bold("AGENTS"));
+               agentSection.push(theme.bold("agents"));
                for (const agent of details.agents) {
                   const agentContextText = agentContext(agent);
                   const icon = agentBadge(agent.state, theme);
-                  const line = `  ${icon} ${theme.fg("accent", agent.label)}${agent.phase ? theme.fg("dim", ` (${agent.phase})`) : ""}${theme.fg(
+                  const line = `  ${icon} ${theme.fg("accent", agent.label)}${agent.phase ? theme.fg("dim", ` (${displayPhaseTitle(agent.phase)})`) : ""}${theme.fg(
                      "dim",
                      `${agentContextText ? ` · ${agentContextText}` : ""} · ${formatElapsed(agent.startedAt, agent.finishedAt)}`
                   )}`;
@@ -868,14 +1495,14 @@ export default function workflows(pi: ExtensionAPI) {
 
             const usageSection: string[] = [];
             if (totals) {
-               usageSection.push(theme.bold("TOTAL USAGE"));
+               usageSection.push(theme.bold("usage"));
                usageSection.push(`  ${theme.fg("dim", totals)}`);
             }
             if (details.error) {
-               usageSection.push(theme.fg("error", `Error: ${details.error}`));
+               usageSection.push(theme.fg("error", `error: ${details.error}`));
             }
             usageSection.push("");
-            usageSection.push(theme.fg("muted", `(Press ${keyHint("app.tools.expand", "to expand details")})`));
+            usageSection.push(theme.fg("muted", `(press ${keyHint("app.tools.expand", "to expand details")})`));
 
             const text = formatCleanSections([headerSection, agentSection, usageSection], theme);
             const component = previous instanceof Text ? previous : new Text("", 0, 0);
@@ -886,19 +1513,19 @@ export default function workflows(pi: ExtensionAPI) {
          const container = previous instanceof Container ? previous : new Container();
          container.clear();
 
-         const titleLine = `${theme.fg("toolTitle", theme.bold("WORKFLOW  "))}${theme.fg("accent", details.name ?? details.runId)}  ${badge}`;
+         const titleLine = `${theme.fg("toolTitle", theme.bold("workflow  "))}${theme.fg("accent", details.name ?? details.runId)}  ${badge}`;
          const headerSection: string[] = [titleLine];
          if (details.description) {
             headerSection.push(theme.fg("dim", details.description));
          }
          let expandedSummaryLine = theme.fg(
             "dim",
-            `Run ID: ${details.runId} · ${settled}/${details.agents.length} agents` +
+            `run id: ${details.runId} · ${settled}/${details.agents.length} agents` +
                `${failed ? ` · ${failed} failed` : ""} · ${elapsed}`
          );
          if (details.background) expandedSummaryLine += theme.fg("dim", " · (background)");
          if (details.status === "running" && details.currentPhase) {
-            expandedSummaryLine += theme.fg("muted", ` · Active Phase: ${details.currentPhase}`);
+            expandedSummaryLine += theme.fg("muted", ` · active phase: ${displayPhaseTitle(details.currentPhase)}`);
          }
          headerSection.push(expandedSummaryLine);
 
@@ -907,7 +1534,7 @@ export default function workflows(pi: ExtensionAPI) {
          for (const group of phaseGroups(details)) {
             const phaseSection: string[] = [];
             const matchingMetaPhase = details.phases.find((p) => p.title === group.title);
-            phaseSection.push(theme.bold(`PHASE: ${group.title}`));
+            phaseSection.push(theme.bold(`phase: ${displayPhaseTitle(group.title)}`));
             if (matchingMetaPhase?.detail) {
                phaseSection.push(theme.fg("dim", `  ${matchingMetaPhase.detail}`));
             }
@@ -917,20 +1544,20 @@ export default function workflows(pi: ExtensionAPI) {
                const model = formatAgentModel(agent);
                const contextText = agentContext(agent);
                const subLineParts = [
-                  model ? `Model: ${model}` : undefined,
-                  contextText ? `Context: ${contextText}` : undefined,
+                  model ? `model: ${model}` : undefined,
+                  contextText ? `context: ${contextText}` : undefined,
                   formatElapsed(agent.startedAt, agent.finishedAt)
                ].filter(Boolean);
                phaseSection.push(theme.fg("dim", `    ${subLineParts.join(" · ")}`));
 
                const usage = formatUsage(agent.usage);
                if (usage) {
-                  phaseSection.push(theme.fg("dim", `    Usage: ${usage}`));
+                  phaseSection.push(theme.fg("dim", `    usage: ${usage}`));
                }
                if (agent.error) {
-                  phaseSection.push(theme.fg("error", `    Error: ${agent.error}`));
+                  phaseSection.push(theme.fg("error", `    error: ${agent.error}`));
                } else if (agent.preview) {
-                  phaseSection.push(theme.fg("dim", "    Preview:"));
+                  phaseSection.push(theme.fg("dim", "    preview:"));
                   for (const line of agent.preview.split("\n").slice(0, 4)) {
                      phaseSection.push(theme.fg("dim", `      ${line}`));
                   }
@@ -940,11 +1567,11 @@ export default function workflows(pi: ExtensionAPI) {
          }
 
          if (details.error) {
-            sections.push([theme.bold(theme.fg("error", "WORKFLOW ERROR")), `  ${theme.fg("error", details.error)}`]);
+            sections.push([theme.bold(theme.fg("error", "workflow error")), `  ${theme.fg("error", details.error)}`]);
          }
 
          if (details.result !== undefined) {
-            const resultLines: string[] = [theme.bold("RESULT")];
+            const resultLines: string[] = [theme.bold("result")];
             const formattedJson = resultJson(details.result);
             for (const line of formattedJson.split("\n")) {
                resultLines.push(`  ${theme.fg("accent", line)}`);
@@ -953,7 +1580,7 @@ export default function workflows(pi: ExtensionAPI) {
          }
 
          if (totals) {
-            sections.push([theme.bold("TOTAL USAGE"), `  ${theme.fg("dim", totals)}`]);
+            sections.push([theme.bold("usage"), `  ${theme.fg("dim", totals)}`]);
          }
 
          const text = formatCleanSections(sections, theme);
