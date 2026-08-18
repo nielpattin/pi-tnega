@@ -16,6 +16,7 @@
 - No flowery language. No "I'd be happy to", "Great question!".
 - No paragraph intros like "The punchline:", "The kicker:", "Here's the thing:", "Bottom line:". LLM slop.
 - Active voice, concise language. No passive or filler.
+- Write technical prose (replies, explanations, summaries, docs, commit messages, PR descriptions, code comments) per the `tech-comm` skill.
 - When responding to user feedback or critique, explicitly say whether you agree or disagree before explaining changes.
 
 # Environment

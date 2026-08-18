@@ -23,6 +23,7 @@ export default defineConfig({
       "eslint/max-params": "off",
       "eslint/id-length": "off",
       "eslint/no-continue": "off",
+      "eslint/no-await-in-loop": "off",
       "eslint/sort-imports": "off",
       "eslint/no-nested-ternary": "off",
       "eslint/prefer-destructuring": "off",

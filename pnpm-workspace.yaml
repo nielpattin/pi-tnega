@@ -1,6 +1,7 @@
 packages:
   - "packages/*"
   - "extensions/*"
+  - "extensions/pi-ide-pro/vscode"
 
 minimumReleaseAgeExclude:
   - "@earendil-works/*"
@@ -24,6 +25,8 @@ allowBuilds:
   msgpackr-extract: true
   protobufjs: true
   better-sqlite3: true
+  "@vscode/vsce-sign": true
+  keytar: true
   tree-sitter-bash: true
   onnxruntime-node: true
   sharp: true

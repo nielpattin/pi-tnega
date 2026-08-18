@@ -1,0 +1,28 @@
+{
+  "name": "pi-ide-pro",
+  "displayName": "Pi IDE Pro",
+  "description": "Connect VS Code selections, open files, diagnostics, and edits to Pi.",
+  "version": "0.1.0",
+  "publisher": "nielpattin",
+  "author": "Niel Pattin",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onUri"
+  ],
+  "main": "./extension.bundle.js",
+  "scripts": {
+    "package": "esbuild extension.js --bundle --platform=node --external:vscode --outfile=extension.bundle.js && vsce package --no-dependencies --allow-missing-repository --skip-license --out ../dist/pi-ide-pro.vsix"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.25.0",
+    "ws": "^8.18.0"
+  }
+}

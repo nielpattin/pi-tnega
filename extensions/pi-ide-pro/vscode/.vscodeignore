@@ -1,0 +1,7 @@
+extension.js
+logging.js
+node_modules/
+*.vsix
+*.ts
+pnpm-lock.yaml
+.gitignore

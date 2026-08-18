@@ -26,6 +26,14 @@ export interface CodexUsageSnapshot {
    raw: unknown;
 }
 
+/** Injectable knobs for `fetchCodexUsage`, used by tests to avoid real network calls. */
+export interface CodexUsageFetchOptions {
+   /** Replace the global fetch (test seam). Defaults to `fetch`. */
+   fetchImpl?: typeof fetch;
+   /** Delay before the single transient-failure retry, in milliseconds. */
+   retryDelayMs?: number;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -157,18 +165,76 @@ function findCodexModel(ctx: ExtensionContext): RuntimeModel | undefined {
    );
 }
 
-export async function fetchCodexUsage(ctx: ExtensionContext): Promise<CodexUsageSnapshot> {
+/**
+ * Format a thrown error including its cause chain, so transport-level failures
+ * like `TypeError: fetch failed` reveal the underlying reason instead of hiding
+ * it inside `error.cause`.
+ *
+ * @param error - The thrown value.
+ * @returns A single-line message with the most relevant cause appended.
+ */
+export function formatFetchError(error: unknown): string {
+   if (!(error instanceof Error)) return String(error);
+   const causes: string[] = [];
+   let current: Error = error;
+   for (let depth = 0; depth < 5; depth++) {
+      const cause = current.cause;
+      if (cause === undefined || cause === current) break;
+      if (cause instanceof Error) {
+         causes.push(cause.message);
+         current = cause;
+      } else if (typeof cause === "string" && cause.trim()) {
+         causes.push(cause);
+         break;
+      } else {
+         break;
+      }
+   }
+   if (causes.length === 0) return error.message;
+   const summary = `${error.message} (${causes.join("; ")})`;
+   return summary.length > 300 ? `${summary.slice(0, 300)}…` : summary;
+}
+
+function isAbortError(error: unknown): boolean {
+   return error instanceof Error && error.name === "AbortError";
+}
+
+function sleep(ms: number): Promise<void> {
+   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function fetchCodexUsage(
+   ctx: ExtensionContext,
+   options: CodexUsageFetchOptions = {}
+): Promise<CodexUsageSnapshot> {
    const model = findCodexModel(ctx);
    if (!model) {
       throw new Error("No OpenAI Codex model is available. Log in with /login openai-codex first.");
    }
 
    const headers = await buildCodexUsageHeaders(ctx, model);
-   const response = await fetch(buildCodexUsageUrl(), {
-      method: "GET",
-      headers,
-      ...(ctx.signal ? { signal: ctx.signal } : {})
-   });
+   const request = (): Promise<Response> =>
+      (options.fetchImpl ?? fetch)(buildCodexUsageUrl(), {
+         method: "GET",
+         headers,
+         ...(ctx.signal ? { signal: ctx.signal } : {})
+      });
+
+   let response: Response;
+   try {
+      response = await request();
+   } catch (error) {
+      if (isAbortError(error)) throw error;
+      // Transient transport failure (TLS drop, reset connection): retry once
+      // before surfacing. HTTP status errors are handled below without retry.
+      await sleep(options.retryDelayMs ?? 1_000);
+      try {
+         response = await request();
+      } catch (retryError) {
+         throw new Error(formatFetchError(retryError), { cause: retryError });
+      }
+   }
+
    const text = await response.text();
    if (!response.ok) throw new Error(`Usage request failed (${response.status}): ${text || response.statusText}`);
 

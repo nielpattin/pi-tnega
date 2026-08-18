@@ -1,25 +1,31 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { matchesKey } from "@earendil-works/pi-tui";
+import { matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { fetchCodexUsage, type CodexUsageSnapshot } from "./usage";
 
 interface UsageView {
    ensureLoaded(): void;
    handleInput(data: string): boolean;
-   render(theme: Theme): string[];
+   render(theme: Theme, width: number): string[];
 }
 
-/** Open the read-only Codex usage screen. */
-export async function openCodexUsageScreen(ctx: ExtensionContext): Promise<void> {
-   await ctx.ui.custom((tui, theme, _keybindings, done) => {
+/** Open the read-only Codex usage screen. Resolves to `"settings"` when the user presses S. */
+export async function openCodexUsageScreen(ctx: ExtensionContext): Promise<"settings" | undefined> {
+   return ctx.ui.custom<"settings" | undefined>((tui, theme, _keybindings, done) => {
       const view = createUsageView(ctx, () => tui.requestRender());
       view.ensureLoaded();
 
       return {
-         render: () => view.render(theme),
+         render(width: number) {
+            return view.render(theme, width);
+         },
          invalidate() {},
          handleInput(data: string) {
             if (matchesKey(data, "escape")) {
                done(undefined);
+               return true;
+            }
+            if (data.toLowerCase() === "s") {
+               done("settings");
                return true;
             }
             return view.handleInput(data);
@@ -56,20 +62,33 @@ function createUsageView(ctx: ExtensionContext, requestRender: () => void): Usag
          load();
          return true;
       },
-      render(theme: Theme) {
-         return formatUsageLines(theme, usageState, usageLoading);
+      render(theme: Theme, width: number) {
+         return formatUsageLines(theme, usageState, usageLoading, width);
       }
    };
 }
 
-function formatUsageLines(
+export function formatUsageLines(
    theme: Theme,
    usageState: CodexUsageSnapshot | { error: string } | undefined,
-   loading: boolean
+   loading: boolean,
+   width = 80
 ): string[] {
-   if (!usageState) return [theme.fg("dim", "  Loading Codex usage…")];
+   const safeWidth = Math.max(10, width);
+   if (!usageState) {
+      return [truncateToWidth(theme.fg("dim", "  Loading Codex usage…"), safeWidth)];
+   }
+
    if ("error" in usageState) {
-      return [theme.fg("error", `  ${usageState.error}`), theme.fg("dim", "  Press R to retry.")];
+      const errorContentWidth = Math.max(10, safeWidth - 4);
+      const wrappedErrorLines = wrapTextWithAnsi(usageState.error, errorContentWidth);
+      const formattedErrors = wrappedErrorLines.map((line) =>
+         truncateToWidth(theme.fg("error", `  ${line}`), safeWidth)
+      );
+      return [
+         ...formattedErrors,
+         truncateToWidth(theme.fg("dim", "  Press R to retry · S for settings · Esc to close"), safeWidth)
+      ];
    }
 
    const rows = usageState.limits.map((limit) => {
@@ -87,21 +106,22 @@ function formatUsageLines(
    });
    const headers = ["Limit", "5h left", "", "Reset", "Weekly left", "", "Reset"];
    const widths = columnWidths([headers, ...rows]);
+   const totalTableWidth = widths.reduce((sum, colWidth) => sum + colWidth, 0) + 2 * (widths.length - 1);
+   const dividerLength = Math.max(0, Math.min(totalTableWidth, safeWidth - 4));
 
-   return [
+   const rawLines = [
       `  ${theme.bold(`Codex usage${usageState.planType ? ` · ${usageState.planType}` : ""}`)}${loading ? theme.fg("dim", "  refreshing…") : ""}`,
-      theme.fg("dim", "  Press R to refresh · Esc to close"),
+      theme.fg("dim", "  Press R to refresh · S for settings · Esc to close"),
       "",
       formatUsageRow(
          headers.map((header) => theme.fg("dim", header)),
          widths
       ),
-      theme.fg(
-         "borderMuted",
-         `  ${"─".repeat(widths.reduce((sum, width) => sum + width, 0) + 2 * (widths.length - 1))}`
-      ),
+      theme.fg("borderMuted", `  ${"─".repeat(dividerLength)}`),
       ...rows.map((row) => formatUsageRow(row, widths))
    ];
+
+   return rawLines.map((line) => truncateToWidth(line, safeWidth));
 }
 
 function columnWidths(rows: string[][]): number[] {
