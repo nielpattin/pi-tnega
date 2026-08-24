@@ -322,6 +322,10 @@ function normalizeDetails(runId: string, raw: unknown): WorkflowDetails | undefi
               : a.state === "running"
                 ? "running"
                 : "done";
+      const transcript = normalizeTranscript(a.transcript);
+      if (transcript.length === 0 && a.phase === "Summary" && typeof a.result === "string" && a.result.length > 0) {
+         transcript.push({ role: "assistant", text: a.result });
+      }
       agents.push({
          index: typeof a.index === "number" ? a.index : agents.length + 1,
          label: typeof a.label === "string" ? a.label : `agent-${agents.length + 1}`,
@@ -353,7 +357,7 @@ function normalizeDetails(runId: string, raw: unknown): WorkflowDetails | undefi
             turns: 0,
             ...(a.usage && typeof a.usage === "object" ? (a.usage as object) : {})
          },
-         transcript: normalizeTranscript(a.transcript)
+         transcript
       });
    }
    const summaryAgents = agents.filter((agent) => agent.phase === "Summary");

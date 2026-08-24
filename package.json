@@ -11,10 +11,10 @@
       "prepare": "git config core.hooksPath .githooks"
    },
    "dependencies": {
-      "@earendil-works/pi-agent-core": "^0.84.0",
-      "@earendil-works/pi-ai": "^0.84.0",
-      "@earendil-works/pi-coding-agent": "^0.84.0",
-      "@earendil-works/pi-tui": "^0.84.0",
+      "@earendil-works/pi-agent-core": "^0.84.3",
+      "@earendil-works/pi-ai": "^0.84.3",
+      "@earendil-works/pi-coding-agent": "^0.84.3",
+      "@earendil-works/pi-tui": "^0.84.3",
       "@sinclair/typebox": "^0.34.52",
       "acorn": "^8.18.0",
       "fzf": "^0.5.2",

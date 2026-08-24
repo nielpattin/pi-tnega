@@ -9,19 +9,23 @@ function writeRunFile(runDir: string, name: string, content: string) {
    writeFileAtomic(path.join(runDir, name), content);
 }
 
-type CompactWorkflowDetails = Omit<WorkflowDetails, "agents"> & {
-   agents: Array<Omit<WorkflowDetails["agents"][number], "transcript" | "preview">>;
+type CompactAgent = Omit<WorkflowDetails["agents"][number], "transcript" | "preview"> & {
+   /** The Summary has no child session file, so its transcript must remain durable here. */
+   transcript?: WorkflowDetails["agents"][number]["transcript"];
 };
 
-/** Remove transcript payloads from workflow metadata while keeping the result inline. */
+type CompactWorkflowDetails = Omit<WorkflowDetails, "agents"> & {
+   agents: CompactAgent[];
+};
+
+/** Remove child transcript payloads from workflow metadata while retaining the final Summary transcript. */
 export function compactWorkflowDetails(details: WorkflowDetails): CompactWorkflowDetails {
    const { agents, ...metadata } = details;
    return {
       ...metadata,
-      agents: agents.map(({ transcript: _transcript, preview: _preview, ...agent }) => {
-         void _transcript;
+      agents: agents.map(({ transcript, preview: _preview, ...agent }) => {
          void _preview;
-         return agent;
+         return agent.phase === "Summary" ? { ...agent, transcript } : agent;
       })
    };
 }

@@ -78,7 +78,14 @@ import {
    WORKFLOW_PROMPT_SNIPPET,
    WORKFLOW_TOOL_DESCRIPTION
 } from "./prompt.ts";
-import { createWorkflowResources, runAgent, runWorkflowSummary, type AgentOutcome } from "./runner.ts";
+import {
+   capWorkflowModelToParentContext,
+   createWorkflowResources,
+   resolveModelById,
+   runAgent,
+   runWorkflowSummary,
+   type AgentOutcome
+} from "./runner.ts";
 import {
    DEFAULT_WORKFLOW_SETTINGS,
    readWorkflowSettings,
@@ -93,6 +100,12 @@ import { safeStringify, writeFileAtomic } from "../shared/serialization.ts";
 export const WORKFLOW_TOOL_EMIT_INTERVAL_MS = 500;
 export const WORKFLOW_BACKGROUND_RESULT_MESSAGE_TYPE = "workflow-background-result";
 const PREVIEW_LENGTH = 200;
+
+interface WorkflowToolRendererState {
+   liveDetails?: WorkflowDetails;
+   backgroundRunId?: string;
+   backgroundRefreshTimer?: ReturnType<typeof setInterval>;
+}
 
 export function renderBackgroundWorkflowMessage(
    message: { content: unknown; details?: unknown },
@@ -174,6 +187,8 @@ interface ScriptAgentResult {
 
 interface AgentCallOptions {
    agent?: unknown;
+   /** Compatibility alias accepted by older workflow scripts. */
+   profile?: unknown;
    label?: unknown;
    phase?: unknown;
    schema?: unknown;
@@ -203,10 +218,13 @@ function errorText(error: unknown): string {
 
 function resolveSummaryModel(settings: WorkflowSettings, ctx: ExtensionContext) {
    if (!settings.summaryModel) return ctx.model;
-   return resolveProfileModel(
-      ctx.modelRegistry,
-      { model: settings.summaryModel },
-      ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined
+   return capWorkflowModelToParentContext(
+      resolveProfileModel(
+         ctx.modelRegistry,
+         { model: settings.summaryModel },
+         ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined
+      ),
+      ctx.model
    );
 }
 
@@ -568,7 +586,7 @@ class WorkflowSettingsPanel {
          this.view === "add_fallback" ||
          this.view === "edit_fallback" ||
          this.view === "replace_fallback"
-            ? "Configure fallback models to swap to and retry from the last message when an agent fails."
+            ? "Configure fallback models to retry workflow agents or the final Summary with."
             : "Configure workflow summary and agent execution settings.";
       const lines = [this.theme.bold(this.theme.fg("accent", title)), this.theme.fg("muted", description), ""];
       const isSearch = this.view === "model" || this.view === "add_fallback" || this.view === "replace_fallback";
@@ -1059,7 +1077,7 @@ export default function workflows(pi: ExtensionAPI) {
                optsValue && typeof optsValue === "object" ? (optsValue as AgentCallOptions) : {};
             const label =
                typeof opts.label === "string" && opts.label.trim() ? opts.label.trim().slice(0, 160) : `agent-${index}`;
-            const profile = resolveAgentProfile(opts.agent, ctx.cwd);
+            const profile = resolveAgentProfile(opts.agent ?? opts.profile, ctx.cwd);
 
             const record: AgentRecord = {
                index,
@@ -1236,12 +1254,22 @@ export default function workflows(pi: ExtensionAPI) {
             } else if (!summaryModel) {
                outcome = summaryFailure("Final Summary requires an active model or Workflow Summary settings");
             } else {
+               const summaryFallbackModels = (workflowSettings.fallbackModels ?? [])
+                  .map((modelId) =>
+                     capWorkflowModelToParentContext(resolveModelById(ctx.modelRegistry, modelId), ctx.model)
+                  )
+                  .filter(
+                     (model): model is NonNullable<typeof model> =>
+                        model !== undefined &&
+                        (model.provider !== summaryModel.provider || model.id !== summaryModel.id)
+                  );
                try {
                   outcome = await controller.schedule(
                      (runSignal) =>
                         runWorkflowSummary({
                            prompt,
                            model: summaryModel,
+                           fallbackModels: summaryFallbackModels,
                            thinkingLevel: workflowSettings.summaryThinking ?? pi.getThinkingLevel(),
                            modelRegistry: ctx.modelRegistry,
                            signal: runSignal
@@ -1445,13 +1473,38 @@ export default function workflows(pi: ExtensionAPI) {
 
       renderResult(result, { expanded }, theme, context) {
          const previous = context?.lastComponent;
-         const details = result.details as WorkflowDetails | undefined;
-         if (!details) {
+         const resultDetails = result.details as WorkflowDetails | undefined;
+         if (!resultDetails) {
             const first = result.content[0];
             const component = previous instanceof Text ? previous : new Text("", 0, 0);
             component.setText(first?.type === "text" ? first.text : "(no output)");
             return component;
          }
+
+         const rendererState = context?.state as WorkflowToolRendererState | undefined;
+         const liveDetails = resultDetails.background ? activeRuns.get(resultDetails.runId)?.details : undefined;
+         if (liveDetails && rendererState) rendererState.liveDetails = liveDetails;
+         const details =
+            rendererState?.liveDetails?.runId === resultDetails.runId ? rendererState.liveDetails : resultDetails;
+
+         if (details.background && context && rendererState && activeRuns.has(details.runId)) {
+            if (rendererState.backgroundRunId !== details.runId) {
+               if (rendererState.backgroundRefreshTimer) clearInterval(rendererState.backgroundRefreshTimer);
+               rendererState.backgroundRunId = details.runId;
+               rendererState.backgroundRefreshTimer = undefined;
+            }
+            if (!rendererState.backgroundRefreshTimer) {
+               rendererState.backgroundRefreshTimer = setInterval(() => {
+                  context.invalidate();
+                  const live = activeRuns.get(details.runId)?.details ?? rendererState.liveDetails;
+                  if (!activeRuns.has(details.runId) && live?.status !== "running") {
+                     if (rendererState.backgroundRefreshTimer) clearInterval(rendererState.backgroundRefreshTimer);
+                     rendererState.backgroundRefreshTimer = undefined;
+                  }
+               }, WORKFLOW_TOOL_EMIT_INTERVAL_MS);
+            }
+         }
+
          if (details.status === "aborted") {
             return renderAbortedWorkflowResult(details, expanded, theme, previous);
          }

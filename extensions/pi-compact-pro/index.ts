@@ -244,6 +244,16 @@ export default function (pi: ExtensionAPI) {
       return result ? { compaction: result } : undefined;
    });
 
+   pi.on("session_compact_failed", (event, ctx) => {
+      if (event.aborted) {
+         ctx.ui.notify(`Compaction aborted (${event.reason}).`, "info");
+         return;
+      }
+      const source = event.fromExtension ? "Custom compaction" : "Compaction";
+      const detail = event.errorMessage?.trim() || "unknown error";
+      ctx.ui.notify(`${source} failed (${event.reason}): ${detail}`, "warning");
+   });
+
    // /compaction command — view and change settings
    pi.registerCommand("compaction", {
       description: "View and configure auto-compaction settings (interactive UI)",

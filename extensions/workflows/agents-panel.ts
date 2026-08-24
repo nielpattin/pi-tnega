@@ -11,7 +11,7 @@
 
 import type { ExtensionCommandContext, KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
 import type { Component, Focusable, TUI } from "@earendil-works/pi-tui";
-import { Input, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { Input, Key, matchesKey, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { TextContent } from "@earendil-works/pi-ai";
 import {
@@ -392,19 +392,19 @@ export class BodyEditor {
          }
          return;
       }
-      if (data === "\x1b[A") {
+      if (matchesKey(data, Key.up)) {
          this.moveCursorVertical(-1);
          return;
       }
-      if (data === "\x1b[B") {
+      if (matchesKey(data, Key.down)) {
          this.moveCursorVertical(1);
          return;
       }
-      if (data === "\x1b[D") {
+      if (matchesKey(data, Key.left)) {
          if (this.cursorIndex > 0) this.cursorIndex--;
          return;
       }
-      if (data === "\x1b[C") {
+      if (matchesKey(data, Key.right)) {
          if (this.cursorIndex < this.value.length) this.cursorIndex++;
          return;
       }
@@ -1119,6 +1119,13 @@ export class FullScreenAgentsManager implements Component, Focusable {
    }
 
    handleInput(data: string): void {
+      const up = matchesKey(data, Key.up) || this.keybindings.matches(data, "tui.select.up");
+      const down = matchesKey(data, Key.down) || this.keybindings.matches(data, "tui.select.down");
+      const left = matchesKey(data, Key.left) || this.keybindings.matches(data, "tui.editor.cursorLeft");
+      const right = matchesKey(data, Key.right) || this.keybindings.matches(data, "tui.editor.cursorRight");
+      const cancel = matchesKey(data, Key.escape) || this.keybindings.matches(data, "tui.select.cancel");
+      const save = matchesKey(data, Key.ctrl("s"));
+
       if (
          this.viewState === "select_model" ||
          this.viewState === "select_thinking" ||
@@ -1129,7 +1136,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
       }
 
       if (this.viewState === "create_name") {
-         if (data === "\x1b") {
+         if (cancel) {
             this.viewState = "list";
             this.tui.requestRender();
             return;
@@ -1140,7 +1147,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
       }
 
       if (this.viewState === "create_intent") {
-         if (data === "\x1b") {
+         if (cancel) {
             this.viewState = "list";
             this.tui.requestRender();
             return;
@@ -1153,7 +1160,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
       if (this.isEditingBody) {
          const isDirty = this.systemPromptEditor.getValue() !== this.initialBodyValue;
 
-         if (data === "\x1b") {
+         if (cancel) {
             if (isDirty && !this.pendingEscConfirm) {
                this.pendingEscConfirm = true;
                this.tui.requestRender();
@@ -1167,7 +1174,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
 
          this.pendingEscConfirm = false;
 
-         if (data === "\x13") {
+         if (save) {
             void this.saveBodyEdit();
             return;
          }
@@ -1177,7 +1184,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
       }
 
       if (this.isEditingText) {
-         if (data === "\r" || data === "\n" || data === "\x13") {
+         if (data === "\r" || data === "\n" || save) {
             const textVal = this.textInput.getValue();
             void this.commitTextEdit(textVal);
             this.isEditingText = false;
@@ -1186,7 +1193,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
             return;
          }
          let key = data.toLowerCase();
-         if (data === "\u001b") key = "escape";
+         if (cancel) key = "escape";
          if (key === "escape") {
             this.isEditingText = false;
             this.tui.requestRender();
@@ -1202,12 +1209,12 @@ export class FullScreenAgentsManager implements Component, Focusable {
             this.initialAgentSnapshot && JSON.stringify(this.currentAgent()) !== this.initialAgentSnapshot
          );
 
-         if (data === "\x13" || data.toLowerCase() === "s") {
+         if (save || data.toLowerCase() === "s") {
             void this.saveDetailChanges();
             return;
          }
 
-         if (data === "\x1b" || data.toLowerCase() === "q" || data === "\x7f" || data === "\x08") {
+         if (cancel || data.toLowerCase() === "q" || data === "\x7f" || data === "\x08") {
             if (isDirtyDetail && !this.pendingDetailEscConfirm) {
                this.pendingDetailEscConfirm = true;
                this.tui.requestRender();
@@ -1279,14 +1286,14 @@ export class FullScreenAgentsManager implements Component, Focusable {
       }
 
       let key = data.toLowerCase();
-      if (data === "\u001b") key = "escape";
+      if (cancel) key = "escape";
       else if (data === "\r" || data === "\n") key = "enter";
       else if (data === "\t") key = "tab";
       else if (data === " ") key = "space";
-      else if (data === "\u001b[A") key = "up";
-      else if (data === "\u001b[B") key = "down";
-      else if (data === "\u001b[C") key = "right";
-      else if (data === "\u001b[D") key = "left";
+      else if (up || data === "k") key = "up";
+      else if (down || data === "j") key = "down";
+      else if (right || data === "l") key = "right";
+      else if (left || data === "h") key = "left";
       else if (data === "\u007f" || data === "\b") key = "backspace";
 
       const res = reduceAgentsPanelKey(this.state, { key }, this.viewModel);
@@ -1309,8 +1316,11 @@ export class FullScreenAgentsManager implements Component, Focusable {
 
    private handlePickerInput(data: string) {
       const q = this.selectorFilterInput.getValue().toLowerCase();
+      const up = matchesKey(data, Key.up) || this.keybindings.matches(data, "tui.select.up");
+      const down = matchesKey(data, Key.down) || this.keybindings.matches(data, "tui.select.down");
+      const cancel = matchesKey(data, Key.escape) || this.keybindings.matches(data, "tui.select.cancel");
 
-      if (data === "\x1b") {
+      if (cancel) {
          this.viewState = "detail";
          this.tui.requestRender();
          return;
@@ -1326,13 +1336,13 @@ export class FullScreenAgentsManager implements Component, Focusable {
             void this.commitToolsPicker();
             return;
          }
-         if (data === "\x1b[A" || data === "k") {
+         if (up || data === "k") {
             this.selectorSelectedIndex = Math.max(0, this.selectorSelectedIndex - 1);
             this.toolDetailScrollOffset = 0;
             this.tui.requestRender();
             return;
          }
-         if (data === "\x1b[B" || data === "j") {
+         if (down || data === "j") {
             this.selectorSelectedIndex = Math.min(Math.max(0, filtered.length - 1), this.selectorSelectedIndex + 1);
             this.toolDetailScrollOffset = 0;
             this.tui.requestRender();
@@ -1400,12 +1410,12 @@ export class FullScreenAgentsManager implements Component, Focusable {
          void this.commitSingleValuePicker(selected);
          return;
       }
-      if (data === "\x1b[A" || data === "k") {
+      if (up || data === "k") {
          this.selectorSelectedIndex = Math.max(0, this.selectorSelectedIndex - 1);
          this.tui.requestRender();
          return;
       }
-      if (data === "\x1b[B" || data === "j") {
+      if (down || data === "j") {
          this.selectorSelectedIndex = Math.min(Math.max(0, filtered.length - 1), this.selectorSelectedIndex + 1);
          this.tui.requestRender();
          return;

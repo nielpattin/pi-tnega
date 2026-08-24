@@ -146,6 +146,8 @@ export interface RunWorkflowSummaryOptions {
    signal: AbortSignal;
    /** Maximum output tokens for the final summary. */
    maxTokens?: number;
+   /** Models to retry when the primary summary completion fails. */
+   fallbackModels?: WorkflowModel[];
    /** Provider completion implementation, injectable for alternate runtimes and tests. */
    completeFn?: typeof completeSimple;
 }
@@ -373,77 +375,88 @@ function errorText(error: unknown): string {
  * assistant's final text is the workflow result.
  */
 export async function runWorkflowSummary(options: RunWorkflowSummaryOptions): Promise<AgentOutcome> {
-   const metadata = {
-      provider: options.model.provider,
-      model: options.model.id,
-      contextWindow: options.model.contextWindow,
+   const models = [options.model, ...(options.fallbackModels ?? [])];
+   const metadataFor = (model: WorkflowModel) => ({
+      provider: model.provider,
+      model: model.id,
+      contextWindow: model.contextWindow,
       systemPrompt: SUMMARY_SYSTEM_PROMPT
-   };
-   const emptyResult = (error: string, aborted = false): AgentOutcome => ({
+   });
+   const emptyResult = (model: WorkflowModel, error: string, aborted = false): AgentOutcome => ({
       ok: false,
       output: "",
       error,
       aborted,
       usage: emptyUsage(),
-      ...metadata,
+      ...metadataFor(model),
       transcript: []
    });
 
-   if (options.signal.aborted) return emptyResult("Final summary was aborted", true);
+   if (options.signal.aborted) return emptyResult(options.model, "Final summary was aborted", true);
 
-   try {
-      const auth = await options.modelRegistry.getApiKeyAndHeaders?.(options.model);
-      const maxTokens = Math.max(
-         1,
-         Math.min(
-            options.maxTokens ?? 8_192,
-            options.model.maxTokens > 0 ? options.model.maxTokens : Number.POSITIVE_INFINITY
-         )
-      );
-      const reasoning = options.thinkingLevel === "off" ? undefined : options.thinkingLevel;
-      const complete = options.completeFn ?? completeSimple;
-      const response = await complete(
-         options.model,
-         {
-            systemPrompt: SUMMARY_SYSTEM_PROMPT,
-            messages: [
-               {
-                  role: "user",
-                  content: options.prompt,
-                  timestamp: Date.now()
-               }
-            ]
-         },
-         {
-            ...(auth?.ok ? { apiKey: auth.apiKey, headers: auth.headers } : {}),
-            ...(reasoning ? { reasoning } : {}),
-            signal: options.signal,
-            maxTokens,
-            cacheRetention: "none"
+   let lastError = "Final summary failed";
+   for (const model of models) {
+      if (options.signal.aborted) return emptyResult(model, "Final summary was aborted", true);
+
+      const metadata = metadataFor(model);
+      try {
+         const auth = await options.modelRegistry.getApiKeyAndHeaders?.(model);
+         const maxTokens = Math.max(
+            1,
+            Math.min(options.maxTokens ?? 8_192, model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY)
+         );
+         const reasoning = options.thinkingLevel === "off" ? undefined : options.thinkingLevel;
+         const complete = options.completeFn ?? completeSimple;
+         const response = await complete(
+            model,
+            {
+               systemPrompt: SUMMARY_SYSTEM_PROMPT,
+               messages: [
+                  {
+                     role: "user",
+                     content: options.prompt,
+                     timestamp: Date.now()
+                  }
+               ]
+            },
+            {
+               ...(auth?.ok ? { apiKey: auth.apiKey, headers: auth.headers } : {}),
+               ...(reasoning ? { reasoning } : {}),
+               signal: options.signal,
+               maxTokens,
+               cacheRetention: "none"
+            }
+         );
+
+         if (options.signal.aborted || response.stopReason === "aborted") {
+            return emptyResult(model, "Final summary was aborted", true);
          }
-      );
+         if (response.stopReason === "error") {
+            lastError = response.errorMessage ?? "Final summary failed";
+            continue;
+         }
 
-      if (options.signal.aborted || response.stopReason === "aborted") {
-         return emptyResult("Final summary was aborted", true);
+         const output = contentText(response.content).trim();
+         if (!output) {
+            lastError = "Final summary returned no text";
+            continue;
+         }
+
+         return {
+            ok: true,
+            output,
+            aborted: false,
+            usage: computeAssistantUsage([{ role: "assistant", usage: response.usage }]),
+            ...metadata,
+            transcript: buildWorkflowSummaryTranscript({ prompt: options.prompt, output })
+         };
+      } catch (error) {
+         if (options.signal.aborted) return emptyResult(model, errorText(error), true);
+         lastError = errorText(error);
       }
-      if (response.stopReason === "error") {
-         return emptyResult(response.errorMessage ?? "Final summary failed");
-      }
-
-      const output = contentText(response.content).trim();
-      if (!output) return emptyResult("Final summary returned no text");
-
-      return {
-         ok: true,
-         output,
-         aborted: false,
-         usage: computeAssistantUsage([{ role: "assistant", usage: response.usage }]),
-         ...metadata,
-         transcript: buildWorkflowSummaryTranscript({ prompt: options.prompt, output })
-      };
-   } catch (error) {
-      return emptyResult(errorText(error), options.signal.aborted);
    }
+
+   return emptyResult(models.at(-1) ?? options.model, lastError);
 }
 
 export function shouldRetryWorkflowFallback(options: {
@@ -485,6 +498,48 @@ export function resolveModelById(
    return undefined;
 }
 
+export function capWorkflowModelToParentContext(
+   model: WorkflowModel | undefined,
+   parentModel?: WorkflowModel
+): WorkflowModel | undefined {
+   const parentContextWindow = parentModel?.contextWindow;
+   if (
+      !model ||
+      typeof model.contextWindow !== "number" ||
+      !Number.isFinite(model.contextWindow) ||
+      model.contextWindow <= 0 ||
+      typeof parentContextWindow !== "number" ||
+      !Number.isFinite(parentContextWindow) ||
+      parentContextWindow <= 0 ||
+      model.contextWindow <= parentContextWindow
+   ) {
+      return model;
+   }
+   return { ...model, contextWindow: parentContextWindow };
+}
+
+export function resolveWorkflowAgentModel(
+   registry: ExtensionContext["modelRegistry"],
+   profile: Pick<AgentProfile, "model">,
+   inheritedModel?: WorkflowModel
+): WorkflowModel | undefined {
+   const resolved = resolveProfileModel(
+      registry,
+      profile,
+      inheritedModel ? { provider: inheritedModel.provider, id: inheritedModel.id } : undefined
+   );
+   return capWorkflowModelToParentContext(resolved ?? inheritedModel, inheritedModel);
+}
+
+/** Accept a captured structured result even when the provider reports a late request error. */
+export function shouldAcceptStructuredWorkflowResult(options: {
+   structuredOutput: unknown;
+   aborted: boolean;
+   stopReason?: string;
+}): boolean {
+   return options.structuredOutput !== undefined && !options.aborted && options.stopReason !== "aborted";
+}
+
 export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> {
    let structured: unknown;
    let customTools: ToolDefinition[] | undefined;
@@ -500,13 +555,7 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
             structured = value;
          })
       ];
-      const model = profile.model
-         ? resolveProfileModel(
-              options.modelRegistry,
-              profile,
-              options.model ? { provider: options.model.provider, id: options.model.id } : undefined
-           )
-         : options.model;
+      const model = resolveWorkflowAgentModel(options.modelRegistry, profile, options.model);
       const thinkingLevel = options.thinkingLevel ?? profile.thinking;
       sessionManager = createChildSessionManager(options.cwd, options.parentSessionFile);
       ({ session } = await createAgentSession({
@@ -692,11 +741,13 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
          if (shouldFallback && options.fallbackModels && options.fallbackModels.length > 0) {
             for (const fallbackModelId of options.fallbackModels) {
                if (options.signal?.aborted || aborted) break;
-               const resolvedFallback = resolveModelById(options.modelRegistry, fallbackModelId);
+               const resolvedFallback = capWorkflowModelToParentContext(
+                  resolveModelById(options.modelRegistry, fallbackModelId),
+                  options.model
+               );
                if (!resolvedFallback) continue;
                try {
                   if (toolCallsStarted || activeToolCalls.size > 0 || agentWorking) break;
-                  // eslint-disable-next-line no-await-in-loop
                   await childSession.setModel(resolvedFallback);
                   providerId = resolvedFallback.provider;
                   modelId = resolvedFallback.id;
@@ -704,7 +755,6 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
                   errorMessage = undefined;
                   stopReason = undefined;
 
-                  // eslint-disable-next-line no-await-in-loop
                   await childSession.prompt(
                      "Continue the unfinished task from the existing session and call structured_output when complete."
                   );
@@ -766,8 +816,13 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
       };
    }
 
+   const hasUsableStructuredResult = shouldAcceptStructuredWorkflowResult({
+      structuredOutput: structured,
+      aborted,
+      stopReason
+   });
    const failed = stopReason === "error" || errorMessage !== undefined;
-   if (failed) {
+   if (!hasUsableStructuredResult && failed) {
       return {
          ok: false,
          output,
@@ -780,7 +835,7 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
       };
    }
 
-   if (structured === undefined) {
+   if (!hasUsableStructuredResult) {
       return {
          ok: false,
          output,

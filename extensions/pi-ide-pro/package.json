@@ -1,10 +1,10 @@
 {
   "name": "pi-ide-pro",
   "version": "0.1.0",
-  "description": "Pi IDE Pro: live VS Code selection context, open-file autocomplete, diagnostics, and clickable edit links.",
-  "keywords": ["pi-package", "pi", "ide", "vscode"],
+  "description": "Pi IDE Pro: live VS Code and Neovim context, open-file autocomplete, and diagnostics.",
+  "keywords": ["pi-package", "pi", "ide", "vscode", "neovim"],
   "license": "MIT",
-  "files": ["index.ts", "*.ts", "README.md", "vscode"],
+  "files": ["index.ts", "*.ts", "README.md", "vscode", "nvim"],
   "type": "module",
   "scripts": {
     "check": "pnpm run typecheck",
@@ -15,8 +15,8 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "0.84.0",
-    "@earendil-works/pi-tui": "0.84.0",
+    "@earendil-works/pi-coding-agent": "0.84.3",
+    "@earendil-works/pi-tui": "0.84.3",
     "@types/node": "^26.1.2",
     "@types/ws": "^8.18.1",
     "typescript": "^7.0.2"

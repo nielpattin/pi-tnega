@@ -8,7 +8,7 @@ export interface WorkflowSettings {
    summaryModel?: string;
    /** Thinking level for the mandatory final Summary. Omitted means inherit the active level. */
    summaryThinking?: WorkflowThinkingLevel;
-   /** Custom list of fallback model identifiers to swap to and retry from the last message when an agent fails. */
+   /** Custom list of fallback model identifiers to retry workflow agents or the final Summary with. */
    fallbackModels?: string[];
 }
 

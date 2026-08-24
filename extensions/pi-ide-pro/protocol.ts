@@ -13,7 +13,7 @@ export interface SelectionRange {
 }
 
 export interface SelectionSnapshot {
-   source: "vscode";
+   source: "vscode" | "nvim";
    filePath: string;
    workspaceFolder?: string;
    languageId: string;
@@ -55,7 +55,6 @@ export interface LockFile {
    host: "127.0.0.1";
    port: number;
    authToken: string;
-   externalUri?: string;
    workspaceFolders: string[];
    pid: number;
    createdAt: string;

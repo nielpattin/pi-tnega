@@ -16,7 +16,7 @@
 - Persistent Pi child sessions scoped to the parent Pi session when a parent session file exists.
 - Workflow metadata and results under `~/.pi/agent/workflows/<runId>/`; agent transcripts are read from their persisted child session files.
 - Blocking and background runs with automatic follow-up delivery. Background results render as collapsible cards: the collapsed view keeps the workflow summary and agent records visible, while `Ctrl+O` reveals the `Result` section.
-- Provider fallback retries only run after an agent has stopped before any tool execution starts. Tool activity blocks the retry, preventing duplicate `structured_output` calls.
+- Configured fallback models retry a final Summary completion after provider failures. Work-agent fallbacks only run before tool activity starts, preventing duplicate `structured_output` calls.
 - `/wf` dashboard for phases, agents, transcripts, usage, and recovered runs.
 - `/agents` profile listing and fullscreen profile editor with save, toggle, create, delete, and prompt editing.
 

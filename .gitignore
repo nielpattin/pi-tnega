@@ -199,3 +199,5 @@ tests/
 !tsconfig.json
 !tsconfig.*.json
 !package.json
+
+pnpm-lock.yaml

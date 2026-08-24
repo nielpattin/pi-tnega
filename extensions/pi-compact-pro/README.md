@@ -12,7 +12,7 @@ Pi uses context compaction when conversations grow long. By default, auto-compac
 2. **Dedicated compaction models with 3-tier fallback**: Lets you specify cheaper or faster models (such as Gemini Flash or Claude Haiku) for compaction summaries instead of using the primary session model, with an automatic fallback chain of up to 3 models.
 3. **Predictable compaction targets**: Derives Pi's native `reserveTokens` setting from the active model's effective context window minus `compactionTarget`, triggering auto-compaction at the desired token budget even when the native model window is smaller than the configured cap.
 4. **Structured summary prompts**: Injects detailed continuity instructions into the summarizer, preserving exact paths, error messages, rationale, and active work without breaking Pi's native XML tool tracking.
-5. **Graceful fallback**: Uses Pi's native `session_before_compact` extension seam. If custom summarization fails or is aborted across all candidate models, Pi falls back to its built-in summarizer automatically.
+5. **Graceful fallback**: Uses Pi's native `session_before_compact` extension seam. If custom summarization fails or is aborted across all candidate models, Pi falls back to its built-in summarizer automatically. `session_compact_failed` notifies when that custom summary fails or is aborted.
 6. **Reversible context caps**: Retains original model context sizes in memory so increasing caps or resetting configuration works immediately without restarting the process.
 7. **Interactive TUI panel & CLI**: Provides the `/compaction` command with an interactive SettingsList UI, token presets, current context metrics, summary model selection, and scriptable text shortcuts.
 

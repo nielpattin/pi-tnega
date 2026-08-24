@@ -3,14 +3,12 @@ const http = require("node:http");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const os = require("node:os");
 const { WebSocketServer } = require("ws");
 const { formatLogLine } = require("./logging");
 
 let httpServer;
 let websocketServer;
 let token;
-let externalUri;
 let lockPath;
 let status;
 let outputChannel;
@@ -19,7 +17,6 @@ const clients = new Map();
 
 const home = process.env.USERPROFILE || process.env.HOME || require("node:os").homedir();
 const lockDir = path.join(home, ".pi", "pi-ide-pro", "lock");
-const diffDir = path.join(os.tmpdir(), "pi-ide-pro-diffs");
 
 function log(level, message) {
    outputChannel?.appendLine(formatLogLine(level, message));
@@ -34,37 +31,6 @@ function isInside(parent, child) {
    return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
-async function openDiffUri(uri) {
-   log("info", `Received diff URI: ${uri.toString()}`);
-   if (uri.path !== "/open-diff") return;
-   const query = new URLSearchParams(uri.query);
-   const leftPath = query.get("left");
-   const rightPath = query.get("right");
-   if (
-      !leftPath ||
-      !rightPath ||
-      !isInside(diffDir, leftPath) ||
-      !fs.existsSync(leftPath) ||
-      !fs.existsSync(rightPath)
-   ) {
-      log("warn", `Rejected diff link. left=${leftPath ?? "missing"} right=${rightPath ?? "missing"}`);
-      return;
-   }
-
-   try {
-      await vscode.commands.executeCommand(
-         "vscode.diff",
-         vscode.Uri.file(leftPath),
-         vscode.Uri.file(rightPath),
-         `Pi IDE Pro: ${path.basename(rightPath)}`,
-         { preview: false }
-      );
-      log("info", `Opened diff: ${rightPath}`);
-   } catch (error) {
-      log("error", `Could not open diff: ${error.message}`);
-   }
-}
-
 function clientMatchesWorkspace(client) {
    return workspaceFolders().some((folder) => isInside(folder, client.cwd));
 }
@@ -77,7 +43,6 @@ function writeLockFile(port) {
       host: "127.0.0.1",
       port,
       authToken: token,
-      externalUri,
       workspaceFolders: workspaceFolders(),
       pid: process.pid,
       createdAt: new Date().toISOString(),
@@ -88,13 +53,6 @@ function writeLockFile(port) {
    fs.writeFileSync(temporary, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
    fs.renameSync(temporary, lockPath);
    log("debug", `Lock file updated: ${lockPath}`);
-}
-
-async function getExternalUri() {
-   const uri = await vscode.env.asExternalUri(
-      vscode.Uri.parse(`${vscode.env.uriScheme}://nielpattin.pi-ide-pro/open-diff`)
-   );
-   return uri.toString();
 }
 
 function removeLockFile() {
@@ -416,10 +374,7 @@ function handleRpc(socket, value) {
 function startServer(context) {
    token = crypto.randomBytes(32).toString("hex");
    outputChannel = vscode.window.createOutputChannel("Pi IDE Pro");
-   context.subscriptions.push(
-      outputChannel,
-      vscode.window.registerUriHandler({ handleUri: (uri) => void openDiffUri(uri) })
-   );
+   context.subscriptions.push(outputChannel);
    log("info", "Pi IDE Pro VS Code companion starting");
    httpServer = http.createServer((request, response) => {
       const url = new URL(request.url, "http://127.0.0.1");
@@ -463,13 +418,7 @@ function startServer(context) {
       });
    });
    httpServer.on("error", (error) => log("error", `HTTP server error: ${error.message}`));
-   httpServer.listen(0, "127.0.0.1", async () => {
-      try {
-         externalUri = await getExternalUri();
-         log("debug", `External URI configured: ${externalUri}`);
-      } catch (error) {
-         log("warn", `Could not configure external URI: ${error.message}`);
-      }
+   httpServer.listen(0, "127.0.0.1", () => {
       writeLockFile(httpServer.address().port);
       log("info", `Pi IDE Pro listening on localhost:${httpServer.address().port}`);
    });

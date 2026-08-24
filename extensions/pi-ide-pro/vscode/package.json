@@ -13,8 +13,7 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished",
-    "onUri"
+    "onStartupFinished"
   ],
   "main": "./extension.bundle.js",
   "scripts": {

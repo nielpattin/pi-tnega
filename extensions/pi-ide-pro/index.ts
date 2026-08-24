@@ -1,34 +1,18 @@
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem, AutocompleteProvider, AutocompleteSuggestions } from "@earendil-works/pi-tui";
-import { basename, join, resolve } from "node:path";
+import { basename } from "node:path";
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { discoverCandidates } from "./lock";
 import { IdeBridgeConnection } from "./bridge";
 import { formatRangeMention, formatSelectionContext, toWorkspaceRelativePath, type SelectionSnapshot } from "./format";
-import { appendEditLinks, collectChangedLines, createVscodeDiffUrl, reconstructOriginalContent } from "./diff-links";
 import type { Diagnostic, DiagnosticRequest, LockCandidate, OpenFile } from "./protocol";
 import { formatCompletionValue, sortOpenFiles } from "./autocomplete";
 
 const STATUS_KEY = "pi-ide-pro";
 const WIDGET_KEY = "pi-ide-pro-selection";
-const CUSTOM_SELECTION_TYPE = "pi-ide-pro-selection";
+const CUSTOM_SELECTION_TYPE = "Selected code";
 const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_DELAY_MS = 2_000;
-const DIFF_SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1_000;
-
-async function writeDiffSnapshot(filePath: string, content: string): Promise<string> {
-   const directory = join(tmpdir(), "pi-ide-pro-diffs");
-   await mkdir(directory, { recursive: true });
-   const snapshotPath = join(directory, `${Date.now()}-${randomBytes(8).toString("hex")}-${basename(filePath)}`);
-   await writeFile(snapshotPath, content, { encoding: "utf8", mode: 0o600 });
-   const cleanup = setTimeout(() => {
-      void unlink(snapshotPath).catch(() => undefined);
-   }, DIFF_SNAPSHOT_TTL_MS);
-   cleanup.unref?.();
-   return snapshotPath;
-}
 
 interface Runtime {
    ctx?: ExtensionContext;
@@ -207,27 +191,6 @@ export default function piIdePro(pi: ExtensionAPI): void {
       };
    });
 
-   pi.on("tool_result", async (event, ctx) => {
-      if (event.toolName !== "edit" || !runtime.connection || !runtime.candidate) return undefined;
-      const path = typeof event.input?.path === "string" ? resolve(ctx.cwd, event.input.path) : undefined;
-      if (!path) return undefined;
-      const details = event.details as { diff?: string; patch?: string; firstChangedLine?: number };
-      if (!details.diff) return undefined;
-      const patch = details.patch || details.diff;
-      const lines = collectChangedLines(patch);
-      if (lines.length === 0 && details.firstChangedLine) lines.push(details.firstChangedLine);
-      if (lines.length === 0) return undefined;
-      const currentContent = await readFile(path, "utf8").catch(() => undefined);
-      if (currentContent === undefined) return undefined;
-      const originalContent = reconstructOriginalContent(currentContent, patch);
-      if (originalContent === undefined) return undefined;
-      const snapshotPath = await writeDiffSnapshot(path, originalContent);
-      const targetUri = runtime.candidate.lock.externalUri;
-      const diff = appendEditLinks(details.diff, lines, () => createVscodeDiffUrl(snapshotPath, path, targetUri));
-      if (diff === details.diff) return undefined;
-      return { details: { ...details, diff } };
-   });
-
    registerCommands(pi, runtime, connect, clearRuntime);
 }
 
@@ -315,13 +278,17 @@ function registerCommands(
    pi.registerCommand("ide", {
       description: "Manage Pi IDE Pro",
       getArgumentCompletions: (prefix) => {
-         const values = ["status", "problems", "list", "auto", "off"];
+         const values = ["status", "problems", "list", "off"];
          const matches = values.filter((value) => value.startsWith(prefix));
          return matches.length ? matches.map((value) => ({ value, label: value })) : null;
       },
       handler: async (args, ctx) => {
          const [command, ...rest] = args.trim().split(/\s+/).filter(Boolean);
-         if (!command || command === "status") {
+         if (!command) {
+            runtime.enabled = true;
+            runtime.reconnectAttempts = 0;
+            await connect(ctx);
+         } else if (command === "status") {
             const workspace = runtime.candidate?.workspaceFolder ?? "none";
             const bridgeName = runtime.candidate?.lock.name ?? "no VS Code";
             ctx.ui.notify(
@@ -336,10 +303,6 @@ function registerCommands(
                   : "No matching VS Code workspaces found.",
                "info"
             );
-         } else if (command === "auto") {
-            runtime.enabled = true;
-            runtime.reconnectAttempts = 0;
-            await connect(ctx);
          } else if (command === "off") {
             runtime.enabled = false;
             runtime.status = "disabled";
@@ -361,7 +324,7 @@ function registerCommands(
             ctx.ui.setEditorText(filtered.map(formatDiagnostic).join("\n"));
             ctx.ui.notify(`Loaded ${filtered.length} VS Code problem(s).`, "info");
          } else {
-            ctx.ui.notify("Usage: /ide [status|problems [all]|list|auto|off]", "warning");
+            ctx.ui.notify("Usage: /ide [status|problems [all]|list|off]", "warning");
          }
       }
    });

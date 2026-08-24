@@ -44,13 +44,5 @@ export function formatSelectionContext(snapshot: SelectionSnapshot): string {
    });
    const codeBlocks = snapshot.ranges.map((range) => `\`\`\`${snapshot.languageId}\n${range.text}\n\`\`\``);
 
-   return [
-      "<pi-ide-pro-selection>",
-      `File: ${path}`,
-      ...rangeLines,
-      `Language: ${snapshot.languageId}`,
-      "",
-      ...codeBlocks,
-      "</pi-ide-pro-selection>"
-   ].join("\n");
+   return [`File: \`${path}\``, ...rangeLines, `Language: ${snapshot.languageId}`, "", ...codeBlocks].join("\n");
 }
