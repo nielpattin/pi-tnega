@@ -1,6 +1,6 @@
 # Architecture & Domain Context
 
-This repository is a monorepo containing native extensions, tools, sub-agent execution engines, and TUI components built for the [Pi coding agent](https://pi.dev) harness (`@earendil-works/pi-coding-agent` v0.84+).
+This repository is a monorepo containing native extensions, tools, sub-agent execution engines, and TUI components built for the [Pi coding agent](https://pi.dev) runtime (`@earendil-works/pi-coding-agent` v0.84+).
 
 Code in this monorepo is written in TypeScript using **Effect v4** (`effect` v4.0.0-beta), **TypeBox**, and Pi's native extension APIs (`@earendil-works/pi-agent-core`, `@earendil-works/pi-tui`).
 
@@ -15,17 +15,17 @@ Code in this monorepo is written in TypeScript using **Effect v4** (`effect` v4.
                                └────────────────────┬─────────────────────┘
                                                     │
                 ┌───────────────────────────────┼────────────────┐
-                │                               │                
-                ▼                               ▼                
+                │                               │
+                ▼                               ▼
 ┌───────────────────────────────┐   ┌───────────────────────────────┐
-│           workflows           │   │        pi-processes           │
+│         pi-worker-flows       │   │        pi-processes           │
 │     JavaScript DSL Engine     │   │   Process Supervision         │
 │  (parallel, phase, profiles)  │   │ (start, stop, logs, ready)    │
 └───────────────┬───────────────┘   └───────────────┬───────────────┘
                 │                                   │
                 ▼                                   ▼
 ┌───────────────────────────────┐   ┌───────────────────────────────┐
-│     Child Workflow Agents     │   │    Supervised OS Processes    │
+│  Workflow and Direct Workers  │   │    Supervised OS Processes    │
 │   (Persistent Pi Sessions)    │   │   (Servers, watchers, logs)   │
 └───────────────────────────────┘   └───────────────────────────────┘
 ```
@@ -40,7 +40,6 @@ Code in this monorepo is written in TypeScript using **Effect v4** (`effect` v4.
 - **Workflow Agent**: A child Pi session created to execute one profile-configured workflow assignment independently. _(Avoid: subagent, child worker)_
 - **Orchestrator**: The primary agent operating in workflow mode to coordinate profile-configured agents with `phase()` and `parallel()` rather than performing broad exploration itself.
 - **Owner Session**: The parent session that created and owns a job's lifecycle and delivery boundary. _(Avoid: current session, worker session)_
-- **Harness**: The execution environment running a session (e.g. Pi or Agy). _(Avoid: agent, worker)_
 
 ### Work & Execution Units
 
@@ -71,28 +70,27 @@ Code in this monorepo is written in TypeScript using **Effect v4** (`effect` v4.
 
 The monorepo contains native extensions located under `extensions/`:
 
-| Extension              | Category                | Description                                                                                                                                                                                     | Key Directives / Commands                            |
-| ---------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| `workflows`            | Multi-Agent DSL         | Primary JavaScript multi-agent orchestration DSL with profiles, compaction-aware persistent child sessions, parallel fan-out, schema validation, background result cards, and a profile editor. | `workflow`, `/wf`, `/agents`                         |
-| `pi-compact-pro`       | Compaction              | Configurable auto-compaction thresholds, reversible model context caps, custom summary model fallbacks, and structured summaries.                                                               | `/compaction`, `session_before_compact`              |
-| `pi-processes`         | Process Supervision     | Standalone retained process supervision, readiness checks, logs, lifecycle controls, and process dashboard.                                                                                     | `process_start`, `/processes`                        |
-| `btw`                  | Interaction             | Independent modal side-chat with explicit handoff into the parent session.                                                                                                                      | `/btw`, `/btw:inject`                                |
-| `pi-constellation`     | Inspection & Compaction | Deterministic zero-LLM compaction and incremental session transcript navigation, search, and message inspection.                                                                                | `session_inspect`, `session_before_compact`          |
-| `pi-workers`           | Disabled Reference      | Disabled legacy worker and process implementation retained for later reference only.                                                                                                            | disabled                                             |
-| `pi-reference`         | Code Accessibility      | Project reference manager auto-cloning Git repos into `~/.cache/checkouts/` and auto-allowing directories.                                                                                      | `@alias/path`, `/references`                         |
-| `pi-cortex`            | Code Intelligence       | Semantic and AST pattern search, call graphs, ONNX embeddings, SQLite knowledge triples, and agent memory.                                                                                      | `code_search`, `code_ast_grep`, `/cc-index`          |
-| `pi-exa`               | Web & Research          | Exa-powered web search, webpage content fetching, and multi-source deep research.                                                                                                               | `web_search_exa`, `web_fetch_exa`, `deep_search_exa` |
-| `pi-acks`              | Auth & Accounts         | Subscription OAuth account manager and credential switcher for OpenAI Codex.                                                                                                                    | `/accounts`                                          |
-| `pi-rtk`               | Token Optimization      | Token-optimized bash command rewriting (`rtk rewrite`) and RTK tools (`rtk_grep`, `rtk_find`).                                                                                                  | `/pi-rtk`                                            |
-| `pi-station`           | TUI Compositor          | Fixed-layout TUI compositor status bar, bash mode, hashline file anchors (`LINE#HASH`), prompt history, undo/redo.                                                                              | `/station`, `/stash-history`                         |
-| `pi-code-block-picker` | Utilities               | Code block extractor from session history, fuzzy selector, and cross-platform clipboard copy.                                                                                                   | `/codeblocks`, `Ctrl+Shift+Y`                        |
-| `pi-codex-usage`       | Monitoring              | OpenAI Codex token limit monitoring and response verbosity control.                                                                                                                             | `/codex-usage`                                       |
-| `pi-skill-toggle`      | Skill Governance        | Interactive checklist to toggle skills between automatic agent invocation and manual-only mode.                                                                                                 | `/toggle-skills`                                     |
-| `ask-user`             | Interaction             | Structured multiple-choice user question tool with custom text input.                                                                                                                           | `ask_user`                                           |
-| `notification`         | Audio Alerts            | Audio completion notifications (`agent_end`) with configurable sounds and volume.                                                                                                               | `~/.pi/agent/settings.json`                          |
-| `copy-all`             | Utilities               | Copies the active post-compaction conversation window to the system clipboard.                                                                                                                  | `/copy-all`                                          |
-| `tool-selector`        | Inspection              | Read-only inspector displaying active and inactive status for all session tools.                                                                                                                | `/tools`                                             |
-| `treepluss`            | TUI Compositor          | Enhanced conversation branch tree component renderer for interactive mode.                                                                                                                      | TUI session visualizer                               |
+| Extension              | Category                | Description                                                                                                                                                                    | Key Directives / Commands                                |
+| ---------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
+| `pi-worker-flows`      | Multi-Agent DSL         | Workflow orchestration plus direct worker delegation with profiles, compaction-aware persistent child sessions, parallel fan-out, structured results, and worker job controls. | `workflow`, `worker_spawn`, `/wf`, `/workers`, `/agents` |
+| `pi-compact-pro`       | Compaction              | Configurable auto-compaction thresholds, reversible model context caps, custom summary model fallbacks, and structured summaries.                                              | `/compaction`, `session_before_compact`                  |
+| `pi-processes`         | Process Supervision     | Standalone retained process supervision, readiness checks, logs, lifecycle controls, and process dashboard.                                                                    | `process_start`, `/processes`                            |
+| `btw`                  | Interaction             | Independent modal side-chat with explicit handoff into the parent session.                                                                                                     | `/btw`, `/btw:inject`                                    |
+| `pi-constellation`     | Inspection & Compaction | Deterministic zero-LLM compaction and incremental session transcript navigation, search, and message inspection.                                                               | `session_inspect`, `session_before_compact`              |
+| `pi-reference`         | Code Accessibility      | Project reference manager auto-cloning Git repos into `~/.cache/checkouts/` and auto-allowing directories.                                                                     | `@alias/path`, `/references`                             |
+| `pi-cortex`            | Code Intelligence       | Semantic and AST pattern search, call graphs, ONNX embeddings, SQLite knowledge triples, and agent memory.                                                                     | `code_search`, `code_ast_grep`, `/cc-index`              |
+| `pi-exa`               | Web & Research          | Exa-powered web search, webpage content fetching, and multi-source deep research.                                                                                              | `web_search_exa`, `web_fetch_exa`, `deep_search_exa`     |
+| `pi-acks`              | Auth & Accounts         | Subscription OAuth account manager and credential switcher for OpenAI Codex.                                                                                                   | `/accounts`                                              |
+| `pi-rtk`               | Token Optimization      | Token-optimized bash command rewriting (`rtk rewrite`) and RTK tools (`rtk_grep`, `rtk_find`).                                                                                 | `/pi-rtk`                                                |
+| `pi-station`           | TUI Compositor          | Fixed-layout TUI compositor status bar, bash mode, hashline file anchors (`LINE#HASH`), prompt history, undo/redo.                                                             | `/station`, `/stash-history`                             |
+| `pi-code-block-picker` | Utilities               | Code block extractor from session history, fuzzy selector, and cross-platform clipboard copy.                                                                                  | `/codeblocks`, `Ctrl+Shift+Y`                            |
+| `pi-codex-usage`       | Monitoring              | OpenAI Codex token limit monitoring and response verbosity control.                                                                                                            | `/codex-usage`                                           |
+| `pi-skill-toggle`      | Skill Governance        | Interactive checklist to toggle skills between automatic agent invocation and manual-only mode.                                                                                | `/toggle-skills`                                         |
+| `ask-user`             | Interaction             | Structured multiple-choice user question tool with custom text input.                                                                                                          | `ask_user`                                               |
+| `notification`         | Audio Alerts            | Audio completion notifications (`agent_end`) with configurable sounds and volume.                                                                                              | `~/.pi/agent/settings.json`                              |
+| `copy-all`             | Utilities               | Copies the active post-compaction conversation window to the system clipboard.                                                                                                 | `/copy-all`                                              |
+| `tool-selector`        | Inspection              | Read-only inspector displaying active and inactive status for all session tools.                                                                                               | `/tools`                                                 |
+| `treepluss`            | TUI Compositor          | Enhanced conversation branch tree component renderer for interactive mode.                                                                                                     | TUI session visualizer                                   |
 
 ---
 

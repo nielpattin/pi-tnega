@@ -24,7 +24,7 @@
     Examples:
 
     ```text
-    pnpm --dir extensions/workflows check
+    pnpm --dir extensions/pi-worker-flows check
     ```
 
 - Run lint for a single extension from the repository root with:
@@ -65,7 +65,6 @@ The contributor monorepo workflow for creating and publishing packages lives in 
 
 - Multi-file extensions live in `extensions/<extension-name>/` with their entry point at `extensions/<extension-name>/index.ts`.
 - Single-file extensions live directly at `extensions/<extension-name>.ts`.
-- Shared cross-extension helpers live under `extensions/shared/`.
 
 ## Verification workflow
 

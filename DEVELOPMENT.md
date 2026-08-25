@@ -12,7 +12,7 @@ This document provides the full contributor workflow for developing and publishi
 - **Extension Location**: `extensions/*`
     - [`pi-reference`](./extensions/pi-reference): Project reference declaration & resolution with `@alias` autocomplete.
     - [`pi-station`](./extensions/pi-station): Status bar, layout manager, bash mode, hashline editor with in-chat diff preview.
-    - [`workflows`](./extensions/workflows): Primary profile-configured multi-agent orchestration, persistent child sessions, structured results, background result cards, the `/wf` dashboard, and the `/agents` profile editor.
+    - [`pi-worker-flows`](./extensions/pi-worker-flows): Primary profile-configured multi-agent orchestration, persistent child sessions, structured results, background result cards, the `/wf` dashboard, and the `/agents` profile editor.
     - [`pi-compact-pro`](./extensions/pi-compact-pro): Configurable auto-compaction, model context caps, summary model fallback chains, and structured summaries through `/compaction`.
     - [`pi-processes`](./extensions/pi-processes): Standalone retained process supervision and the `/processes` dashboard.
     - [`btw`](./extensions/btw): Independent side-chat and explicit parent-session handoff.
@@ -37,7 +37,7 @@ agent-root/
 ├── extensions/
 │   ├── pi-reference              # project references extension
 │   ├── pi-station                # published npm extension
-│   ├── workflows                 # primary multi-agent orchestration
+│   ├── pi-worker-flows           # primary multi-agent orchestration
 │   ├── pi-compact-pro            # configurable compaction and summary models
 │   ├── pi-processes              # standalone process supervision
 │   ├── btw                       # independent side-chat extension
@@ -87,7 +87,7 @@ Run checks from root:
 Run scripts for individual packages from the root using `pnpm --dir`:
 
 ```bash
-pnpm --dir extensions/workflows check
+pnpm --dir extensions/pi-worker-flows check
 pnpm --dir extensions/pi-processes check
 pnpm --dir extensions/pi-station typecheck
 ```
@@ -122,7 +122,7 @@ pnpm --dir extensions/pi-station typecheck
 
 ## 5. Editing an Existing Package
 
-- **Raw TypeScript Extensions** (`pi-reference`, `pi-station`, `workflows`, `pi-compact-pro`, `pi-processes`, `btw`, `pi-constellation`, and others):
+- **Raw TypeScript Extensions** (`pi-reference`, `pi-station`, `pi-worker-flows`, `pi-compact-pro`, `pi-processes`, `btw`, `pi-constellation`, and others):
     - Published directly as raw TypeScript source files (`.ts`).
     - Loaded by Pi harness at runtime via `jiti`. No `dist/` build step is required.
 - Ensure changes pass the applicable root checks (`pnpm lint`, `pnpm typecheck`, and `pnpm fmt`).

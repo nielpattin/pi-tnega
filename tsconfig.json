@@ -7,7 +7,7 @@
     "extensions/pi-rtk/**/*.ts",
     "extensions/tool-selector/**/*.ts",
     "extensions/treepluss/**/*.ts",
-    "extensions/workflows/**/*.ts"
+    "extensions/pi-worker-flows/**/*.ts"
   ],
   "exclude": ["node_modules"]
 }

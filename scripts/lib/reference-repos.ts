@@ -30,7 +30,7 @@ export const referenceRepos: ReadonlyArray<ReferenceRepo> = [
       repository: "https://github.com/Effect-TS/effect.git",
       prefix: "repos/effect",
       latestRef: "main",
-      versionSourcePath: "extensions/pi-workers/package.json",
+      versionSourcePath: "extensions/pi-worker-flows/package.json",
       packageVersionPath: ["dependencies", "effect"],
       versionTagPrefix: "effect@"
    }

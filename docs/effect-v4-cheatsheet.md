@@ -14,7 +14,7 @@ Effect is the **async runtime core** for process lifecycle, fiber orchestration,
 | :-------------------------------- | :--------------------------------------------------------------------------------------------------------------------- |
 | `extensions/ask-user`             | `Effect.tryPromise` + `Effect.runPromiseExit` for TUI prompts                                                          |
 | `extensions/copy-all`             | `Effect.callback` for clipboard processes, `Data.TaggedError`                                                          |
-| `extensions/pi-workers`           | `Context.Service`, `Layer`, `ManagedRuntime`, `Deferred`, `Effect.callback`, explicit `Scope`, and typed domain errors |
+| `extensions/pi-worker-flows`      | `Context.Service`, `Layer`, `ManagedRuntime`, `Deferred`, `Effect.callback`, explicit `Scope`, and typed domain errors |
 | `scripts/sync-reference-repos.ts` | Effect CLI, `Schema`, `FileSystem`, `Stream`, and `ChildProcessSpawner`                                                |
 
 ### When NOT to Use Effect
@@ -144,10 +144,7 @@ export type JobRegistryService = JobRegistry["Service"];
 Compose layers:
 
 ```ts
-const WorkersLive = WorkerManager.layer.pipe(
-    Layer.provide(JobRegistry.layer),
-    Layer.provideMerge(ProcessSupervisor.layer)
-);
+const WorkersLive = WorkerManager.layer.pipe(Layer.provide(JobRegistry.layer));
 ```
 
 - `Layer.provide`: hide deps, expose only outer service.
@@ -156,7 +153,7 @@ const WorkersLive = WorkerManager.layer.pipe(
 
 ### 4.6 Resources: explicit `Scope`
 
-The pi-workers extension creates an explicit scope for each external agent process, provides that scope to its polling effects, and closes it when the process settles or is cancelled.
+The pi-worker-flows worker feature creates an explicit scope for each external agent process, provides that scope to its polling effects, and closes it when the process settles or is cancelled.
 
 ```ts
 const scope = yield * Scope.make();
@@ -168,7 +165,7 @@ Use `Effect.forkScoped` for work that must follow the lifetime of an enclosing s
 
 ### 4.7 Reservation + interest (concurrency caps)
 
-WorkerManager and ProcessSupervisor reserve capacity before spawning work:
+WorkerManager reserves capacity before spawning work:
 
 1. Check the current running count plus the incoming count before spawning.
 2. Increment the reservation synchronously.
@@ -190,7 +187,7 @@ const wait = Effect.gen(function* () {
 | Primitive           | Current use                                                                |
 | :------------------ | :------------------------------------------------------------------------- |
 | `Effect.forkScoped` | Background decoding work tied to a Workers scope                           |
-| `Deferred`          | Job and process settlement signals                                         |
+| `Deferred`          | Worker job settlement signals                                              |
 | `Effect.runFork`    | Completing settlement deferreds from synchronous listener callbacks        |
 | `Stream`            | Concurrently collecting child-process stdout and stderr in the sync script |
 
@@ -230,7 +227,7 @@ export async function runTool<A, E>(
 
 ### 4.11 Child processes
 
-`pi-workers` uses Node `spawn` wrapped with `Effect.callback` in `ShellExecutor` and `ProcessSupervisor`. The repository sync script uses `effect/unstable/process` and `ChildProcessSpawner` for Git subprocesses.
+The pi-worker-flows worker feature runs child Pi sessions through the shared agent runner. OS process supervision belongs to `pi-processes`. The repository sync script uses `effect/unstable/process` and `ChildProcessSpawner` for Git subprocesses.
 
 ### 4.12 Logging
 
@@ -249,7 +246,7 @@ Use `Console.log` for CLI output in `scripts/sync-reference-repos.ts`. Keep Effe
 
 ## 6. Workers-Oriented Checklist
 
-When implementing `extensions/pi-workers`, every service must:
+When implementing the worker feature in `extensions/pi-worker-flows`, every service must:
 
 1. Use `Context.Service<Name, Shape>()("workers/Name")` with `static layer`.
 2. Implement methods with `Effect.fn("Name.method")`.
@@ -269,6 +266,6 @@ pnpm lint
 pnpm fmt
 pnpm --dir extensions/ask-user check
 pnpm --dir extensions/copy-all check
-pnpm --dir extensions/pi-workers check
+pnpm --dir extensions/pi-worker-flows check
 pnpm sync:repos --dry-run
 ```
