@@ -1,7 +1,7 @@
 /**
  * Status reporter for pi-reference.
  *
- * Decouples git-cache.ts / permissions.ts / resolve.ts from the Pi UI context.
+ * Decouples git-cache.ts / resolve.ts from the Pi UI context.
  * index.ts wires the UI context on session_start; other modules call
  * reportInfo / reportWarning / reportError.
  *

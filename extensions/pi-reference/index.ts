@@ -1,6 +1,5 @@
 import type { ReferenceInfo } from "./types.js";
 import { resolveReferences } from "./resolve.js";
-import { allowReferenceDirs } from "./permissions.js";
 import { setUiContext, setCurrentReferences, reportError } from "./status.js";
 import { ReferenceAutocompleteProvider } from "./autocomplete.js";
 import { buildReferenceGuidance } from "./system-prompt.js";
@@ -8,7 +7,6 @@ import { buildReferenceGuidance } from "./system-prompt.js";
 // ─── Module-level state ───────────────────────────────────────────
 
 let resolvedReferences: ReferenceInfo[] = [];
-let rulesInjected = false;
 let autocompleteRegistered = false;
 
 // ─── Extension factory ────────────────────────────────────────────
@@ -24,7 +22,6 @@ export default function (pi: import("@earendil-works/pi-coding-agent").Extension
          });
          autocompleteRegistered = true;
       }
-      rulesInjected = false;
       setUiContext(
          ctx.ui
             ? {
@@ -44,14 +41,8 @@ export default function (pi: import("@earendil-works/pi-coding-agent").Extension
       }
    });
 
-   // Auto-allow reference directories + inject reference guidance into system prompt.
-   pi.on("before_agent_start", (_event, ctx) => {
-      // Auto-allow reference directories (once per session).
-      if (!rulesInjected && resolvedReferences.length > 0) {
-         allowReferenceDirs(resolvedReferences, ctx.cwd);
-         rulesInjected = true;
-      }
-
+   // Inject reference guidance into system prompt.
+   pi.on("before_agent_start", (_event, _ctx) => {
       // Append reference guidance to system prompt
       const guidance = buildReferenceGuidance(resolvedReferences);
       if (!guidance) return {};

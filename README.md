@@ -10,7 +10,6 @@ All extensions publish raw TypeScript source that Pi loads through jiti, so they
 
 | Package                                                   | Role                                                                                                                                                                        | Install                           | npm                                                         | Version    |
 | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- | ----------------------------------------------------------- | ---------- |
-| [pi-permission-system](./extensions/pi-permission-system) | Central permission gates for tools, bash, MCP, skills, file paths, and subagents. Edit permission prompt is status-only; the diff lives in the chat via the edit tool.      | `<NONE>`                          |                                                             | 0.2.2      |
 | [pi-reference](./extensions/pi-reference)                 | Project references: declare local dirs and Git repos as agent-accessible with @alias autocomplete.                                                                          | `<NONE>`                          |                                                             | 0.2.1      |
 | [pi-station](./extensions/pi-station)                     | Station bar, fixed editor layout, bash mode, stash, prompt history, undo/redo, hashline read/edit with in-chat diff preview, and configurable segments for the Pi TUI.      | `pnpm add @nielpattin/pi-station` | [npm](https://www.npmjs.com/package/@nielpattin/pi-station) | 0.9.0      |
 | [workflows](./extensions/workflows)                       | Profile-configured multi-agent orchestration with phases, parallel fan-out, persistent child sessions, structured output, background result cards, and the `/wf` dashboard. | `<NONE>`                          |                                                             | 0.1.0      |
@@ -51,7 +50,6 @@ agent-root/
 ├── .githooks/
 │   └── pre-commit                # pnpm lint-staged
 ├── extensions/
-│   ├── pi-permission-system      # permission system extension
 │   ├── pi-reference              # project references extension
 │   ├── pi-station                # published npm extension
 │   ├── workflows                 # primary multi-agent orchestration

@@ -86,9 +86,8 @@ The footer status bar shows `refs: N` (reference count). During git sync, the fo
 ## How it works
 
 1. On `session_start`, references are resolved from global + project settings. Git repos are synced asynchronously through a bounded-concurrency worker pool (3 at a time) with network-error retry, to avoid DNS exhaustion on Windows.
-2. On `before_agent_start` (first turn), reference directories are auto-allowed via the permission system's `external_directory` surface. References with descriptions are injected into the system prompt as an XML block with an explicit instruction telling the agent how to resolve `@alias/path` tokens.
+2. On `before_agent_start` (first turn), references with descriptions are injected into the system prompt as an XML block with an explicit instruction telling the agent how to resolve `@alias/path` tokens.
 
 ## Graceful degradation
 
-- If `pi-permission-system` is not installed, auto-allow is skipped. References still work if you have `external_directory: allow` in your permission config.
 - If a git clone fails, the reference is listed with an error status and retried on the next session start.

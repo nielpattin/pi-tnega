@@ -9,7 +9,6 @@ on:
             required: true
             type: choice
             options:
-               - pi-permission-system
                - pi-reference
                - pi-station
          tag:

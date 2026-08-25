@@ -10,7 +10,6 @@ This document provides the full contributor workflow for developing and publishi
 - **Node.js**: `>=24`
 - **Package Manager**: `pnpm 11` (workspace defined in `pnpm-workspace.yaml`)
 - **Extension Location**: `extensions/*`
-    - [`pi-permission-system`](./extensions/pi-permission-system): Central permission gates for tools, bash, MCP, skills, file paths, and subagents.
     - [`pi-reference`](./extensions/pi-reference): Project reference declaration & resolution with `@alias` autocomplete.
     - [`pi-station`](./extensions/pi-station): Status bar, layout manager, bash mode, hashline editor with in-chat diff preview.
     - [`workflows`](./extensions/workflows): Primary profile-configured multi-agent orchestration, persistent child sessions, structured results, background result cards, the `/wf` dashboard, and the `/agents` profile editor.
@@ -36,7 +35,6 @@ agent-root/
 ├── .nvmrc                        # Node 24
 ├── openspec/                     # change proposals and specs
 ├── extensions/
-│   ├── pi-permission-system      # permission system extension
 │   ├── pi-reference              # project references extension
 │   ├── pi-station                # published npm extension
 │   ├── workflows                 # primary multi-agent orchestration
@@ -89,7 +87,6 @@ Run checks from root:
 Run scripts for individual packages from the root using `pnpm --dir`:
 
 ```bash
-pnpm --dir extensions/pi-permission-system check
 pnpm --dir extensions/workflows check
 pnpm --dir extensions/pi-processes check
 pnpm --dir extensions/pi-station typecheck
@@ -125,7 +122,7 @@ pnpm --dir extensions/pi-station typecheck
 
 ## 5. Editing an Existing Package
 
-- **Raw TypeScript Extensions** (`pi-permission-system`, `pi-reference`, `pi-station`, `workflows`, `pi-compact-pro`, `pi-processes`, `btw`, `pi-constellation`, and others):
+- **Raw TypeScript Extensions** (`pi-reference`, `pi-station`, `workflows`, `pi-compact-pro`, `pi-processes`, `btw`, `pi-constellation`, and others):
     - Published directly as raw TypeScript source files (`.ts`).
     - Loaded by Pi harness at runtime via `jiti`. No `dist/` build step is required.
 - Ensure changes pass the applicable root checks (`pnpm lint`, `pnpm typecheck`, and `pnpm fmt`).
@@ -137,7 +134,6 @@ pnpm --dir extensions/pi-station typecheck
 Before publishing, verify the contents of the generated tarball:
 
 ```bash
-pnpm --dir extensions/pi-permission-system pack --dry-run
 pnpm --dir extensions/pi-reference pack --dry-run
 pnpm --dir extensions/pi-station pack --dry-run
 ```

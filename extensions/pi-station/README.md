@@ -18,7 +18,7 @@ Restart pi to activate.
 
 ## Development
 
-pi-station is a raw TypeScript extension. Pi loads `index.ts` directly through jiti, so no build step is required; `/reload` picks up source edits immediately. The `features/hashline/edit-tool` subpath is exported for consumers (e.g. `pi-permission-system` reuses the edit tool's diff rendering).
+pi-station is a raw TypeScript extension. Pi loads `index.ts` directly through jiti, so no build step is required; `/reload` picks up source edits immediately. The `features/hashline/edit-tool` subpath is exported for consumers that reuse the edit tool's diff rendering.
 
 ## Commands
 

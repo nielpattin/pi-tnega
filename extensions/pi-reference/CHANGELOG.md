@@ -24,11 +24,8 @@
     - @alias autocomplete: type @ to browse reference aliases (cyan), @alias/ to browse files, drill into directories
     - @alias/path tokens in submitted prompts are expanded to file content (or directory listings)
     - System prompt XML guidance for references with descriptions
-    - Permission auto-allow via external_directory session rules
     - Footer status bar shows "refs: N"
     - Transient widget above editor shows "cloning owner/repo..." during git operations
-
-    Extend PermissionsService with approveSessionRule() for cross-extension session-level allow rules.
 
 ## 0.1.0
 
@@ -64,11 +61,6 @@ Three entry forms: string shorthand (local if starts with `.`/`/`/`~`, otherwise
 - `@alias` autocomplete: type `@` to browse all reference aliases (cyan), `@alias/` to list files inside a reference, drill into subdirectories. Selecting a file inserts `@alias/path/to/file.ts` into the editor.
 - `@alias/path` token expansion: on prompt submission, `@alias/path/to/file.ts` tokens are resolved to the reference's cache path and replaced with file content. Directory tokens get a listing. Large files (>100KB) get a placeholder.
 - System prompt guidance: references with descriptions are injected as an XML block so the agent knows about them.
-- Permission auto-allow: reference directories are pre-approved on the `external_directory` surface via `approveSessionRule()`, so the agent can read/grep/find/ls without prompts.
 - Git materialization: repos cloned into `~/.cache/checkouts/<host>/<org>/<repo>` (reuses librarian cache path), refreshed on session start with a 5-minute throttle.
 - Footer status bar: shows `refs: N` persistently.
 - Clone widget: shows `cloning owner/repo...` above the editor during git operations, cleared when done.
-
-**Changes to pi-permission-system**
-
-- Added `approveSessionRule(surface, pattern)` to `PermissionsService` interface for cross-extension session-level allow rules.

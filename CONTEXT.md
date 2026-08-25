@@ -14,20 +14,20 @@ Code in this monorepo is written in TypeScript using **Effect v4** (`effect` v4.
                                │  (Interactive TUI / Orchestrator Mode)   │
                                └────────────────────┬─────────────────────┘
                                                     │
-                ┌───────────────────────────────────┼──────────────────────────────────┐
-                │                                   │                                  │
-                ▼                                   ▼                                  ▼
-┌───────────────────────────────┐   ┌───────────────────────────────┐   ┌───────────────────────────────┐
-│           workflows           │   │        pi-processes           │   │     pi-permission-system      │
-│     JavaScript DSL Engine     │   │   Process Supervision         │   │   Security & Policy Control   │
-│  (parallel, phase, profiles)  │   │ (start, stop, logs, ready)    │   │     (allow, ask, deny)        │
-└───────────────┬───────────────┘   └───────────────┬───────────────┘   └───────────────┬───────────────┘
-                │                                   │                                   │
-                ▼                                   ▼                                   ▼
-┌───────────────────────────────┐   ┌───────────────────────────────┐   ┌───────────────────────────────┐
-│     Child Workflow Agents     │   │    Supervised OS Processes    │   │   Tool & Command Gateways     │
-│   (Persistent Pi Sessions)    │   │   (Servers, watchers, logs)   │   │   (Bash, MCP, File Paths)     │
-└───────────────────────────────┘   └───────────────────────────────┘   └───────────────────────────────┘
+                ┌───────────────────────────────┼────────────────┐
+                │                               │                
+                ▼                               ▼                
+┌───────────────────────────────┐   ┌───────────────────────────────┐
+│           workflows           │   │        pi-processes           │
+│     JavaScript DSL Engine     │   │   Process Supervision         │
+│  (parallel, phase, profiles)  │   │ (start, stop, logs, ready)    │
+└───────────────┬───────────────┘   └───────────────┬───────────────┘
+                │                                   │
+                ▼                                   ▼
+┌───────────────────────────────┐   ┌───────────────────────────────┐
+│     Child Workflow Agents     │   │    Supervised OS Processes    │
+│   (Persistent Pi Sessions)    │   │   (Servers, watchers, logs)   │
+└───────────────────────────────┘   └───────────────────────────────┘
 ```
 
 ---
@@ -79,7 +79,6 @@ The monorepo contains native extensions located under `extensions/`:
 | `btw`                  | Interaction             | Independent modal side-chat with explicit handoff into the parent session.                                                                                                                      | `/btw`, `/btw:inject`                                |
 | `pi-constellation`     | Inspection & Compaction | Deterministic zero-LLM compaction and incremental session transcript navigation, search, and message inspection.                                                                                | `session_inspect`, `session_before_compact`          |
 | `pi-workers`           | Disabled Reference      | Disabled legacy worker and process implementation retained for later reference only.                                                                                                            | disabled                                             |
-| `pi-permission-system` | Security & Governance   | Granular policy enforcement (`allow`, `ask`, `deny`) across tools, bash commands, MCP servers, and file paths.                                                                                  | `~/.pi/agent/permission.jsonc`                       |
 | `pi-reference`         | Code Accessibility      | Project reference manager auto-cloning Git repos into `~/.cache/checkouts/` and auto-allowing directories.                                                                                      | `@alias/path`, `/references`                         |
 | `pi-cortex`            | Code Intelligence       | Semantic and AST pattern search, call graphs, ONNX embeddings, SQLite knowledge triples, and agent memory.                                                                                      | `code_search`, `code_ast_grep`, `/cc-index`          |
 | `pi-exa`               | Web & Research          | Exa-powered web search, webpage content fetching, and multi-source deep research.                                                                                                               | `web_search_exa`, `web_fetch_exa`, `deep_search_exa` |
