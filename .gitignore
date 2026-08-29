@@ -191,8 +191,6 @@ agents/
 .pi/cortex
 **/target/
 
-# Local scratch tests - never committed (see .pi/skills/tdd)
-tests/
 .ext-config/
 /*.json
 /*.jsonc

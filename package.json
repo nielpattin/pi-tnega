@@ -2,6 +2,7 @@
    "private": true,
    "type": "module",
    "scripts": {
+      "test": "node --test \"tests/*/**/*.mjs\"",
       "typecheck": "node scripts/typecheck.mjs",
       "package": "pnpm --dir extensions/pi-ide-pro/vscode package",
       "lint": "oxlint -c oxlint.config.ts --no-error-on-unmatched-pattern",
