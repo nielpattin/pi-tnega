@@ -30,11 +30,13 @@ import {
    capModelDirectly,
    capModelContextWindow,
    DEFAULT_CONFIG,
+   DEFAULT_NATIVE_RESERVE_TOKENS,
    generateCustomCompaction,
    getEffectiveContextWindow,
    getOriginalContextWindow,
    getReserveTokensForModel,
    NO_CAP,
+   NO_TARGET,
    normalizeConfig,
    type CompactionConfig,
    type ModelOverride,
@@ -43,8 +45,26 @@ import {
    type ScopedModelLike
 } from "./src/compaction.ts";
 
-export { DEFAULT_CONFIG, getEffectiveConfig, normalizeConfig, type CompactionConfig } from "./src/compaction.ts";
-import { Container, Input, SelectList, SettingsList, Spacer, Text, type Component } from "@earendil-works/pi-tui";
+export {
+   DEFAULT_CONFIG,
+   DEFAULT_NATIVE_RESERVE_TOKENS,
+   getEffectiveConfig,
+   normalizeConfig,
+   NO_CAP,
+   NO_TARGET,
+   type CompactionConfig
+} from "./src/compaction.ts";
+import {
+   Container,
+   Input,
+   Key,
+   matchesKey,
+   SelectList,
+   SettingsList,
+   Spacer,
+   Text,
+   type Component
+} from "@earendil-works/pi-tui";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -139,12 +159,17 @@ function writeSettingsCompaction(reserveTokens: number, keepRecentTokens: number
  */
 function persistSettings(
    config: CompactionConfig,
-   model: { provider: string; id: string; contextWindow: number } | undefined,
+   model: { provider: string; id: string; contextWindow?: number } | undefined,
    originalContextWindows: OriginalContextWindows
 ): { settingsChanged: boolean; reserveTokens: number } {
    const reserveTokens = model
       ? getReserveTokensForModel(model, config, originalContextWindows)
-      : Math.max(1, config.maxContext - config.compactionTarget);
+      : config.compactionTarget === NO_TARGET || config.compactionTarget <= 0
+        ? DEFAULT_NATIVE_RESERVE_TOKENS
+        : Math.max(
+             DEFAULT_NATIVE_RESERVE_TOKENS,
+             (config.maxContext === NO_CAP ? 128_000 : config.maxContext) - config.compactionTarget
+          );
    return {
       settingsChanged: writeSettingsCompaction(reserveTokens, config.keepRecentTokens, config.enabled),
       reserveTokens
@@ -156,6 +181,8 @@ function persistSettings(
 // ---------------------------------------------------------------------------
 
 export function formatTokens(n: number): string {
+   if (n === NO_CAP) return "No cap";
+   if (n === NO_TARGET || n <= 0) return "Native (flow normally)";
    if (n < 1000) return n.toString();
    if (n < 10_000) return `${(n / 1000).toFixed(1)}k`;
    if (n < 1_000_000) return `${Math.round(n / 1000)}k`;
@@ -300,14 +327,31 @@ export default function (pi: ExtensionAPI) {
                      .slice(0, 3);
                }
             } else if (key === "maxcontext" || key === "target" || key === "keeprecent") {
-               const value = parseInt(valueStr, 10);
-               if (isNaN(value) || value <= 0) {
-                  ctx.ui.notify(`Invalid value for ${key}: ${valueStr}`, "error");
-                  return;
+               if (
+                  key === "target" &&
+                  (valueStr === "native" ||
+                     valueStr === "none" ||
+                     valueStr === "off" ||
+                     valueStr === "-1" ||
+                     valueStr === "0" ||
+                     valueStr === "__notarget__")
+               ) {
+                  config.compactionTarget = NO_TARGET;
+               } else if (
+                  key === "maxcontext" &&
+                  (valueStr === "none" || valueStr === "nocap" || valueStr === "-1" || valueStr === "__nocap__")
+               ) {
+                  config.maxContext = NO_CAP;
+               } else {
+                  const value = parseInt(valueStr, 10);
+                  if (isNaN(value) || value <= 0) {
+                     ctx.ui.notify(`Invalid value for ${key}: ${valueStr}`, "error");
+                     return;
+                  }
+                  if (key === "maxcontext") config.maxContext = value;
+                  else if (key === "target") config.compactionTarget = value;
+                  else if (key === "keeprecent") config.keepRecentTokens = value;
                }
-               if (key === "maxcontext") config.maxContext = value;
-               else if (key === "target") config.compactionTarget = value;
-               else if (key === "keeprecent") config.keepRecentTokens = value;
             } else {
                ctx.ui.notify(
                   `Unknown setting: ${key}\nValid: maxContext, target, keepRecent, enabled, summaryModel`,
@@ -400,6 +444,11 @@ export default function (pi: ExtensionAPI) {
             const targetChoices = (): Option[] =>
                withCurrent(
                   [
+                     {
+                        value: "__notarget__",
+                        label: "Native (flow normally / no hard target)",
+                        description: "Do not enforce an early compaction target; let context flow to native limit"
+                     },
                      { value: "40000", label: "40k", description: "40,000 tokens" },
                      { value: "60000", label: "60k", description: "60,000 tokens" },
                      { value: "64000", label: "64k", description: "64,000 tokens" },
@@ -410,7 +459,7 @@ export default function (pi: ExtensionAPI) {
                      { value: "200000", label: "200k", description: "200,000 tokens" },
                      { value: "__custom__", label: "Custom value…", description: "Type any token count" }
                   ],
-                  String(config.compactionTarget),
+                  config.compactionTarget === NO_TARGET ? "__notarget__" : String(config.compactionTarget),
                   formatTokens(config.compactionTarget)
                );
 
@@ -510,12 +559,15 @@ export default function (pi: ExtensionAPI) {
                   : config.maxContext === NO_CAP
                     ? Number.POSITIVE_INFINITY
                     : config.maxContext;
+               const isNoTarget = config.compactionTarget === NO_TARGET || config.compactionTarget <= 0;
                const reserveTokens = model
                   ? getReserveTokensForModel(model, config, originalContextWindows)
-                  : Math.max(
-                       1,
-                       (config.maxContext === NO_CAP ? 1_000_000 : config.maxContext) - config.compactionTarget
-                    );
+                  : isNoTarget
+                    ? DEFAULT_NATIVE_RESERVE_TOKENS
+                    : Math.max(
+                         DEFAULT_NATIVE_RESERVE_TOKENS,
+                         (config.maxContext === NO_CAP ? 1_000_000 : config.maxContext) - config.compactionTarget
+                      );
                const effectiveTarget = Math.max(1, effectiveWindow - reserveTokens);
                const effLabel = Number.isFinite(effectiveWindow) ? formatTokens(effectiveWindow) : "native";
 
@@ -530,6 +582,10 @@ export default function (pi: ExtensionAPI) {
                const overrideCount = Object.keys(config.modelOverrides ?? {}).length;
                const maxContextDisplay =
                   config.maxContext === NO_CAP ? "No cap (native windows)" : formatTokens(config.maxContext);
+               const targetDisplay = isNoTarget ? "Native (flow normally)" : formatTokens(config.compactionTarget);
+               const targetDescription = isNoTarget
+                  ? `Context flows normally up to the window ceiling without an early compaction target. Native Pi reserve: ${formatTokens(reserveTokens)}.`
+                  : `Trigger compaction when context reaches ${formatTokens(config.compactionTarget)}. Effective threshold for the active model: ${formatTokens(effectiveTarget)} (window minus reserve).`;
 
                return [
                   {
@@ -542,15 +598,15 @@ export default function (pi: ExtensionAPI) {
                   {
                      id: "compactionTarget",
                      label: "Compaction target",
-                     description: `Trigger compaction when context reaches ${formatTokens(config.compactionTarget)}. Effective threshold for the active model: ${formatTokens(effectiveTarget)} (window minus reserve).`,
-                     currentValue: formatTokens(config.compactionTarget),
+                     description: targetDescription,
+                     currentValue: targetDisplay,
                      submenu: (_cv: string, submenuDone: (v?: string) => void) =>
                         new SelectSubmenu(
                            theme,
                            "Compaction Target",
                            "Token count at which auto-compaction triggers",
                            targetChoices(),
-                           String(config.compactionTarget),
+                           config.compactionTarget === NO_TARGET ? "__notarget__" : String(config.compactionTarget),
                            (value: string) => {
                               applyConfig({ ...config, compactionTarget: tokenValue(value) });
                               submenuDone(value);
@@ -725,7 +781,7 @@ export default function (pi: ExtensionAPI) {
                () => done()
             );
 
-            const panel = new CompactionSettingsPanel(settingsList, theme);
+            const panel = new CompactionSettingsPanel(settingsList, theme, () => done());
             return panel;
          });
       }
@@ -742,7 +798,9 @@ const NAV_KEYS = new Set(["\r", "\n", "\x1b[A", "\x1b[B", "\x1b[5~", "\x1b[6~", 
 
 /** Parse a selected token value; "__nocap__" maps to the no-cap sentinel. */
 function tokenValue(value: string): number {
-   return value === "__nocap__" ? NO_CAP : parseInt(value, 10);
+   if (value === "__nocap__") return NO_CAP;
+   if (value === "__notarget__") return NO_TARGET;
+   return parseInt(value, 10);
 }
 
 /** Size presets for per-model overrides, including no-cap and custom entries. */
@@ -842,13 +900,14 @@ class SelectSubmenu implements Component {
    }
 
    handleInput(data: string): void {
+      const isEscape = matchesKey(data, Key.escape) || data === "\x1b" || data === "escape";
       if (this.mode === "custom" && this.customInput) {
          if (data === "\r" || data === "\n") {
             const raw = this.customInput.getValue().trim();
             if (/^\d+$/.test(raw)) this.onSelect(raw);
             return;
          }
-         if (data === "\x1b") {
+         if (isEscape) {
             this.mode = "list";
             this.hint = this.enableSearch
                ? "  Type to filter · ↑/↓ to navigate · Enter to select · Esc to go back"
@@ -859,8 +918,18 @@ class SelectSubmenu implements Component {
          return;
       }
 
+      if (isEscape) {
+         this.onCancel();
+         return;
+      }
+
       if (this.searchInput) {
-         if (NAV_KEYS.has(data)) {
+         if (
+            NAV_KEYS.has(data) ||
+            matchesKey(data, Key.up) ||
+            matchesKey(data, Key.down) ||
+            matchesKey(data, Key.enter)
+         ) {
             this.selectList.handleInput(data);
             return;
          }
@@ -1093,6 +1162,7 @@ class OverrideSubmenu implements Component {
    }
 
    handleInput(data: string): void {
+      const isEscape = matchesKey(data, Key.escape) || data === "\x1b" || data === "escape";
       if (this.customMode && this.customInput) {
          if (data === "\r" || data === "\n") {
             const raw = this.customInput.getValue().trim();
@@ -1103,7 +1173,7 @@ class OverrideSubmenu implements Component {
             }
             return;
          }
-         if (data === "\x1b") {
+         if (isEscape) {
             this.customMode = false;
             this.hint = "  Enter to select · Esc to go back";
             return;
@@ -1112,9 +1182,23 @@ class OverrideSubmenu implements Component {
          return;
       }
 
+      if (isEscape) {
+         if (this.levels.length > 1) {
+            this.pop();
+         } else {
+            this.onDone("updated");
+         }
+         return;
+      }
+
       const level = this.levels[this.levels.length - 1];
       if (this.searchInput && level.options.length > 5) {
-         if (NAV_KEYS.has(data)) {
+         if (
+            NAV_KEYS.has(data) ||
+            matchesKey(data, Key.up) ||
+            matchesKey(data, Key.down) ||
+            matchesKey(data, Key.enter)
+         ) {
             this.selectList.handleInput(data);
             return;
          }
@@ -1163,7 +1247,8 @@ class CompactionSettingsPanel extends Container {
 
    constructor(
       settingsList: SettingsList,
-      private theme: Theme
+      private theme: Theme,
+      private onDone: () => void
    ) {
       super();
       this.addChild(new DynamicBorder());
@@ -1175,6 +1260,11 @@ class CompactionSettingsPanel extends Container {
    }
 
    handleInput(data: string): void {
+      const hasSubmenu = Boolean((this.settingsList as unknown as { submenuComponent?: unknown }).submenuComponent);
+      if (!hasSubmenu && (matchesKey(data, Key.escape) || data === "\x1b" || data === "escape" || data === "q")) {
+         this.onDone();
+         return;
+      }
       this.settingsList.handleInput(data);
    }
 }

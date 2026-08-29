@@ -32,6 +32,11 @@ export const DEFAULT_CONFIG: CompactionConfig = {
 /** Sentinel value meaning "no context cap" (use each model's native window). */
 export const NO_CAP = -1;
 
+/** Sentinel value meaning "no custom compaction target" (flow naturally without early trigger). */
+export const NO_TARGET = -1;
+
+export const DEFAULT_NATIVE_RESERVE_TOKENS = 16_384;
+
 export interface EffectiveCompactionConfig {
    maxContext: number;
    compactionTarget: number;
@@ -55,8 +60,20 @@ export function normalizeConfig(value: unknown): CompactionConfig {
    const input = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
    const noCap = input.maxContext === NO_CAP;
    const maxContext = noCap ? NO_CAP : positiveInteger(input.maxContext, DEFAULT_CONFIG.maxContext);
-   const requestedTarget = positiveInteger(input.compactionTarget, DEFAULT_CONFIG.compactionTarget);
-   const compactionTarget = noCap ? requestedTarget : Math.min(requestedTarget, Math.max(1, maxContext - 1));
+   const noTarget =
+      input.compactionTarget === NO_TARGET ||
+      input.compactionTarget === "none" ||
+      input.compactionTarget === "native" ||
+      input.compactionTarget === "off" ||
+      input.compactionTarget === 0;
+   const requestedTarget = noTarget
+      ? NO_TARGET
+      : positiveInteger(input.compactionTarget, DEFAULT_CONFIG.compactionTarget);
+   const compactionTarget = noTarget
+      ? NO_TARGET
+      : noCap
+        ? requestedTarget
+        : Math.min(requestedTarget, Math.max(1, maxContext - 1));
    const keepRecentTokens = positiveInteger(input.keepRecentTokens, DEFAULT_CONFIG.keepRecentTokens);
 
    const modelOverrides: Record<string, ModelOverride> = {};
@@ -118,9 +135,12 @@ export function getReserveTokensForModel(
    config: CompactionConfig,
    originalContextWindows: OriginalContextWindows
 ): number {
+   if (config.compactionTarget === NO_TARGET || config.compactionTarget <= 0) {
+      return DEFAULT_NATIVE_RESERVE_TOKENS;
+   }
    const effectiveWindow = getEffectiveContextWindow(model, config, originalContextWindows);
    const target = Math.min(config.compactionTarget, Math.max(1, effectiveWindow - 1));
-   return Math.max(1, effectiveWindow - target);
+   return Math.max(DEFAULT_NATIVE_RESERVE_TOKENS, effectiveWindow - target);
 }
 
 export function getEffectiveConfig(
