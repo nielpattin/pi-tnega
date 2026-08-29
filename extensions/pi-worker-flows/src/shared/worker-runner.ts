@@ -26,10 +26,11 @@ import {
    type ToolDefinition
 } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
-import { resolveAgentProfile, type AgentProfile } from "../services/agent-profiles.ts";
+import { resolveAgentProfile, type AgentProfile } from "../services/worker-profiles.ts";
 import {
    childToolPolicy,
    createChildResources,
+   getChildExtensionPathsForTools,
    createChildSessionManager,
    shutdownAndDisposeChildSession
 } from "./child-session.ts";
@@ -177,9 +178,11 @@ export function createWorkflowResources(
       ...(profile?.systemPrompt ? [profile.systemPrompt] : []),
       ...(variant === "structured" ? [STRUCTURED_OUTPUT_SYSTEM_INSTRUCTION] : [])
    ];
+   const additionalExtensionPaths = getChildExtensionPathsForTools(profile?.tools ?? []);
    return createChildResources({
       cwd,
       projectTrusted,
+      ...(additionalExtensionPaths.length > 0 ? { additionalExtensionPaths } : {}),
       ...(appendSystemPrompt.length > 0 ? { appendSystemPrompt } : {})
    });
 }
@@ -563,7 +566,7 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
    const profile = options.profile ?? resolveAgentProfile(undefined);
    const toolPolicy = childToolPolicy();
    try {
-      if (!profile) throw new Error("The default `good` agent profile is unavailable.");
+      if (!profile) throw new Error("The default `worker` agent profile is unavailable.");
       customTools = [
          makeStructuredOutputTool(options.schema ?? DEFAULT_WORKFLOW_OUTPUT_SCHEMA, (value) => {
             structured = value;

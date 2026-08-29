@@ -2,28 +2,30 @@ import { Context, Effect, Layer } from "effect";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { deriveChildSessionDirectory } from "../../shared/child-session-dir.ts";
-import { ManifestPersistenceError, ManifestSerializationError, type Job } from "../domain.js";
+import { ManifestPersistenceError, ManifestSerializationError, type Task } from "../domain.js";
 import {
-   WORKERS_JOB_MANIFEST_VERSION,
-   WORKERS_JOB_MANIFEST_LIMITS,
+   WORKERS_TASK_MANIFEST_VERSION,
+   WORKERS_TASK_MANIFEST_LIMITS,
    buildPersistedIndex,
    parsePersistedIndex,
-   type WorkersJobIndex
-} from "./workers-job-manifest.js";
+   type WorkersTaskIndex
+} from "./workers-task-manifest.js";
 
-export const WORKERS_JOBS_FILE = "workers-jobs.json";
-export { WORKERS_JOB_MANIFEST_VERSION as WORKERS_JOBS_VERSION };
-export { WORKERS_JOB_MANIFEST_LIMITS };
-export { computeReservedWorkerSeq as computeNextWorkerSeq } from "./workers-job-manifest.js";
+export const WORKERS_TASKS_FILE = "workers-tasks.json";
+/** Legacy manifest name still read for migration from earlier versions. */
+export const WORKERS_LEGACY_TASKS_FILE = "workers-jobs.json";
+export { WORKERS_TASK_MANIFEST_VERSION as WORKERS_TASKS_VERSION };
+export { WORKERS_TASK_MANIFEST_LIMITS };
+export { computeReservedTaskSeq as computeNextTaskSeq } from "./workers-task-manifest.js";
 
 const RESTART_INTERRUPTED_ERROR =
-   "Workers parent session restarted before this job settled. The job was not resumed to avoid duplicating work.";
+   "Workers parent session restarted before this Task settled. The Task was left recoverable; resume it with worker_recover.";
 
 const MAX_REPLACE_ATTEMPTS = 5;
 const RETRY_BASE_MS = 5;
 const RETRY_MAX_MS = 80;
 
-/** Narrow filesystem capability used by Workers job persistence. */
+/** Narrow filesystem capability used by Workers Task persistence. */
 export interface WorkersFileSystem {
    readonly mkdir: (dir: string) => Promise<void>;
    readonly readdir: (dir: string) => Promise<ReadonlyArray<string>>;
@@ -103,7 +105,7 @@ const nodeFileSystem: WorkersFileSystem = {
    }
 };
 
-export interface WorkersJobPersistenceShape {
+export interface WorkersTaskPersistenceShape {
    readonly configure: (parentSessionFile: string | undefined | null) => Effect.Effect<void, ManifestPersistenceError>;
    readonly currentTarget: () => Effect.Effect<string | undefined>;
    readonly currentDir: () => Effect.Effect<string | undefined>;
@@ -111,35 +113,35 @@ export interface WorkersJobPersistenceShape {
    readonly setChangeListener: (unsubscribe: (() => void) | undefined) => Effect.Effect<void>;
    readonly takeChangeWriter: () => Effect.Effect<RegistryChangeWriter | undefined>;
    readonly setChangeWriter: (writer: RegistryChangeWriter | undefined) => Effect.Effect<void>;
-   readonly load: () => Effect.Effect<WorkersJobIndex, ManifestPersistenceError>;
+   readonly load: () => Effect.Effect<WorkersTaskIndex, ManifestPersistenceError>;
    readonly persist: (
-      jobs: ReadonlyArray<Job>
+      jobs: ReadonlyArray<Task>
    ) => Effect.Effect<void, ManifestSerializationError | ManifestPersistenceError>;
    readonly flush: () => Effect.Effect<void, ManifestPersistenceError>;
 }
 
-export class WorkersJobPersistence extends Context.Service<WorkersJobPersistence, WorkersJobPersistenceShape>()(
-   "workers/services/WorkersJobPersistence"
+export class WorkersTaskPersistence extends Context.Service<WorkersTaskPersistence, WorkersTaskPersistenceShape>()(
+   "workers/services/WorkersTaskPersistence"
 ) {
    static readonly layer = Layer.effect(
-      WorkersJobPersistence,
-      Effect.sync(() => makeWorkersJobPersistenceShape(nodeFileSystem))
+      WorkersTaskPersistence,
+      Effect.sync(() => makeWorkersTaskPersistenceShape(nodeFileSystem))
    );
 
-   static layerWith(fileSystem: WorkersFileSystem): Layer.Layer<WorkersJobPersistence> {
+   static layerWith(fileSystem: WorkersFileSystem): Layer.Layer<WorkersTaskPersistence> {
       return Layer.effect(
-         WorkersJobPersistence,
-         Effect.sync(() => makeWorkersJobPersistenceShape(fileSystem))
+         WorkersTaskPersistence,
+         Effect.sync(() => makeWorkersTaskPersistenceShape(fileSystem))
       );
    }
 }
 
 export interface RegistryChangeWriter {
-   readonly schedule: (jobs: ReadonlyArray<Job>) => void;
+   readonly schedule: (jobs: ReadonlyArray<Task>) => void;
    readonly flush: () => Promise<void>;
 }
 
-function makeWorkersJobPersistenceShape(fileSystem: WorkersFileSystem): WorkersJobPersistenceShape {
+function makeWorkersTaskPersistenceShape(fileSystem: WorkersFileSystem): WorkersTaskPersistenceShape {
    let indexDir: string | undefined;
    let configuredParentSessionFile: string | undefined;
    let changeListenerUnsubscribe: (() => void) | undefined;
@@ -148,7 +150,12 @@ function makeWorkersJobPersistenceShape(fileSystem: WorkersFileSystem): WorkersJ
 
    const resolveFinalPath = (): string | undefined => {
       if (!indexDir) return undefined;
-      return path.join(indexDir, WORKERS_JOBS_FILE);
+      return path.join(indexDir, WORKERS_TASKS_FILE);
+   };
+
+   const resolveLegacyFinalPath = (): string | undefined => {
+      if (!indexDir) return undefined;
+      return path.join(indexDir, WORKERS_LEGACY_TASKS_FILE);
    };
 
    const makeArtifactPath = (finalPath: string, suffix: "tmp" | "bak" | "corrupt"): string => {
@@ -265,8 +272,9 @@ function makeWorkersJobPersistenceShape(fileSystem: WorkersFileSystem): WorkersJ
       if (!succeeded) throw lastError;
    };
 
-   const isTempArtifact = (entry: string): boolean => entry.startsWith(`${WORKERS_JOBS_FILE}.tmp-`);
-   const isBackupArtifact = (entry: string): boolean => entry.startsWith(`${WORKERS_JOBS_FILE}.bak-`);
+   const isTempArtifact = (entry: string): boolean =>
+      entry.startsWith(`${WORKERS_TASKS_FILE}.tmp-`) || entry.startsWith(`${WORKERS_TASKS_FILE}.bak-`);
+   const isBackupArtifact = (entry: string): boolean => entry.startsWith(`${WORKERS_TASKS_FILE}.bak-`);
 
    const cleanupTempArtifacts = async (dir: string): Promise<void> => {
       const entries = await fileSystem.readdir(dir).catch((): ReadonlyArray<string> => []);
@@ -288,7 +296,7 @@ function makeWorkersJobPersistenceShape(fileSystem: WorkersFileSystem): WorkersJ
    };
 
    const backupTimestamp = (entry: string): number => {
-      const prefix = `${WORKERS_JOBS_FILE}.bak-`;
+      const prefix = `${WORKERS_TASKS_FILE}.bak-`;
       const rest = entry.slice(prefix.length);
       const dash = rest.indexOf("-");
       const ts = dash >= 0 ? rest.slice(0, dash) : rest;
@@ -362,11 +370,11 @@ function makeWorkersJobPersistenceShape(fileSystem: WorkersFileSystem): WorkersJ
       await syncDirectory(dir);
    };
 
-   const readIndexFromDisk = async (filePath: string): Promise<WorkersJobIndex | undefined> => {
+   const readIndexFromDisk = async (filePath: string): Promise<WorkersTaskIndex | undefined> => {
       try {
          const text = await fileSystem.readFile(filePath);
          if (text === undefined) return undefined;
-         if (Buffer.byteLength(text, "utf8") > WORKERS_JOB_MANIFEST_LIMITS.maxPersistedManifestBytes) return undefined;
+         if (Buffer.byteLength(text, "utf8") > WORKERS_TASK_MANIFEST_LIMITS.maxPersistedManifestBytes) return undefined;
          const parsed = JSON.parse(text) as unknown;
          if (!parsed || typeof parsed !== "object") return undefined;
          return parsePersistedIndex(parsed as Record<string, unknown>);
@@ -375,7 +383,34 @@ function makeWorkersJobPersistenceShape(fileSystem: WorkersFileSystem): WorkersJ
       }
    };
 
-   const configure: WorkersJobPersistenceShape["configure"] = Effect.fn("WorkersJobPersistence.configure")(
+   /**
+    * Migrate a legacy workers-jobs.json manifest into the new tasks file.
+    *
+    * The legacy parser accepts both `agent`/`worker` fields and legacy ids,
+    * so the persisted records are already normalized. When the legacy file is
+    * the only manifest, promote it and keep the old file as a backup.
+    */
+   const migrateLegacyManifestIfNeeded = async (dir: string): Promise<void> => {
+      const finalPath = resolveFinalPath();
+      if (!finalPath) return;
+      const legacyPath = resolveLegacyFinalPath();
+      if (!legacyPath) return;
+
+      const legacyText = await fileSystem.readFile(legacyPath);
+      if (legacyText !== undefined) {
+         const finalText = await fileSystem.readFile(finalPath);
+         if (finalText === undefined) {
+            try {
+               await fileSystem.rename(legacyPath, finalPath);
+               await syncDirectory(dir);
+            } catch {
+               // Keep both files; configure/load falls back to the legacy path.
+            }
+         }
+      }
+   };
+
+   const configure: WorkersTaskPersistenceShape["configure"] = Effect.fn("WorkersTaskPersistence.configure")(
       (parentSessionFile) =>
          Effect.gen(function* () {
             // A configure call always replaces the previous target, including when
@@ -389,18 +424,19 @@ function makeWorkersJobPersistenceShape(fileSystem: WorkersFileSystem): WorkersJ
             if (!dir) return;
             yield* Effect.promise(() => fileSystem.mkdir(dir));
             yield* Effect.promise(() => cleanupTempArtifacts(dir));
+            yield* Effect.promise(() => migrateLegacyManifestIfNeeded(dir));
             indexDir = dir;
             configuredParentSessionFile = parentSessionFile;
             yield* Effect.promise(() => reconcileBackupsAtConfigure(dir));
          })
    );
 
-   const currentTarget: WorkersJobPersistenceShape["currentTarget"] = Effect.fn("WorkersJobPersistence.currentTarget")(
-      () => Effect.succeed(configuredParentSessionFile)
-   );
+   const currentTarget: WorkersTaskPersistenceShape["currentTarget"] = Effect.fn(
+      "WorkersTaskPersistence.currentTarget"
+   )(() => Effect.succeed(configuredParentSessionFile));
 
-   const takeChangeListener: WorkersJobPersistenceShape["takeChangeListener"] = Effect.fn(
-      "WorkersJobPersistence.takeChangeListener"
+   const takeChangeListener: WorkersTaskPersistenceShape["takeChangeListener"] = Effect.fn(
+      "WorkersTaskPersistence.takeChangeListener"
    )(() =>
       Effect.sync(() => {
          const unsub = changeListenerUnsubscribe;
@@ -409,16 +445,16 @@ function makeWorkersJobPersistenceShape(fileSystem: WorkersFileSystem): WorkersJ
       })
    );
 
-   const setChangeListener: WorkersJobPersistenceShape["setChangeListener"] = Effect.fn(
-      "WorkersJobPersistence.setChangeListener"
+   const setChangeListener: WorkersTaskPersistenceShape["setChangeListener"] = Effect.fn(
+      "WorkersTaskPersistence.setChangeListener"
    )((unsubscribe: (() => void) | undefined) =>
       Effect.sync(() => {
          changeListenerUnsubscribe = unsubscribe;
       })
    );
 
-   const takeChangeWriter: WorkersJobPersistenceShape["takeChangeWriter"] = Effect.fn(
-      "WorkersJobPersistence.takeChangeWriter"
+   const takeChangeWriter: WorkersTaskPersistenceShape["takeChangeWriter"] = Effect.fn(
+      "WorkersTaskPersistence.takeChangeWriter"
    )(() =>
       Effect.sync(() => {
          const writer = changeWriter;
@@ -427,39 +463,45 @@ function makeWorkersJobPersistenceShape(fileSystem: WorkersFileSystem): WorkersJ
       })
    );
 
-   const setChangeWriter: WorkersJobPersistenceShape["setChangeWriter"] = Effect.fn(
-      "WorkersJobPersistence.setChangeWriter"
+   const setChangeWriter: WorkersTaskPersistenceShape["setChangeWriter"] = Effect.fn(
+      "WorkersTaskPersistence.setChangeWriter"
    )((writer: RegistryChangeWriter | undefined) =>
       Effect.sync(() => {
          changeWriter = writer;
       })
    );
 
-   const currentDir: WorkersJobPersistenceShape["currentDir"] = Effect.fn("WorkersJobPersistence.currentDir")(() =>
+   const currentDir: WorkersTaskPersistenceShape["currentDir"] = Effect.fn("WorkersTaskPersistence.currentDir")(() =>
       Effect.succeed(indexDir)
    );
 
-   const load: WorkersJobPersistenceShape["load"] = Effect.fn("WorkersJobPersistence.load")(() =>
+   const load: WorkersTaskPersistenceShape["load"] = Effect.fn("WorkersTaskPersistence.load")(() =>
       Effect.gen(function* () {
          const finalPath = resolveFinalPath();
+         const legacyPath = resolveLegacyFinalPath();
          if (!finalPath) {
-            return { version: WORKERS_JOB_MANIFEST_VERSION, jobs: [] as Job[] };
+            return { version: WORKERS_TASK_MANIFEST_VERSION, jobs: [] as Task[] };
          }
 
          const parsed = yield* Effect.promise(() => readIndexFromDisk(finalPath));
-
          if (parsed) return parsed;
+
+         // Fall back to the legacy manifest, which parsePersistedIndex accepts.
+         if (legacyPath) {
+            const legacyParsed = yield* Effect.promise(() => readIndexFromDisk(legacyPath));
+            if (legacyParsed) return legacyParsed;
+         }
 
          // Missing or structurally invalid index: quarantine any existing bytes
          // before returning an empty recovery set.
          yield* Effect.promise(() => quarantineFile(finalPath));
          const dir = path.dirname(finalPath);
          yield* Effect.promise(() => syncDirectory(dir));
-         return { version: WORKERS_JOB_MANIFEST_VERSION, source: "missing", jobs: [] as Job[] };
+         return { version: WORKERS_TASK_MANIFEST_VERSION, source: "missing", jobs: [] as Task[] };
       })
    );
 
-   const persist: WorkersJobPersistenceShape["persist"] = Effect.fn("WorkersJobPersistence.persist")((jobs) =>
+   const persist: WorkersTaskPersistenceShape["persist"] = Effect.fn("WorkersTaskPersistence.persist")((jobs) =>
       Effect.gen(function* () {
          const finalPath = resolveFinalPath();
          if (!finalPath) return yield* Effect.void;
@@ -468,7 +510,7 @@ function makeWorkersJobPersistenceShape(fileSystem: WorkersFileSystem): WorkersJ
          try {
             const { index } = buildPersistedIndex(jobs, configuredParentSessionFile);
             data = JSON.stringify(index, undefined, 2);
-            if (Buffer.byteLength(data, "utf8") > WORKERS_JOB_MANIFEST_LIMITS.maxPersistedManifestBytes) {
+            if (Buffer.byteLength(data, "utf8") > WORKERS_TASK_MANIFEST_LIMITS.maxPersistedManifestBytes) {
                throw new Error("Serialized workers jobs manifest exceeds maxPersistedManifestBytes");
             }
          } catch (error) {
@@ -504,7 +546,7 @@ function makeWorkersJobPersistenceShape(fileSystem: WorkersFileSystem): WorkersJ
       })
    );
 
-   const flush: WorkersJobPersistenceShape["flush"] = Effect.fn("WorkersJobPersistence.flush")(() =>
+   const flush: WorkersTaskPersistenceShape["flush"] = Effect.fn("WorkersTaskPersistence.flush")(() =>
       Effect.gen(function* () {
          yield* Effect.tryPromise({
             try: () => writeLock,
@@ -520,7 +562,7 @@ function makeWorkersJobPersistenceShape(fileSystem: WorkersFileSystem): WorkersJ
       })
    );
 
-   return WorkersJobPersistence.of({
+   return WorkersTaskPersistence.of({
       configure,
       currentTarget,
       currentDir,
@@ -543,27 +585,28 @@ function makeWorkersJobPersistenceShape(fileSystem: WorkersFileSystem): WorkersJ
  * events survive a crash. Call {@link RegistryChangeWriter.flush} during
  * session shutdown to guarantee any pending debounced write lands on disk.
  */
-export function createRegistryChangeWriter(persistence: WorkersJobPersistenceShape): RegistryChangeWriter {
-   let lastSnapshot: ReadonlyArray<Job> | undefined;
-   let pending: { jobs: ReadonlyArray<Job>; immediate: boolean } | undefined;
+export function createRegistryChangeWriter(persistence: WorkersTaskPersistenceShape): RegistryChangeWriter {
+   let lastSnapshot: ReadonlyArray<Task> | undefined;
+   let pending: { jobs: ReadonlyArray<Task>; immediate: boolean } | undefined;
    let timer: ReturnType<typeof setTimeout> | undefined;
    let inFlight: Promise<void> | undefined;
    let flushWaiters: Array<() => void> = [];
 
-   const isTerminal = (job: Job) => job.status === "completed" || job.status === "failed" || job.status === "cancelled";
+   const isTerminal = (task: Task) =>
+      task.status === "completed" || task.status === "failed" || task.status === "cancelled";
 
-   const snapshotContains = (snapshot: ReadonlyArray<Job>, id: string) => snapshot.some((job) => job.id === id);
+   const snapshotContains = (snapshot: ReadonlyArray<Task>, id: string) => snapshot.some((task) => task.id === id);
 
    const logPersistError = (error: unknown) => {
       try {
          const message = error instanceof Error ? error.message : String(error);
-         console.error(`[workers] failed to persist job manifest: ${message}`);
+         console.error(`[workers] failed to persist Task manifest: ${message}`);
       } catch {
          // Logging must not break registry change delivery.
       }
    };
 
-   const scheduleWrite = (jobs: ReadonlyArray<Job>, immediate: boolean) => {
+   const scheduleWrite = (jobs: ReadonlyArray<Task>, immediate: boolean) => {
       pending = { jobs, immediate };
       if (timer !== undefined) {
          clearTimeout(timer);
@@ -591,7 +634,7 @@ export function createRegistryChangeWriter(persistence: WorkersJobPersistenceSha
          // transitions in the same worker collapse into a single disk write.
          timer = setTimeout(execute, 0);
       } else {
-         timer = setTimeout(execute, WORKERS_JOB_MANIFEST_LIMITS.persistDebounceMs);
+         timer = setTimeout(execute, WORKERS_TASK_MANIFEST_LIMITS.persistDebounceMs);
       }
    };
 
@@ -604,10 +647,11 @@ export function createRegistryChangeWriter(persistence: WorkersJobPersistenceSha
          return;
       }
 
-      const hasNewJob = jobs.some((job) => !snapshotContains(previous, job.id));
+      const hasNewJob = jobs.some((task) => !snapshotContains(previous, task.id));
       const hasTerminalTransition = jobs.some(
-         (job) =>
-            isTerminal(job) && !previous.some((previousJob) => previousJob.id === job.id && isTerminal(previousJob))
+         (task) =>
+            isTerminal(task) &&
+            !previous.some((previousTask) => previousTask.id === task.id && isTerminal(previousTask))
       );
 
       if (hasNewJob || hasTerminalTransition) {
@@ -634,7 +678,18 @@ export function createRegistryChangeWriter(persistence: WorkersJobPersistenceSha
    return { schedule, flush };
 }
 
-export function convertInterruptedJob(stored: Job): Job {
+export function convertInterruptedTask(stored: Task): Task {
+   // A task that was still in flight when the parent restarted keeps its
+   // session file so the main session can resume it in place.
+   if (typeof stored.sessionFile === "string" && stored.sessionFile.length > 0) {
+      return {
+         ...stored,
+         status: "recoverable",
+         resultData: undefined,
+         errorText: RESTART_INTERRUPTED_ERROR,
+         settledAt: Date.now()
+      };
+   }
    return {
       ...stored,
       status: "failed",

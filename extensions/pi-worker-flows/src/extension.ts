@@ -50,15 +50,16 @@ import {
    visibleWidth
 } from "@earendil-works/pi-tui";
 import { Type, type Static } from "typebox";
-import { listAgentProfiles, resolveAgentProfile } from "./services/agent-profiles.ts";
+import { listAgentProfiles, resolveAgentProfile } from "./services/worker-profiles.ts";
 import { resolveProfileModel } from "./services/model-resolution.ts";
 import { formatActivityStatus } from "./ui/activity-status.ts";
 import { createWorkflowPersistence, persistWorkflowJson, recoverWorkflowDetails } from "./core/artifacts.ts";
 import { MAX_AGENT_CALLS, RunController } from "./core/controller.ts";
 import { sessionWorkflowRunIds } from "./ui/dashboard.ts";
 import { showRunsDashboard } from "./ui/runs-dashboard.ts";
+import { extractMarkdownText } from "./workers/ui/tool-renderers.ts";
 import { prepareWorkflowScript } from "./core/meta.ts";
-import { openAgentsPanel } from "./ui/agents-panel.ts";
+import { openAgentsPanel } from "./ui/worker-profiles-panel.ts";
 import {
    agentContext,
    aggregateUsage,
@@ -955,8 +956,8 @@ export default function workflows(pi: ExtensionAPI) {
       lastUi = undefined;
    });
 
-   pi.registerCommand("agents", {
-      description: "Open the workflow agent profile editor",
+   pi.registerCommand("wr-profile", {
+      description: "Open the worker profile editor",
       handler: async (_rawArgs, ctx) => {
          if (ctx.hasUI) {
             await openAgentsPanel(ctx, undefined, {
@@ -977,7 +978,7 @@ export default function workflows(pi: ExtensionAPI) {
          const lines = profiles.map(
             (profile) => `  ${profile.name}  ${profile.enabled ? "on" : "off"}  ${profile.description}`
          );
-         ctx.ui.notify(["Agent profiles", "", ...lines].join("\n"), "info");
+         ctx.ui.notify(["Worker profiles", "", ...lines].join("\n"), "info");
       }
    });
 
@@ -1244,7 +1245,7 @@ export default function workflows(pi: ExtensionAPI) {
             const prompt = typeof promptValue === "string" ? promptValue : "";
             if (!prompt.trim()) return fail("agent() requires a non-empty prompt string");
             if (!profile) {
-               const requested = typeof opts.agent === "string" && opts.agent.trim() ? opts.agent.trim() : "good";
+               const requested = typeof opts.agent === "string" && opts.agent.trim() ? opts.agent.trim() : "worker";
                return fail(`Unknown agent profile "${requested}".`);
             }
             if (controller.signal.aborted) return fail("Workflow was aborted before this agent started");
@@ -1740,21 +1741,25 @@ export default function workflows(pi: ExtensionAPI) {
             sections.push([theme.bold(theme.fg("error", "workflow error")), `  ${theme.fg("error", details.error)}`]);
          }
 
+         const text = formatCleanSections(sections, theme);
+         if (text.trim().length > 0) {
+            container.addChild(new Text(text, 0, 0));
+         }
+
          if (details.result !== undefined) {
-            const resultLines: string[] = [theme.bold("result")];
-            const formattedJson = resultJson(details.result);
-            for (const line of formattedJson.split("\n")) {
-               resultLines.push(`  ${theme.fg("accent", line)}`);
+            const resultMarkdown = extractMarkdownText(details.result);
+            if (resultMarkdown.trim().length > 0) {
+               container.addChild(new Spacer(1));
+               container.addChild(new Text(theme.bold("result"), 0, 0));
+               container.addChild(new Markdown(resultMarkdown, 0, 0, getMarkdownTheme()));
             }
-            sections.push(resultLines);
          }
 
          if (totals) {
-            sections.push([theme.bold("usage"), `  ${theme.fg("dim", totals)}`]);
+            container.addChild(new Spacer(1));
+            container.addChild(new Text(`${theme.bold("usage")}\n  ${theme.fg("dim", totals)}`, 0, 0));
          }
 
-         const text = formatCleanSections(sections, theme);
-         container.addChild(new Text(text, 0, 0));
          return container;
       }
    });

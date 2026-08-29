@@ -1,12 +1,17 @@
 import { keyHint, type Theme } from "@earendil-works/pi-coding-agent";
-import { Text, type Component } from "@earendil-works/pi-tui";
+import { Container, Markdown, type MarkdownTheme, Text, truncateToWidth, type Component } from "@earendil-works/pi-tui";
 import type { WorkerSpec } from "../domain.js";
 import {
    buildTranscriptRows,
    normalizeWorkerTranscript,
    type WorkerTranscriptLike
 } from "../../shared/transcript-ui.ts";
-import type { WorkerCancelToolParams, WorkerListToolParams, WorkerSpawnToolParams } from "../tools/worker.js";
+import type {
+   WorkerCancelToolParams,
+   WorkerListToolParams,
+   WorkerRecoverToolParams,
+   WorkerSpawnToolParams
+} from "../tools/worker.js";
 
 interface ToolResultLike {
    readonly content: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
@@ -22,7 +27,7 @@ interface WorkerRenderState {
    spinnerIndex?: number;
    spinnerTimer?: ReturnType<typeof setTimeout>;
    spinnerRunning?: boolean;
-   jobStatuses?: ReadonlyArray<string | undefined>;
+   taskStatuses?: ReadonlyArray<string | undefined>;
    startedAt?: number;
    endedAt?: number;
 }
@@ -48,7 +53,7 @@ function stringValue(value: unknown): string | undefined {
    return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function jobStatusesFromDetails(details: unknown): ReadonlyArray<string | undefined> {
+function taskStatusesFromDetails(details: unknown): ReadonlyArray<string | undefined> {
    if (!isRecord(details)) return [];
    if (Array.isArray(details.jobs)) {
       return details.jobs.map((job) => stringValue((job as Details).status));
@@ -72,11 +77,24 @@ function errorText(result: ToolResultLike): string | undefined {
    return undefined;
 }
 
-function statusMark(status: string | undefined, theme: Theme): string {
-   if (status === "completed" || status === "exited" || status === "delivered") return theme.fg("success", "✓");
-   if (status === "failed" || status === "cancelled") return theme.fg("error", "✗");
-   if (status === "running" || status === "starting" || status === "pending") return theme.fg("warning", "●");
-   return theme.fg("muted", "·");
+function statusMark(status: string | undefined, theme: Theme, struck = false): string {
+   const mark =
+      status === "completed" || status === "exited" || status === "delivered"
+         ? "✓"
+         : status === "failed" || status === "cancelled"
+           ? "✗"
+           : status === "running" || status === "starting" || status === "pending"
+             ? "●"
+             : "·";
+   const color =
+      status === "completed" || status === "exited" || status === "delivered"
+         ? "success"
+         : status === "failed" || status === "cancelled"
+           ? "error"
+           : status === "running" || status === "starting" || status === "pending"
+             ? "warning"
+             : "muted";
+   return theme.fg(color, struck ? theme.strikethrough(mark) : mark);
 }
 
 function resultPrelude(
@@ -115,14 +133,23 @@ function renderJsonResult(details: Details, options: RenderOptions, theme: Theme
 const WORKER_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 
 function workerIndicator(index: number, theme: Theme, context?: RenderContext): string {
-   const status = context?.state?.jobStatuses?.[index];
-   if (status === "completed") return statusMark(status, theme);
-   if (status === "failed" || status === "cancelled") return statusMark(status, theme);
-   return theme.fg("muted", "·");
+   const aborted = context?.isError === true;
+   const status = aborted ? "cancelled" : context?.state?.taskStatuses?.[index];
+   return statusMark(status, theme, aborted);
 }
 
 function workerCountLabel(count: number): string {
    return `${count} worker${count === 1 ? "" : "s"}`;
+}
+
+class SingleLineText implements Component {
+   constructor(private readonly lines: ReadonlyArray<string>) {}
+
+   invalidate(): void {}
+
+   render(width: number): string[] {
+      return this.lines.map((line) => truncateToWidth(line, Math.max(0, width)));
+   }
 }
 
 /** Render the worker_spawn tool call as a compact worker plan. */
@@ -135,27 +162,27 @@ export function renderWorkerCall(
    const countLabel = workerCountLabel(workers.length);
    const [singleWorker] = workers;
 
+   const aborted = context?.isError === true;
+   const strike = (text: string) => (aborted ? theme.strikethrough(text) : text);
+
    if (singleWorker !== undefined && workers.length === 1) {
       const name = stringValue(singleWorker.name) ?? "worker_spawn";
-      const agent = stringValue(singleWorker.agent) ?? "agent";
-      return new Text(
-         `${theme.fg("toolTitle", theme.bold("worker_spawn"))} ${theme.fg("muted", agent)} ${theme.fg("muted", "·")} ${theme.fg("accent", name)}\n${theme.fg("dim", stringValue(singleWorker.task ?? (singleWorker as any).worker) ?? "")}`,
-         0,
-         0
-      );
+      const workerLabel = stringValue(singleWorker.worker) ?? "worker";
+      const task = preview(singleWorker.task ?? (singleWorker as any).worker);
+      return new SingleLineText([
+         `${workerIndicator(0, theme, context)} ${theme.fg("accent", strike(name))} ${theme.fg("muted", strike(`· ${workerLabel}`))} ${theme.fg("dim", strike(task))}`
+      ]);
    }
 
-   const lines = [
-      `${theme.fg("toolTitle", theme.bold("worker_spawn"))} ${theme.fg("muted", `batch started · ${countLabel}`)}`
-   ];
+   const lines = [`${theme.fg("toolTitle", theme.bold("worker_spawn"))} ${theme.fg("muted", `batch · ${countLabel}`)}`];
    for (const [index, worker] of workers.entries()) {
       const name = stringValue(worker.name) ?? "worker_spawn";
-      const agent = stringValue(worker.agent) ?? "agent";
+      const workerLabel = stringValue(worker.worker) ?? "worker";
       lines.push(
-         `${workerIndicator(index, theme, context)} ${theme.fg("accent", name)} ${theme.fg("muted", `· ${agent}`)} ${theme.fg("dim", preview(worker.task ?? (worker as any).worker))}`
+         `${workerIndicator(index, theme, context)} ${theme.fg("accent", strike(name))} ${theme.fg("muted", strike(`· ${workerLabel}`))} ${theme.fg("dim", strike(preview(worker.task ?? (worker as any).worker)))}`
       );
    }
-   return new Text(lines.join("\n"), 0, 0);
+   return new SingleLineText(lines);
 }
 
 /** Render the worker_spawn result as job handles and lifecycle states. */
@@ -165,7 +192,7 @@ export function renderWorkerResult(
    theme: Theme,
    context: RenderContext
 ): Component {
-   const statuses = jobStatusesFromDetails(result.details);
+   const statuses = taskStatusesFromDetails(result.details);
    if (context.state) {
       let nextStatuses: ReadonlyArray<string | undefined> = statuses;
       if (!options.isPartial && nextStatuses.length === 0) {
@@ -174,7 +201,7 @@ export function renderWorkerResult(
       }
       if (nextStatuses.length > 0) {
          const nextStatusesArray = Array.from(nextStatuses);
-         const previousStatuses = context.state.jobStatuses;
+         const previousStatuses = context.state.taskStatuses;
          const statusesChanged =
             !previousStatuses ||
             previousStatuses.length !== nextStatusesArray.length ||
@@ -182,7 +209,7 @@ export function renderWorkerResult(
          const allSettled = nextStatusesArray.every(
             (status) => status === "completed" || status === "failed" || status === "cancelled"
          );
-         context.state.jobStatuses = nextStatusesArray;
+         context.state.taskStatuses = nextStatusesArray;
          context.state.spinnerRunning = !allSettled;
          if (allSettled && context.state.spinnerTimer) clearTimeout(context.state.spinnerTimer);
          if (allSettled) context.state.spinnerTimer = undefined;
@@ -194,15 +221,15 @@ export function renderWorkerResult(
    const prelude = resultPrelude(result, options, theme, context, "worker_spawn");
    if (prelude) return prelude;
    if (!isRecord(result.details)) return fallbackResult(result, theme);
-   const jobs = records(result.details.jobs);
+   const jobs = records(result.details.tasks ?? result.details.jobs);
    const workerRows = jobs.length > 0 ? jobs : stringValue(result.details.id) ? [result.details] : [];
    if (workerRows.length === 0) return fallbackResult(result, theme);
-   const allSettled = workerRows.every((job) => {
-      const status = stringValue(job.status);
+   const allSettled = workerRows.every((task) => {
+      const status = stringValue(task.status);
       return status === "completed" || status === "failed" || status === "cancelled";
    });
    const isSpawnAcknowledgement =
-      workerRows.length > 0 && workerRows.every((job) => stringValue(job.status) === "spawned");
+      workerRows.length > 0 && workerRows.every((task) => stringValue(task.status) === "spawned");
 
    if (!allSettled) {
       if (isSpawnAcknowledgement) {
@@ -224,10 +251,10 @@ export function renderWorkerResult(
       const payload = options.expanded
          ? expandedOutput(result.details)
          : workerRows
-              .map((job) => {
-                 const id = stringValue(job.id) ?? "worker_spawn";
-                 const name = stringValue(job.name) ?? id;
-                 const status = stringValue(job.status) ?? "pending";
+              .map((task) => {
+                 const id = stringValue(task.id) ?? "worker_spawn";
+                 const name = stringValue(task.name) ?? id;
+                 const status = stringValue(task.status) ?? "pending";
                  return `${id} · ${name} · ${status}`;
               })
               .join("\n");
@@ -241,30 +268,127 @@ export function renderWorkerResult(
       return new Text(lines.join("\n"), 0, 0);
    }
 
-   const lines: string[] = [];
    if (allSettled) {
       const outputs = workerRows
-         .map((job) => ({ job, output: job.result ?? job.resultData ?? job.errorText }))
+         .map((task) => ({ task, output: task.result ?? task.resultData ?? task.errorText }))
          .filter((entry) => entry.output !== null && entry.output !== undefined);
-      if (outputs.length > 0) {
-         lines.push(theme.fg("dim", "---"));
-         for (const { job, output } of outputs) {
-            if (outputs.length > 1) {
-               lines.push(theme.fg("accent", stringValue(job.name) ?? stringValue(job.id) ?? "worker_spawn"));
+
+      if (!options.expanded) {
+         const lines: string[] = [];
+         if (outputs.length === 1) {
+            const { task, output } = outputs[0];
+            const traces = workerTraceLines(task.transcript, theme, false);
+            if (traces.length > 0) {
+               lines.push(...traces);
             }
-            lines.push(...workerTraceLines(job.transcript, theme, options.expanded));
-            const rendered = options.expanded ? expandedOutput(output) : workerPayloadText(output);
-            for (const line of rendered.split("\n")) lines.push(theme.fg("toolOutput", line));
-         }
-         if (!options.expanded) {
-            lines.push(theme.fg("dim", "---"));
+            const err =
+               typeof task.errorText === "string"
+                  ? task.errorText
+                  : isRecord(task.errorText)
+                    ? JSON.stringify(task.errorText)
+                    : undefined;
+            if (err) {
+               lines.push(theme.fg("error", `✗ ${err}`));
+            } else {
+               const mdText = extractMarkdownText(output);
+               const lineCount = mdText ? mdText.split("\n").length : 0;
+               const lineCountStr =
+                  lineCount > 0 ? theme.fg("muted", ` (${lineCount} line${lineCount === 1 ? "" : "s"})`) : "";
+               const summary = outputSummaryPreview(output);
+               if (summary) {
+                  lines.push(`${theme.fg("toolOutput", summary)}${lineCountStr}`);
+               } else if (lineCountStr) {
+                  lines.push(lineCountStr.trim());
+               }
+            }
             lines.push(
-               theme.fg("muted", "(") + `${keyHint("app.tools.expand", "to see schema")}${theme.fg("muted", ")")}`
+               theme.fg("muted", "(") + `${keyHint("app.tools.expand", "to expand output")}${theme.fg("muted", ")")}`
             );
+            return new Text(lines.join("\n"), 0, 0);
+         }
+
+         lines.push(theme.fg("dim", "---"));
+         for (const { task, output } of outputs) {
+            const status = stringValue(task.status) ?? "completed";
+            const name = stringValue(task.name) ?? stringValue(task.id) ?? "worker_spawn";
+            const worker = stringValue(task.worker);
+            const workerStr = worker ? theme.fg("dim", ` · ${worker}`) : "";
+            const mdText = extractMarkdownText(output);
+            const lineCount = mdText ? mdText.split("\n").length : 0;
+            const lineCountStr =
+               lineCount > 0 ? theme.fg("muted", ` (${lineCount} line${lineCount === 1 ? "" : "s"})`) : "";
+            lines.push(
+               `${statusMark(status, theme)} ${theme.fg("accent", name)}${workerStr} ${theme.fg("muted", `· ${status}`)}${lineCountStr}`
+            );
+
+            const traceSummary = workerTraceLines(task.transcript, theme, false);
+            if (traceSummary.length > 0) {
+               lines.push(...traceSummary);
+            }
+
+            const err =
+               typeof task.errorText === "string"
+                  ? task.errorText
+                  : isRecord(task.errorText)
+                    ? JSON.stringify(task.errorText)
+                    : undefined;
+            if (err) {
+               lines.push(theme.fg("error", `  ✗ ${err}`));
+            } else {
+               const summary = outputSummaryPreview(output);
+               if (summary) {
+                  lines.push(theme.fg("dim", `  ${summary}`));
+               }
+            }
+         }
+         lines.push(theme.fg("dim", "---"));
+         lines.push(
+            theme.fg("muted", "(") + `${keyHint("app.tools.expand", "to expand output")}${theme.fg("muted", ")")}`
+         );
+         return new Text(lines.join("\n"), 0, 0);
+      }
+
+      const container = new Container();
+      if (outputs.length === 1) {
+         const { task, output } = outputs[0];
+         const traces = workerTraceLines(task.transcript, theme, true);
+         if (traces.length > 0) {
+            container.addChild(new Text(traces.join("\n"), 0, 0));
+         }
+         const mdText = extractMarkdownText(output);
+         if (mdText.trim().length > 0) {
+            container.addChild(new Markdown(mdText, 0, 0, createMarkdownTheme(theme)));
+         }
+         return container;
+      }
+
+      container.addChild(new Text(theme.fg("dim", "---"), 0, 0));
+      for (const { task, output } of outputs) {
+         const status = stringValue(task.status) ?? "completed";
+         const name = stringValue(task.name) ?? stringValue(task.id) ?? "worker_spawn";
+         const worker = stringValue(task.worker);
+         const workerStr = worker ? theme.fg("dim", ` · ${worker}`) : "";
+         container.addChild(
+            new Text(
+               `${statusMark(status, theme)} ${theme.fg("accent", theme.bold(name))}${workerStr} ${theme.fg("muted", `· ${status}`)}`,
+               0,
+               0
+            )
+         );
+
+         const traces = workerTraceLines(task.transcript, theme, true);
+         if (traces.length > 0) {
+            container.addChild(new Text(traces.join("\n"), 0, 0));
+         }
+
+         const mdText = extractMarkdownText(output);
+         if (mdText.trim().length > 0) {
+            container.addChild(new Markdown(mdText, 0, 0, createMarkdownTheme(theme)));
          }
       }
+      return container;
    }
-   return new Text(lines.join("\n"), 0, 0);
+   return new Text("", 0, 0);
 }
 
 export function renderWorkerListCall(
@@ -275,6 +399,18 @@ export function renderWorkerListCall(
    return new Text(theme.fg("toolTitle", theme.bold("worker_list")), 0, 0);
 }
 
+export function renderWorkerRecoverCall(
+   args: Partial<WorkerRecoverToolParams>,
+   theme: Theme,
+   _context?: RenderContext
+): Component {
+   const id = stringValue(args.id) ?? "task";
+   const note = stringValue(args.note);
+   return new Text(
+      `${theme.fg("toolTitle", theme.bold("worker_recover"))} ${theme.fg("accent", id)}${note ? theme.fg("dim", ` · ${preview(note, 48)}`) : ""}`
+   );
+}
+
 export function renderWorkerCancelCall(
    args: Partial<WorkerCancelToolParams>,
    theme: Theme,
@@ -282,6 +418,51 @@ export function renderWorkerCancelCall(
 ): Component {
    const id = stringValue(args.id) ?? "worker";
    return new Text(`${theme.fg("toolTitle", theme.bold("worker_cancel"))} ${theme.fg("accent", id)}`, 0, 0);
+}
+
+export function createMarkdownTheme(theme: Theme): MarkdownTheme {
+   const fg = (color: Parameters<Theme["fg"]>[0], text: string) => theme.fg(color, text);
+   return {
+      heading: (text: string) => fg("accent", theme.bold(text)),
+      link: (text: string) => fg("mdLink", text),
+      linkUrl: (text: string) => fg("dim", text),
+      code: (text: string) => fg("mdCode", text),
+      codeBlock: (text: string) => fg("mdCode", text),
+      codeBlockBorder: (text: string) => fg("dim", text),
+      quote: (text: string) => fg("muted", text),
+      quoteBorder: (text: string) => fg("dim", text),
+      hr: (text: string) => fg("dim", text),
+      listBullet: (text: string) => fg("accent", text),
+      bold: (text: string) => theme.bold(text),
+      italic: (text: string) => (theme.italic ? theme.italic(text) : `\x1b[3m${text}\x1b[23m`),
+      strikethrough: (text: string) => (theme.strikethrough ? theme.strikethrough(text) : `\x1b[9m${text}\x1b[29m`),
+      underline: (text: string) => (theme.underline ? theme.underline(text) : `\x1b[4m${text}\x1b[24m`)
+   };
+}
+
+export function extractMarkdownText(value: unknown): string {
+   if (typeof value === "string") return value;
+   if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+      const obj = value as Record<string, unknown>;
+      if (typeof obj.output === "string") return obj.output;
+      if (typeof obj.summary === "string") return obj.summary;
+      if (typeof obj.result === "string") return obj.result;
+      if (typeof obj.text === "string") return obj.text;
+      if (typeof obj.markdown === "string") return obj.markdown;
+   }
+   if (value === undefined || value === null) return "";
+   return JSON.stringify(value, null, 2);
+}
+
+function outputSummaryPreview(value: unknown): string | undefined {
+   const md = extractMarkdownText(value).trim();
+   if (!md) return undefined;
+   const firstLine = md
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => l.length > 0);
+   if (!firstLine) return undefined;
+   return preview(firstLine.replace(/^[#*`\-\s]+/, ""), 100);
 }
 
 function recordOutput(item: Details): unknown {
@@ -315,11 +496,11 @@ export function workerTraceLines(value: unknown, theme: Theme, expanded: boolean
    return [theme.fg("dim", "--- Tools ---"), ...buildTranscriptRows(entries, 200, theme, { showThinking: expanded })];
 }
 
-function renderJobTranscript(job: Details, options: RenderOptions, theme: Theme): Component {
-   const status = stringValue(job.status) ?? "unknown";
-   const id = stringValue(job.id) ?? "worker_spawn";
-   const name = stringValue(job.name) ?? id;
-   const transcript = normalizeWorkerTranscript(records(job.transcript) as ReadonlyArray<WorkerTranscriptLike>);
+function renderJobTranscript(task: Details, options: RenderOptions, theme: Theme): Component {
+   const status = stringValue(task.status) ?? "unknown";
+   const id = stringValue(task.id) ?? "worker_spawn";
+   const name = stringValue(task.name) ?? id;
+   const transcript = normalizeWorkerTranscript(records(task.transcript) as ReadonlyArray<WorkerTranscriptLike>);
    const transcriptLines = buildTranscriptRows(transcript, 200, theme, { showThinking: options.expanded });
    const visibleLines = options.expanded ? transcriptLines : transcriptLines.slice(0, 6);
    const lines = [
@@ -395,6 +576,15 @@ export function renderJobListResult(
 }
 
 export function renderWorkerListResult(
+   result: ToolResultLike,
+   options: RenderOptions,
+   theme: Theme,
+   context: RenderContext
+): Component {
+   return renderJobListResult(result, options, theme, context, "worker");
+}
+
+export function renderWorkerRecoverResult(
    result: ToolResultLike,
    options: RenderOptions,
    theme: Theme,

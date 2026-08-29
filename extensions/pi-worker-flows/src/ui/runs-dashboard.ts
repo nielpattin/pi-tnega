@@ -22,12 +22,12 @@ import {
    wrapSelection
 } from "./dashboard.ts";
 import type { WorkflowDetails } from "../core/model.ts";
-import type { Job } from "../workers/domain.js";
+import type { Task } from "../workers/domain.js";
 import type { WorkersRuntime } from "../workers/extension.js";
 import { runTool } from "../workers/runtime.js";
-import { JobRegistry } from "../workers/services/job-registry.js";
+import { TaskRegistry } from "../workers/services/task-registry.js";
 import { WorkerManager } from "../workers/services/worker-manager.js";
-import { buildCopiedTranscriptPayload, openJobTakeover } from "../workers/ui/takeover.js";
+import { buildCopiedTranscriptPayload, openTaskTakeover } from "../workers/ui/takeover.js";
 import { readPiSessionTranscript } from "../workers/ui/session-transcript.js";
 import { formatDuration } from "../workers/ui/formatters.js";
 import { copyToClipboard } from "../shared/clipboard.ts";
@@ -48,7 +48,7 @@ export function moveWorkerRunSelection(index: number, delta: number, length: num
    return wrapSelection(index, delta, length);
 }
 
-export type DashboardPickResult = { type: "takeover"; jobId: string };
+export type DashboardPickResult = { type: "takeover"; taskId: string };
 
 export interface RunsDashboardOptions {
    readonly workerRuntime: WorkersRuntime;
@@ -79,6 +79,8 @@ function statusGlyph(status: string, theme: Theme): string {
       case "running":
       case "pending":
          return theme.fg("warning", "■");
+      case "recoverable":
+         return theme.fg("warning", "↻");
       case "completed":
          return theme.fg("success", "■");
       case "failed":
@@ -94,6 +96,8 @@ function statusWord(status: string, theme: Theme): string {
       case "running":
       case "pending":
          return theme.fg("warning", status);
+      case "recoverable":
+         return theme.fg("warning", "recoverable");
       case "completed":
          return theme.fg("success", status);
       case "failed":
@@ -105,7 +109,7 @@ function statusWord(status: string, theme: Theme): string {
 }
 
 class WorkerRunsView implements Component, Focusable {
-   private runs: Job[] = [];
+   private runs: Task[] = [];
    private selectedIndex = 0;
    private closed = false;
    private disposed = false;
@@ -141,12 +145,12 @@ class WorkerRunsView implements Component, Focusable {
          const selectedId = this.runs[this.selectedIndex]?.id;
          const runs = await runTool(
             this.runtime,
-            JobRegistry.use((registry) => registry.list())
+            TaskRegistry.use((registry) => registry.list())
          );
          this.runs = [...runs];
          if (!this.initialSelectionApplied) {
             this.initialSelectionApplied = true;
-            const lastViewedId = this.lastViewedWorker?.jobId;
+            const lastViewedId = this.lastViewedWorker?.taskId;
             const lastViewedIndex = lastViewedId ? this.runs.findIndex((run) => run.id === lastViewedId) : -1;
             if (lastViewedIndex >= 0) {
                this.selectedIndex = lastViewedIndex;
@@ -173,11 +177,11 @@ class WorkerRunsView implements Component, Focusable {
       this.done(result);
    }
 
-   private selectedRun(): Job | undefined {
+   private selectedRun(): Task | undefined {
       return this.runs[this.selectedIndex];
    }
 
-   private async copyRunTranscript(run: Job): Promise<void> {
+   private async copyRunTranscript(run: Task): Promise<void> {
       const transcript = run.transcript ?? (run.sessionFile ? readPiSessionTranscript(run.sessionFile) : []);
       await copyToClipboard(buildCopiedTranscriptPayload(run, transcript));
       this.notice = `Copied run transcript for ${run.name ?? run.id}`;
@@ -185,7 +189,7 @@ class WorkerRunsView implements Component, Focusable {
       this.tui.requestRender();
    }
 
-   private async copyRunPath(run: Job): Promise<void> {
+   private async copyRunPath(run: Task): Promise<void> {
       const sessionPath = run.sessionFile ? path.resolve(run.sessionFile) : run.cwd ? path.resolve(run.cwd) : undefined;
       if (!sessionPath) return;
       await copyToClipboard(sessionPath);
@@ -210,21 +214,47 @@ class WorkerRunsView implements Component, Focusable {
       } else if (data === "G") {
          this.selectedIndex = Math.max(0, this.runs.length - 1);
       } else if (confirm && run) {
-         this.close({ type: "takeover", jobId: run.id });
+         this.close({ type: "takeover", taskId: run.id });
          return;
       } else if (cancel || data === "q") {
          this.close();
          return;
-      } else if ((data === "c" || data === "x") && run) {
+      } else if (data === "p" && run) {
          void runTool(
             this.runtime,
-            WorkerManager.use((manager) => manager.cancelJob(run.id))
+            WorkerManager.use((manager) => manager.recoverTask(run.id))
          )
-            .then(() => this.refresh())
+            .then(() => {
+               this.notice = `Recovering ${run.name ?? run.id} in place`;
+               this.noticeTime = Date.now();
+               void this.refresh();
+            })
+            .catch(() => {});
+      } else if ((data === "c" || data === "r") && run) {
+         void runTool(
+            this.runtime,
+            WorkerManager.use((manager) => manager.recoverTask(run.id))
+         )
+            .then(() => {
+               this.notice = `Recovering ${run.name ?? run.id} in place`;
+               this.noticeTime = Date.now();
+               void this.refresh();
+            })
+            .catch(() => {});
+      } else if (data === "x" && run) {
+         void runTool(
+            this.runtime,
+            WorkerManager.use((manager) => manager.cancelTask(run.id))
+         )
+            .then(() => {
+               this.notice = `Cancelled ${run.name ?? run.id}`;
+               this.noticeTime = Date.now();
+               void this.refresh();
+            })
             .catch(() => {});
       } else if (data === "s" && run) {
          void this.copyRunTranscript(run).catch(() => {});
-      } else if ((data === "y" || data === "p") && run) {
+      } else if (data === "y" && run) {
          void this.copyRunPath(run).catch(() => {});
       }
 
@@ -234,7 +264,7 @@ class WorkerRunsView implements Component, Focusable {
    render(width: number): string[] {
       const rows = this.tui.terminal.rows || 30;
       const innerWidth = Math.max(1, width - 2);
-      const helpText = `  ${configuredKeys(this.keybindings, "tui.select.up")}/${configuredKeys(this.keybindings, "tui.select.down")}/jk: select · Enter: inspect run · s: copy transcript · y: copy path · x: cancel run · Esc: close`;
+      const helpText = `  ${configuredKeys(this.keybindings, "tui.select.up")}/${configuredKeys(this.keybindings, "tui.select.down")}/jk: select · Enter: inspect run · r: recover · s: copy transcript · y: copy path · x: cancel run · Esc: close`;
       const helpLines = wrapTextWithAnsi(this.theme.fg("dim", helpText), Math.max(1, width));
       const bodyHeight = Math.max(1, rows - 4 - Math.max(1, helpLines.length));
       const activeRuns = this.runs.filter((run) => run.status === "running" || run.status === "pending").length;
@@ -277,8 +307,8 @@ class WorkerRunsView implements Component, Focusable {
          const marker = selected ? this.theme.fg("accent", "❯") : " ";
          const titleText = run.name ?? run.promptOrCommand.slice(0, 35);
          const title = selected ? this.theme.fg("accent", titleText) : this.theme.fg("text", titleText);
-         const agent = run.agent ? this.theme.fg("dim", ` · ${run.agent}`) : "";
-         const left = ` ${marker} ${statusGlyph(run.status, this.theme)} ${title}${agent} ${this.theme.fg("dim", run.id)}`;
+         const worker = run.worker ? this.theme.fg("dim", ` · ${run.worker}`) : "";
+         const left = ` ${marker} ${statusGlyph(run.status, this.theme)} ${title}${worker} ${this.theme.fg("dim", run.id)}`;
          const elapsedMs = run.settledAt
             ? run.settledAt - (run.startedAt ?? run.createdAt)
             : now - (run.startedAt ?? run.createdAt);
@@ -318,11 +348,12 @@ class WorkerRunsView implements Component, Focusable {
 interface RunsDashboardChild extends Component {
    handleInput(data: string): void;
    dispose?(): void;
+   isListView?(): boolean;
 }
 
 class RunsDashboard implements RunsDashboardChild, Focusable {
    private activeTab: RunsDashboardTab;
-   private readonly workflow: RunsDashboardChild;
+   private readonly workflow: WorkflowDashboard;
    private readonly workers: WorkerRunsView;
    private _focused = false;
    private finished = false;
@@ -382,6 +413,10 @@ class RunsDashboard implements RunsDashboardChild, Focusable {
 
    handleInput(data: string): void {
       if (matchesKey(data, Key.tab)) {
+         if (this.activeTab === "workflow" && !this.workflow.isListView()) {
+            this.child().handleInput(data);
+            return;
+         }
          this.activeTab = nextRunsDashboardTab(this.activeTab);
          this.workers.focused = this.activeTab === "worker" && this._focused;
          this.tui.requestRender(true);
@@ -392,6 +427,9 @@ class RunsDashboard implements RunsDashboardChild, Focusable {
 
    render(width: number): string[] {
       const lines = this.child().render(width);
+      if (this.activeTab === "workflow" && !this.workflow.isListView()) {
+         return lines;
+      }
       const tabLabel =
          this.activeTab === "workflow"
             ? this.theme.fg("accent", "WF workflow runs")
@@ -440,7 +478,7 @@ export async function showRunsDashboard(ctx: ExtensionContext, options: RunsDash
    while (true) {
       const picked = await openRunsDashboard(ctx, { ...options, initialTab, lastViewedWorker });
       if (!picked) return;
-      await openJobTakeover(ctx as any, options.workerRuntime, picked.jobId);
+      await openTaskTakeover(ctx as any, options.workerRuntime, picked.taskId);
       initialTab = "worker";
       lastViewedWorker = picked;
    }

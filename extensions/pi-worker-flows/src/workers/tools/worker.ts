@@ -1,25 +1,25 @@
 import { Effect } from "effect";
 import { Type, type Static, type TSchema } from "typebox";
-import { JobRegistry } from "../services/job-registry.js";
+import { TaskRegistry } from "../services/task-registry.js";
 import { WorkerManager } from "../services/worker-manager.js";
 import {
    normalizeWorkerSpecs,
    prependContext,
-   type Job,
-   type JobStatus,
-   type JobTranscriptEntry,
+   type Task,
+   type TaskStatus,
+   type TaskTranscriptEntry,
    type WorkerSpec
 } from "../domain.js";
-import type { AgentProfile } from "../../services/agent-profiles.ts";
+import type { AgentProfile } from "../../services/worker-profiles.ts";
 import type { InheritedModelIdentity, ProfileModelRegistry } from "../../services/model-resolution.ts";
 
 // -----------------------------------------------------------------------------
 // Tool input
 // -----------------------------------------------------------------------------
 
-const JobIdSchema = Type.String({
+const TaskIdSchema = Type.String({
    minLength: 1,
-   description: "Run ID returned by worker_spawn."
+   description: "Task ID returned by worker_spawn (for example task-1)."
 });
 
 /** Schema for one worker delegated by the parent session. */
@@ -33,9 +33,9 @@ export const WorkerSpecSchema = Type.Object({
    name: Type.String({
       description: "Required short worker name, for example investigate-copy-all."
    }),
-   agent: Type.String({
+   worker: Type.String({
       minLength: 1,
-      description: "Required enabled agent profile name listed in the current worker_spawn tool metadata."
+      description: "Required enabled worker profile name listed in the current worker_spawn tool metadata."
    })
 });
 
@@ -50,7 +50,12 @@ function createBatchParamsSchema<const WorkerSchema extends TSchema>(workerSchem
          minItems: 1,
          maxItems: 4,
          description: "One to four worker specifications."
-      })
+      }),
+      background: Type.Optional(
+         Type.Boolean({
+            description: "Return immediately while workers continue independently. Defaults to false."
+         })
+      )
    });
 }
 
@@ -60,43 +65,47 @@ export const WorkerSpawnToolParamsSchema = createBatchParamsSchema(WorkerSpecSch
 /** Typed input accepted by the worker tool. */
 export type WorkerSpawnToolParams = Static<typeof WorkerSpawnToolParamsSchema>;
 
-export const WorkerListToolParamsSchema = Type.Object({}, { description: "List worker runs." });
+export function resolveWorkerBackground(background?: boolean): boolean {
+   return background === true;
+}
+
+export const WorkerListToolParamsSchema = Type.Object({}, { description: "List worker tasks." });
 export type WorkerListToolParams = Static<typeof WorkerListToolParamsSchema>;
 
 export const WorkerCancelToolParamsSchema = Type.Object(
    {
-      id: JobIdSchema
+      id: TaskIdSchema
    },
-   { description: "Cancel a worker by run ID." }
+   { description: "Cancel a worker task by its task id." }
 );
 export type WorkerCancelToolParams = Static<typeof WorkerCancelToolParamsSchema>;
 
-function createAgentProfileSchema(agentProfileNames: readonly string[]) {
-   const choices = agentProfileNames.map((name) => Type.Literal(name));
+function createAgentProfileSchema(workerNames: readonly string[]) {
+   const choices = workerNames.map((name) => Type.Literal(name));
    if (choices.length === 0) {
-      return Type.Never({ description: "No agent profiles are available." });
+      return Type.Never({ description: "No worker profiles are available." });
    }
    if (choices.length === 1) {
       return choices[0];
    }
    return Type.Union(choices, {
-      description: `Enabled agent profiles: ${agentProfileNames.join(", ")}.`
+      description: `Enabled worker profiles: ${workerNames.join(", ")}.`
    });
 }
 
-function createWorkerSpecSchema(agentProfileNames: readonly string[]) {
+function createWorkerSpecSchema(workerNames: readonly string[]) {
    return Type.Object({
       ...WorkerSpecSchema.properties,
-      agent: createAgentProfileSchema(agentProfileNames)
+      worker: createAgentProfileSchema(workerNames)
    });
 }
 
 /**
- * Create the provider-facing worker schema with the enabled agent profiles as
- * the allowed values for each worker's `agent` field.
+ * Create the provider-facing worker schema with the enabled worker profiles as
+ * the allowed values for each worker's `worker` field.
  */
-export function createWorkerSpawnToolParamsSchema(agentProfileNames: readonly string[]) {
-   return createBatchParamsSchema(createWorkerSpecSchema(agentProfileNames));
+export function createWorkerSpawnToolParamsSchema(workerNames: readonly string[]) {
+   return createBatchParamsSchema(createWorkerSpecSchema(workerNames));
 }
 
 // -----------------------------------------------------------------------------
@@ -106,18 +115,19 @@ export function createWorkerSpawnToolParamsSchema(agentProfileNames: readonly st
 /** Description sent to the model with the worker spawn tool definition. */
 export const WORKER_SPAWN_TOOL_BASE_DESCRIPTION = [
    "Spawn one or more workers.",
-   'Use this input: { workers: [{ task: "prompt", name: "short-title", agent, ... }], context? }.',
+   'Use this input: { workers: [{ task: "prompt", name: "short-title", worker, ... }], context?, background? }.',
    "The workers array must contain 1 to 4 worker specifications.",
-   "The parent session receives a spawned acknowledgement immediately.",
-   "Each worker runs independently and returns a worker result when it completes.",
-   "Parent delivery presents worker results to the parent session automatically.",
-   "The worker name is a display label. The returned id is the worker identity.",
-   "Each worker's agent field selects an enabled agent profile."
+   "By default, the tool waits for all workers and returns their final results.",
+   "Set background to true to return a spawned acknowledgement immediately while workers continue independently.",
+   "Background worker results are delivered to the parent session automatically.",
+   "The worker name is a display label. The returned task id is the worker identity.",
+   "Each worker's `worker` field selects an enabled worker profile.",
+   "When a worker fails, use worker_list to see its status and session file, then worker_recover to resume it in place; never re-spawn the same prompt."
 ].join(" ");
 
 /** Short description shown in the available-tools section. */
 export const WORKER_SPAWN_TOOL_BASE_PROMPT_SNIPPET =
-   "Spawn 1 to 4 workers with { workers: [{ task, name, agent, ... }], context? }.";
+   "Spawn 1 to 4 workers with { workers: [{ task, name, worker, ... }], context?, background? }.";
 
 /** Static worker tool definition for callers that do not need dynamic profile names. */
 export const workerSpawnToolDefinition = {
@@ -126,35 +136,58 @@ export const workerSpawnToolDefinition = {
    parameters: WorkerSpawnToolParamsSchema
 };
 
+/** Tool input for recovering one failed/stalled task in place. */
+export const WorkerRecoverToolParamsSchema = Type.Object(
+   {
+      id: TaskIdSchema,
+      note: Type.Optional(
+         Type.String({
+            description: "Optional instruction for the recovery turn, for example 'focus on the payment service first'."
+         })
+      )
+   },
+   { description: "Recover a failed worker by resuming its own session file." }
+);
+export type WorkerRecoverToolParams = Static<typeof WorkerRecoverToolParamsSchema>;
+
+export const workerRecoverToolDefinition = {
+   name: "worker_recover",
+   label: "Worker Recover",
+   description:
+      "Resume a failed or stalled worker task in place. Reopens the worker's own persisted session (all reads and tool results are still there), sends one continuation turn, and waits for structured_output. Re-spawning is never needed.",
+   parameters: WorkerRecoverToolParamsSchema
+};
+
 export const workerListToolDefinition = {
    name: "worker_list",
    label: "Worker List",
-   description: "List worker runs.",
+   description:
+      "List worker tasks with status (running, completed, recoverable, failed, cancelled), error, and session file.",
    parameters: WorkerListToolParamsSchema
 };
 
 export const workerCancelToolDefinition = {
    name: "worker_cancel",
    label: "Worker Cancel",
-   description: "Cancel a worker by run ID.",
+   description: "Cancel a worker task by its task id.",
    parameters: WorkerCancelToolParamsSchema
 };
 
 // -----------------------------------------------------------------------------
-// Agent-profile metadata
+// Worker-profile metadata
 // -----------------------------------------------------------------------------
 
-/** Metadata added to the worker tool for enabled agent profiles. */
+/** Metadata added to the worker tool for enabled worker profiles. */
 export interface WorkerToolMetadataAugmentation {
-   /** Names allowed in each worker's `agent` field. */
-   readonly agentNames: ReadonlyArray<string>;
+   /** Names allowed in each worker's `worker` field. */
+   readonly workerNames: ReadonlyArray<string>;
    /** Profile list appended to the tool description. */
    readonly descriptionAppendix: string;
 }
 
-/** Optional filter for the agent profiles advertised by the worker tool. */
+/** Optional filter for the worker profiles advertised by the worker tool. */
 export interface WorkerToolMetadataOptions {
-   readonly allowedAgentNames?: ReadonlyArray<string>;
+   readonly allowedWorkerNames?: ReadonlyArray<string>;
 }
 
 type WorkerAgentProfile = Pick<AgentProfile, "name" | "description" | "enabled">;
@@ -165,7 +198,7 @@ function formatAgentProfile(agent: WorkerAgentProfile): string {
 }
 
 /**
- * Build the worker-tool metadata for enabled agent profiles.
+ * Build the worker-tool metadata for enabled worker profiles.
  *
  * Worker bodies and disabled profiles are not exposed to the parent session.
  */
@@ -173,7 +206,7 @@ export function augmentWorkerToolMetadata(
    agents: ReadonlyArray<WorkerAgentProfile>,
    options?: WorkerToolMetadataOptions
 ): WorkerToolMetadataAugmentation {
-   const allowedNames = options?.allowedAgentNames;
+   const allowedNames = options?.allowedWorkerNames;
    const allowed = allowedNames === undefined ? undefined : new Set(allowedNames);
    const enabledAgents = agents
       .filter((agent) => agent.enabled && (allowed === undefined || allowed.has(agent.name)))
@@ -181,15 +214,15 @@ export function augmentWorkerToolMetadata(
 
    if (enabledAgents.length === 0) {
       return {
-         agentNames: [],
+         workerNames: [],
          descriptionAppendix: ""
       };
    }
 
    return {
-      agentNames: enabledAgents.map((agent) => agent.name),
+      workerNames: enabledAgents.map((agent) => agent.name),
       descriptionAppendix: [
-         "Enabled agent profiles for the current workspace:",
+         "Enabled worker profiles for the current workspace:",
          ...enabledAgents.map(formatAgentProfile)
       ].join("\n")
    };
@@ -227,14 +260,16 @@ function prepareWorkerSpecs(input: WorkerSpawnToolParams, defaultCwd?: string): 
    return workers.map((worker) => (worker.cwd === undefined ? { ...worker, cwd: defaultCwd } : worker));
 }
 
-type WorkerAcknowledgementStatus = JobStatus | "spawned";
+type WorkerAcknowledgementStatus = TaskStatus | "spawned";
 
-type WorkerJobSummary = {
+type WorkerTaskSummary = {
    readonly id: string;
    readonly name: string;
-   readonly agent: string | undefined;
+   readonly worker: string | undefined;
    readonly status: WorkerAcknowledgementStatus;
-   readonly transcript?: ReadonlyArray<JobTranscriptEntry>;
+   readonly result?: unknown;
+   readonly errorText?: string;
+   readonly sessionFile?: string;
 };
 
 type WorkerToolResult =
@@ -245,109 +280,148 @@ type WorkerToolResult =
    | {
         readonly ok: true;
         readonly count: number;
-        readonly jobs: ReadonlyArray<WorkerJobSummary>;
+        readonly tasks: ReadonlyArray<WorkerTaskSummary>;
         readonly message: string;
      };
 
-function workerJobView(job: Job): Record<string, unknown> {
+function workerTaskView(task: Task): Record<string, unknown> {
    return {
-      id: job.id,
-      name: job.name ?? job.id,
+      id: task.id,
+      name: task.name ?? task.id,
       kind: "worker",
-      status: job.status,
-      agent: job.agent,
-      model: job.model,
-      cwd: job.cwd,
-      context: job.context,
-      createdAt: job.createdAt,
-      startedAt: job.startedAt,
-      settledAt: job.settledAt,
-      errorText: job.errorText ? job.errorText.slice(0, 1000) : undefined
+      status: task.status,
+      worker: task.worker,
+      model: task.model,
+      cwd: task.cwd,
+      context: task.context,
+      createdAt: task.createdAt,
+      startedAt: task.startedAt,
+      settledAt: task.settledAt,
+      errorText: task.errorText ? task.errorText.slice(0, 1000) : undefined,
+      ...(task.sessionFile === undefined ? {} : { sessionFile: task.sessionFile })
    };
 }
 
-function summarizeJob(job: Job): WorkerJobSummary {
+function summarizeTask(task: Task): WorkerTaskSummary {
    const status: WorkerAcknowledgementStatus =
-      job.status === "pending" || job.status === "running" ? "spawned" : job.status;
-   const summary: WorkerJobSummary = {
-      id: job.id,
-      name: job.name ?? job.id,
-      agent: job.agent,
-      status
+      task.status === "pending" || task.status === "running" ? "spawned" : task.status;
+   return {
+      id: task.id,
+      name: task.name ?? task.id,
+      worker: task.worker,
+      status,
+      ...(task.resultData === undefined ? {} : { result: task.resultData }),
+      ...(task.errorText === undefined ? {} : { errorText: task.errorText }),
+      ...(task.sessionFile === undefined ? {} : { sessionFile: task.sessionFile })
    };
-
-   return job.transcript === undefined || job.transcript.length === 0
-      ? summary
-      : { ...summary, transcript: job.transcript };
 }
 
-function summarizeSpawnedWorkers(jobs: ReadonlyArray<Job>): WorkerToolResult {
-   const summaries = jobs.map(summarizeJob);
+function summarizeSpawnedWorkers(tasks: ReadonlyArray<Task>, background: boolean): WorkerToolResult {
+   const summaries = tasks.map(summarizeTask);
    const workerWord = summaries.length === 1 ? "worker" : "workers";
 
    return {
       ok: true,
       count: summaries.length,
-      jobs: summaries,
-      message: `${summaries.length} ${workerWord} spawned. Results will be delivered automatically.`
+      tasks: summaries,
+      message: background
+         ? `${summaries.length} ${workerWord} spawned in background. Results will be delivered automatically.`
+         : `${summaries.length} ${workerWord} finished.`
    };
 }
 
-/** Spawn a batch of workers and return an immediate acknowledgement. */
+/** Spawn a batch of workers, waiting unless background execution is requested. */
 export const handleWorkerSpawn = Effect.fn("worker.handleSpawn")(function* (
    params: WorkerSpawnToolParams,
    options?: HandleWorkerSpawnOptions
 ) {
    const workerManager = yield* WorkerManager;
-   const registry = yield* JobRegistry;
+   const registry = yield* TaskRegistry;
    const workers = prepareWorkerSpecs(params, options?.cwd);
 
    if (workers.length === 0) {
       return { ok: false, error: 'worker_spawn requires a non-empty "workers" array.' } satisfies WorkerToolResult;
    }
 
-   const spawnedJobs = yield* workerManager.spawnBatch(workers, {
+   const background = resolveWorkerBackground(params.background);
+   const spawnedTasks = yield* workerManager.spawnBatch(workers, {
       ownerSessionId: options?.ownerSessionId,
       modelRegistry: options?.modelRegistry,
       inheritedModel: options?.inheritedModel,
       parentSessionFile: options?.parentSessionFile,
       batchId: createWorkerBatchId(),
-      batchSize: workers.length
+      batchSize: workers.length,
+      background
    });
 
-   const currentJobs: Job[] = [];
-   for (const spawnedJob of spawnedJobs) {
-      const currentJob = yield* registry.get(spawnedJob.id);
-      currentJobs.push(currentJob ?? spawnedJob);
+   const currentTasks: Task[] = [];
+   for (const spawnedTask of spawnedTasks) {
+      const currentTask = yield* registry.get(spawnedTask.id);
+      currentTasks.push(currentTask ?? spawnedTask);
    }
 
-   return summarizeSpawnedWorkers(currentJobs);
+   return summarizeSpawnedWorkers(currentTasks, background);
 });
 
 export const handleWorkerList = Effect.fn("worker.handleList")(function* (_params: WorkerListToolParams) {
-   const registry = yield* JobRegistry;
-   const workers = yield* registry.list();
+   const registry = yield* TaskRegistry;
+   const tasks = yield* registry.list();
 
    return {
       ok: true,
-      jobs: workers.map(workerJobView)
+      tasks: tasks.map(workerTaskView)
+   };
+});
+
+export const handleWorkerRecover = Effect.fn("worker.handleRecover")(function* (
+   params: WorkerRecoverToolParams,
+   options?: {
+      ownerSessionId?: string;
+      parentSessionFile?: string;
+      modelRegistry?: any;
+      inheritedModel?: any;
+      note?: string;
+   }
+) {
+   const registry = yield* TaskRegistry;
+   const workerManager = yield* WorkerManager;
+
+   const task = yield* registry.get(params.id);
+   if (!task) {
+      return { ok: false, error: `Worker task "${params.id}" not found.` };
+   }
+
+   const ownerSessionId = options?.ownerSessionId ?? task.ownerSessionId;
+   const recovered = yield* workerManager.recoverTask(params.id, {
+      ownerSessionId,
+      parentSessionFile: options?.parentSessionFile,
+      modelRegistry: options?.modelRegistry,
+      inheritedModel: options?.inheritedModel,
+      note: options?.note
+   });
+
+   return {
+      ok: true,
+      action: "recovered" as const,
+      id: params.id,
+      task: recovered ? workerTaskView(recovered) : undefined
    };
 });
 
 export const handleWorkerCancel = Effect.fn("worker.handleCancel")(function* (params: WorkerCancelToolParams) {
-   const registry = yield* JobRegistry;
+   const registry = yield* TaskRegistry;
    const workerManager = yield* WorkerManager;
 
-   const worker = yield* registry.get(params.id);
-   if (worker) {
-      const cancelled = yield* workerManager.cancelJob(params.id);
+   const task = yield* registry.get(params.id);
+   if (task) {
+      const cancelled = yield* workerManager.cancelTask(params.id);
       return {
          ok: true,
          action: "cancelled" as const,
          id: params.id,
-         job: cancelled ? workerJobView(cancelled) : undefined
+         task: cancelled ? workerTaskView(cancelled) : undefined
       };
    }
 
-   return { ok: false, error: `Worker run "${params.id}" not found.` };
+   return { ok: false, error: `Worker task "${params.id}" not found.` };
 });

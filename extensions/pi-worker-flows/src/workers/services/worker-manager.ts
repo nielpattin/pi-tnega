@@ -3,24 +3,28 @@ import {
    createAgentSession,
    DefaultResourceLoader,
    getAgentDir,
+   SessionManager,
    SettingsManager,
    type AgentSession
 } from "@earendil-works/pi-coding-agent";
+import * as path from "node:path";
+import { existsSync } from "node:fs";
 import {
    CapacityError,
    ConcurrencyLimitError,
-   AgentNotFoundError,
-   ControlError,
-   DuplicateJobError,
+   DuplicateTaskError,
+   WorkerProfileNotFoundError,
    ParentSessionActivationError,
-   formatJobId,
-   type Job,
+   ControlError,
+   formatTaskId,
+   canRecoverTask,
+   type Task,
    type WorkerSpec,
    type ControlMode
 } from "../domain.js";
-import { JobRegistry } from "./job-registry.js";
-import { ParentSessionGate } from "./workers-job-recovery.js";
-import { createChildResources } from "../../shared/child-session.js";
+import { TaskRegistry } from "./task-registry.js";
+import { ParentSessionGate } from "./workers-task-recovery.js";
+import { createChildResources, getChildExtensionPathsForTools } from "../../shared/child-session.js";
 import { ensureAutoCompactionEnabled } from "../../shared/compaction.ts";
 import { buildWorkflowAgentPrompt, STRUCTURED_OUTPUT_SYSTEM_INSTRUCTION } from "../../core/prompt.ts";
 import { emptyUsage } from "../../core/model.ts";
@@ -31,8 +35,8 @@ import {
    type AgentRunnerProfile,
    type AgentSessionMetadata,
    type WorkflowModel
-} from "../../shared/agent-runner.ts";
-import { resolveAgentProfile, type AgentProfile } from "../../services/agent-profiles.ts";
+} from "../../shared/worker-runner.ts";
+import { resolveAgentProfile, type AgentProfile } from "../../services/worker-profiles.ts";
 import type { InheritedModelIdentity, ProfileModelRegistry } from "../../services/model-resolution.ts";
 
 export const MAX_RUNNING_AGENTS = 4;
@@ -44,6 +48,7 @@ export interface WorkerManagerSpawnOptions {
    modelRegistry?: ProfileModelRegistry<any>;
    inheritedModel?: InheritedModelIdentity;
    parentSessionFile?: string;
+   background?: boolean;
 }
 
 export interface ActiveWorkerSession {
@@ -90,11 +95,17 @@ interface SpawnWorkerSessionOptions {
    specTools?: readonly string[];
    modelRegistry?: ProfileModelRegistry<any>;
    inheritedModel?: InheritedModelIdentity;
-   onSettled?: (status: "completed" | "failed" | "cancelled", data?: unknown, errorText?: string) => void;
+   onSettled?: (
+      status: "completed" | "failed" | "cancelled",
+      data?: unknown,
+      errorText?: string
+   ) => void | Promise<void>;
    onOutput?: (text: string) => void;
    onSessionReady?: (metadata: AgentSessionMetadata) => Promise<void> | void;
    createSessionFn?: typeof createAgentSession;
    resourceLoader?: DefaultResourceLoader;
+   /** Resume an existing persisted worker session instead of starting a new one. */
+   resumeSessionFile?: string;
 }
 
 function profileForWorker(options: SpawnWorkerSessionOptions): AgentRunnerProfile | undefined {
@@ -158,6 +169,8 @@ async function spawnWorkerSession(options: SpawnWorkerSessionOptions) {
    const agentDir = getAgentDir();
    const workerPrompt = options.agentDef?.systemPrompt || options.agentDef?.body;
    const appendSystemPrompt = [...(workerPrompt ? [workerPrompt] : []), STRUCTURED_OUTPUT_SYSTEM_INSTRUCTION];
+   const workerTools = options.specTools ?? options.agentDef?.tools ?? [];
+   const additionalExtensionPaths = getChildExtensionPathsForTools(workerTools, agentDir);
 
    let loader: DefaultResourceLoader;
    let settingsManager: SettingsManager;
@@ -171,6 +184,7 @@ async function spawnWorkerSession(options: SpawnWorkerSessionOptions) {
             cwd,
             projectTrusted: true,
             agentDir,
+            ...(additionalExtensionPaths.length > 0 ? { additionalExtensionPaths } : {}),
             appendSystemPrompt
          }),
          options.signal
@@ -194,12 +208,24 @@ async function spawnWorkerSession(options: SpawnWorkerSessionOptions) {
       resolveSession = resolve;
    });
 
-   const notifySettled = (outcome: AgentOutcome) => {
+   // Resume support: open the existing session file so the worker continues
+   // with its full prior context instead of starting a fresh session.
+   const createSessionFn =
+      options.createSessionFn ??
+      (options.resumeSessionFile
+         ? (sessionOptions: Parameters<typeof createAgentSession>[0]) =>
+              createAgentSession({
+                 ...sessionOptions,
+                 sessionManager: SessionManager.open(path.resolve(options.resumeSessionFile!))
+              })
+         : undefined);
+
+   const notifySettled = async (outcome: AgentOutcome) => {
       if (!activeSession) return;
       const status = outcome.aborted ? "cancelled" : outcome.ok ? "completed" : "failed";
       const data = outcome.structured ?? (outcome.output.length > 0 ? outcome.output : undefined);
       try {
-         options.onSettled?.(status, data, outcome.error);
+         await options.onSettled?.(status, data, outcome.error);
       } catch {
          // Job settlement must not turn a completed child session into a startup error.
       }
@@ -217,7 +243,7 @@ async function spawnWorkerSession(options: SpawnWorkerSessionOptions) {
       modelRegistry: options.modelRegistry as any,
       signal: controller.signal,
       sessionName: options.sessionName,
-      createSessionFn: options.createSessionFn,
+      createSessionFn,
       onSession: (session) => {
          activeSession = session;
          resolveSession?.(session);
@@ -227,13 +253,13 @@ async function spawnWorkerSession(options: SpawnWorkerSessionOptions) {
          if (progress.preview.length > 0) options.onOutput?.(progress.preview);
       }
    })
-      .then((outcome) => {
-         notifySettled(outcome);
+      .then(async (outcome) => {
+         await notifySettled(outcome);
          return outcome;
       })
-      .catch((error) => {
+      .catch(async (error) => {
          const outcome = workerOutcomeError(error);
-         notifySettled(outcome);
+         await notifySettled(outcome);
          return outcome;
       })
       .finally(() => {
@@ -252,6 +278,7 @@ async function spawnWorkerSession(options: SpawnWorkerSessionOptions) {
    const session = startup.session;
    return {
       session,
+      completion,
       abort: () => Effect.sync(() => controller.abort()),
       control: (text: string, mode: ControlMode) => routeWorkerControl(session, text, mode)
    };
@@ -262,13 +289,26 @@ export interface WorkerManagerShape {
       specs: ReadonlyArray<WorkerSpec>,
       options?: WorkerManagerSpawnOptions
    ) => Effect.Effect<
-      ReadonlyArray<Job>,
-      CapacityError | ConcurrencyLimitError | AgentNotFoundError | DuplicateJobError | ParentSessionActivationError
+      ReadonlyArray<Task>,
+      | CapacityError
+      | ConcurrencyLimitError
+      | WorkerProfileNotFoundError
+      | DuplicateTaskError
+      | ParentSessionActivationError
    >;
 
-   readonly cancelJob: (id: string) => Effect.Effect<Job | undefined>;
-   readonly controlJob: (id: string, text: string, mode: ControlMode) => Effect.Effect<void, ControlError>;
-   readonly reserveWorkerSeq: (maxRecoveredSeq: number) => Effect.Effect<void>;
+   readonly recoverTask: (
+      id: string,
+      options?: {
+         ownerSessionId?: string;
+         parentSessionFile?: string;
+         modelRegistry?: ProfileModelRegistry<any>;
+         inheritedModel?: InheritedModelIdentity;
+         note?: string;
+      }
+   ) => Effect.Effect<Task | undefined, WorkerProfileNotFoundError | ControlError | ParentSessionActivationError>;
+   readonly cancelTask: (id: string) => Effect.Effect<Task | undefined>;
+   readonly reserveTaskSeq: (maxRecoveredSeq: number) => Effect.Effect<void>;
    readonly cancelActiveSessions: Effect.Effect<void>;
 }
 
@@ -276,63 +316,64 @@ export class WorkerManager extends Context.Service<WorkerManager, WorkerManagerS
    static readonly layer = Layer.effect(
       WorkerManager,
       Effect.gen(function* () {
-         const registry = yield* JobRegistry;
+         const registry = yield* TaskRegistry;
 
          let reservedAgentSlots = 0;
-         let workerSeq = 0;
+         let taskSeq = 0;
          const activeSessions = new Map<string, ActiveWorkerSession>();
          const activeSessionOwners = new Map<string, string>();
          const pendingStartup = new Map<string, AbortController>();
-         const clearActiveSession = (jobId: string, ownerSessionId?: string) => {
-            if (ownerSessionId !== undefined && activeSessionOwners.get(jobId) !== ownerSessionId) return;
-            activeSessions.delete(jobId);
-            activeSessionOwners.delete(jobId);
+         const clearActiveSession = (taskId: string, ownerSessionId?: string) => {
+            if (ownerSessionId !== undefined && activeSessionOwners.get(taskId) !== ownerSessionId) return;
+            activeSessions.delete(taskId);
+            activeSessionOwners.delete(taskId);
          };
 
-         const isTerminalStatus = (status: Job["status"]) =>
+         const isTerminalStatus = (status: Task["status"]) =>
             status === "completed" || status === "failed" || status === "cancelled";
-         const updateRunningIfActive = (jobId: string, patch: Partial<Job>, ownerSessionId?: string) =>
+         const isSettledStatus = (status: Task["status"]) => isTerminalStatus(status) || status === "recoverable";
+         const updateRunningIfActive = (taskId: string, patch: Partial<Task>, ownerSessionId?: string) =>
             Effect.gen(function* () {
-               const current = yield* registry.get(jobId);
+               const current = yield* registry.get(taskId);
                if (
                   !current ||
                   (ownerSessionId !== undefined && current.ownerSessionId !== ownerSessionId) ||
-                  isTerminalStatus(current.status)
+                  isSettledStatus(current.status)
                )
                   return current;
-               return yield* registry.updateStatus(jobId, "running", patch);
+               return yield* registry.updateStatus(taskId, "running", patch);
             });
          const updateSettledIfActive = (
-            jobId: string,
-            status: "completed" | "failed" | "cancelled",
-            patch?: Partial<Job>,
+            taskId: string,
+            status: "completed" | "failed" | "cancelled" | "recoverable",
+            patch?: Partial<Task>,
             ownerSessionId?: string
          ) =>
             Effect.gen(function* () {
-               const current = yield* registry.get(jobId);
+               const current = yield* registry.get(taskId);
                if (
                   !current ||
                   (ownerSessionId !== undefined && current.ownerSessionId !== ownerSessionId) ||
-                  (isTerminalStatus(current.status) && current.status !== status)
+                  (isSettledStatus(current.status) && current.status !== status)
                )
                   return current;
-               return yield* registry.updateStatus(jobId, status, patch);
+               return yield* registry.updateStatus(taskId, status, patch);
             });
 
          // Keep only transient live output. Pi takeover output comes directly
          // from the worker's persisted JSONL session; Pi uses this only as a
          // completion fallback when structured output refers to earlier output.
          const liveOutputState = new Map<string, { text?: string }>();
-         const onLiveOutput = (jobId: string) => (text: string) => {
-            liveOutputState.set(jobId, { text });
+         const onLiveOutput = (taskId: string) => (text: string) => {
+            liveOutputState.set(taskId, { text });
          };
-         const takeLiveOutput = (jobId: string) => {
-            const entry = liveOutputState.get(jobId);
-            liveOutputState.delete(jobId);
+         const takeLiveOutput = (taskId: string) => {
+            const entry = liveOutputState.get(taskId);
+            liveOutputState.delete(taskId);
             return { text: entry?.text };
          };
-         const clearLiveOutput = (jobId: string) => {
-            takeLiveOutput(jobId);
+         const clearLiveOutput = (taskId: string) => {
+            takeLiveOutput(taskId);
          };
 
          const spawnBatch = Effect.fn("WorkerManager.spawnBatch")(function* (
@@ -349,46 +390,61 @@ export class WorkerManager extends Context.Service<WorkerManager, WorkerManagerS
 
             // Validate the complete batch before reserving capacity, registering, or starting any job.
             for (const spec of specs) {
-               const targetAgent = spec.agent.trim();
-               if (targetAgent.length === 0) {
-                  return yield* new AgentNotFoundError({
-                     message: "An agent profile is required for every worker.",
-                     agent: "<missing>"
+               const targetWorker = spec.worker.trim();
+               if (targetWorker.length === 0) {
+                  return yield* new WorkerProfileNotFoundError({
+                     message: "A worker profile is required for every worker.",
+                     worker: "<missing>"
                   });
                }
-               const agentDef = resolveAgentProfile(targetAgent, spec.cwd ?? process.cwd());
+               const agentDef = resolveAgentProfile(targetWorker, spec.cwd ?? process.cwd());
                if (!agentDef) {
-                  return yield* new AgentNotFoundError({
-                     message: `Agent "${targetAgent}" is not enabled. Select an enabled profile from /agents.`,
-                     agent: targetAgent
+                  return yield* new WorkerProfileNotFoundError({
+                     message: `Worker profile "${targetWorker}" is not enabled. Select an enabled profile from /wr-profile.`,
+                     worker: targetWorker
                   });
                }
             }
 
-            const runningJobs = yield* registry.list({ status: "running" });
-            const runningCount = runningJobs.length;
+            const runningTasks = yield* registry.list({ status: "running" });
+            const runningCount = runningTasks.length;
 
             if (runningCount + reservedAgentSlots + incomingCount > MAX_RUNNING_AGENTS) {
                return yield* new ConcurrencyLimitError({
-                  message: `Concurrency limit exceeded. Maximum ${MAX_RUNNING_AGENTS} concurrent agent jobs allowed.`,
+                  message: `Concurrency limit exceeded. Maximum ${MAX_RUNNING_AGENTS} concurrent workers allowed.`,
                   limit: MAX_RUNNING_AGENTS
                });
             }
 
             reservedAgentSlots += incomingCount;
+            const spawnedSessions: Array<{
+               taskId: string;
+               abort: () => Effect.Effect<void, any>;
+               completion: Promise<AgentOutcome>;
+            }> = [];
+            const abortSpawnedSessions = Effect.gen(function* () {
+               for (const spawned of spawnedSessions) {
+                  yield* spawned.abort().pipe(Effect.ignore);
+                  yield* updateSettledIfActive(spawned.taskId, "cancelled", undefined, ownerSessionId).pipe(
+                     Effect.ignore
+                  );
+                  clearActiveSession(spawned.taskId, ownerSessionId);
+               }
+            });
 
             return yield* Effect.gen(function* () {
-               const registeredJobs: Job[] = [];
+               const registeredTasks: Task[] = [];
+               const completions: Array<Promise<AgentOutcome>> = [];
                for (const spec of specs) {
-                  workerSeq++;
-                  const jobId = formatJobId(workerSeq);
+                  taskSeq++;
+                  const taskId = formatTaskId(taskSeq);
 
-                  const targetAgent = spec.agent.trim();
-                  let agentDef = resolveAgentProfile(targetAgent, spec.cwd ?? process.cwd());
+                  const targetWorker = spec.worker.trim();
+                  let agentDef = resolveAgentProfile(targetWorker, spec.cwd ?? process.cwd());
                   if (!agentDef) {
-                     return yield* new AgentNotFoundError({
-                        message: `Agent "${targetAgent}" is not enabled. Select an enabled profile from /agents.`,
-                        agent: targetAgent
+                     return yield* new WorkerProfileNotFoundError({
+                        message: `Worker profile "${targetWorker}" is not enabled. Select an enabled profile from /wr-profile.`,
+                        worker: targetWorker
                      });
                   }
 
@@ -404,31 +460,32 @@ export class WorkerManager extends Context.Service<WorkerManager, WorkerManagerS
                   const resolvedModel = agentDef?.model;
                   const resolvedThinking = spec.thinking ?? agentDef?.thinking;
                   const taskPrompt = spec.task;
-                  const job = yield* registry.register({
-                     id: jobId,
+                  const task = yield* registry.register({
+                     id: taskId,
                      ownerSessionId,
-                     name: spec.name ?? jobId,
-                     agent: targetAgent,
+                     name: spec.name ?? taskId,
+                     worker: targetWorker,
                      model: resolvedModel,
                      thinking: resolvedThinking,
                      cwd: spec.cwd ?? process.cwd(),
                      context: spec.context,
                      batchId: options?.batchId,
                      batchSize: options?.batchSize,
-                     promptOrCommand: taskPrompt
+                     promptOrCommand: taskPrompt,
+                     background: options?.background === true
                   });
 
-                  const runningJob = yield* registry.updateStatus(job.id, "running");
-                  registeredJobs.push(runningJob);
+                  const runningTask = yield* registry.updateStatus(task.id, "running");
+                  registeredTasks.push(runningTask);
 
                   // Spawn the Pi child session.
 
                   const startupController = new AbortController();
-                  pendingStartup.set(jobId, startupController);
+                  pendingStartup.set(taskId, startupController);
                   const piSession = yield* Effect.onInterrupt(
                      Effect.promise(() =>
                         spawnWorkerSession({
-                           sessionName: `worker: ${spec.name ?? jobId} ${jobId}`,
+                           sessionName: `worker: ${spec.name ?? taskId} ${taskId}`,
                            prompt: spec.task,
                            cwd: spec.cwd ?? process.cwd(),
                            parentSessionFile: options?.parentSessionFile,
@@ -438,11 +495,11 @@ export class WorkerManager extends Context.Service<WorkerManager, WorkerManagerS
                            modelRegistry: options?.modelRegistry,
                            inheritedModel: options?.inheritedModel,
                            signal: startupController.signal,
-                           onOutput: onLiveOutput(jobId),
+                           onOutput: onLiveOutput(taskId),
                            onSessionReady: (metadata) =>
                               Effect.runPromise(
                                  updateRunningIfActive(
-                                    jobId,
+                                    taskId,
                                     {
                                        ...metadata,
                                        sessionFile: metadata.sessionFile,
@@ -452,34 +509,54 @@ export class WorkerManager extends Context.Service<WorkerManager, WorkerManagerS
                                  )
                               ).then(() => undefined),
                            onSettled: (resStatus, data, errorText) => {
-                              clearActiveSession(jobId, ownerSessionId);
-                              takeLiveOutput(jobId);
-                              if (resStatus === "completed") {
-                                 Effect.runPromise(
-                                    updateSettledIfActive(jobId, "completed", { resultData: data }, ownerSessionId)
-                                 ).catch(() => {});
-                              } else if (resStatus === "failed") {
-                                 Effect.runPromise(
-                                    updateSettledIfActive(
-                                       jobId,
-                                       "failed",
-                                       { errorText: errorText ?? "Job failed" },
-                                       ownerSessionId
-                                    )
-                                 ).catch(() => {});
-                              } else if (resStatus === "cancelled") {
-                                 Effect.runPromise(
-                                    updateSettledIfActive(jobId, "cancelled", undefined, ownerSessionId)
-                                 ).catch(() => {});
-                              }
+                              return Effect.runPromise(
+                                 Effect.gen(function* () {
+                                    const current = yield* registry.get(taskId);
+                                    // A recoverable worker keeps its session file so the main
+                                    // session can resume it. Mark exactly once.
+                                    if (
+                                       resStatus === "failed" &&
+                                       current?.status !== "recoverable" &&
+                                       typeof current?.sessionFile === "string" &&
+                                       current.sessionFile.length > 0
+                                    ) {
+                                       yield* updateSettledIfActive(
+                                          taskId,
+                                          "recoverable",
+                                          { errorText: errorText ?? "Task failed" },
+                                          ownerSessionId
+                                       );
+                                       return;
+                                    }
+                                    clearActiveSession(taskId, ownerSessionId);
+                                    takeLiveOutput(taskId);
+                                    if (resStatus === "completed") {
+                                       yield* updateSettledIfActive(
+                                          taskId,
+                                          "completed",
+                                          { resultData: data },
+                                          ownerSessionId
+                                       );
+                                    } else if (resStatus === "failed") {
+                                       yield* updateSettledIfActive(
+                                          taskId,
+                                          "failed",
+                                          { errorText: errorText ?? "Task failed" },
+                                          ownerSessionId
+                                       );
+                                    } else {
+                                       yield* updateSettledIfActive(taskId, "cancelled", undefined, ownerSessionId);
+                                    }
+                                 })
+                              ).then(() => undefined);
                            }
-                        }).catch((err) => {
-                           clearActiveSession(jobId, ownerSessionId);
-                           clearLiveOutput(jobId);
+                        }).catch(async (err) => {
+                           clearActiveSession(taskId, ownerSessionId);
+                           clearLiveOutput(taskId);
                            if (!startupController.signal.aborted) {
-                              Effect.runPromise(
+                              await Effect.runPromise(
                                  updateSettledIfActive(
-                                    jobId,
+                                    taskId,
                                     "failed",
                                     { errorText: err instanceof Error ? err.message : String(err) },
                                     ownerSessionId
@@ -487,6 +564,7 @@ export class WorkerManager extends Context.Service<WorkerManager, WorkerManagerS
                               ).catch(() => {});
                            }
                            return {
+                              completion: Promise.resolve(workerOutcomeError(err)),
                               abort: () => Effect.void,
                               control: () => Effect.fail(new ControlError({ message: "Session failed to initialize" }))
                            };
@@ -495,25 +573,31 @@ export class WorkerManager extends Context.Service<WorkerManager, WorkerManagerS
                      () =>
                         Effect.gen(function* () {
                            startupController.abort();
-                           yield* updateSettledIfActive(jobId, "cancelled", undefined, ownerSessionId).pipe(
+                           yield* updateSettledIfActive(taskId, "cancelled", undefined, ownerSessionId).pipe(
                               Effect.ignore
                            );
                         })
-                  ).pipe(Effect.ensuring(Effect.sync(() => pendingStartup.delete(jobId))));
+                  ).pipe(Effect.ensuring(Effect.sync(() => pendingStartup.delete(taskId))));
 
                   if (startupController.signal.aborted) {
                      yield* piSession.abort().pipe(Effect.ignore);
                      continue;
                   }
 
-                  activeSessions.set(jobId, {
+                  activeSessions.set(taskId, {
                      abort: () => piSession.abort(),
                      control: (text, mode) => piSession.control(text, mode)
                   });
-                  activeSessionOwners.set(jobId, ownerSessionId);
+                  activeSessionOwners.set(taskId, ownerSessionId);
+                  spawnedSessions.push({ taskId, abort: piSession.abort, completion: piSession.completion });
+                  completions.push(piSession.completion);
                }
-               return registeredJobs;
+               if (options?.background !== true) {
+                  yield* Effect.promise(() => Promise.all(completions).then(() => undefined));
+               }
+               return registeredTasks;
             }).pipe(
+               Effect.onInterrupt(() => abortSpawnedSessions),
                Effect.ensuring(
                   Effect.sync(() => {
                      reservedAgentSlots = Math.max(0, reservedAgentSlots - incomingCount);
@@ -522,7 +606,160 @@ export class WorkerManager extends Context.Service<WorkerManager, WorkerManagerS
             );
          });
 
-         const cancelJob = Effect.fn("WorkerManager.cancelJob")(function* (id: string) {
+         /**
+          * Resume a failed/stalled task inside its own persisted session.
+          *
+          * The original prompt is not re-sent: the session already contains every
+          * message and tool result produced before the failure. One continuation
+          * turn asks the worker to finish and call structured_output.
+          */
+         const recoverTask = Effect.fn("WorkerManager.recoverTask")(function* (
+            id: string,
+            options?: {
+               ownerSessionId?: string;
+               parentSessionFile?: string;
+               modelRegistry?: ProfileModelRegistry<any>;
+               inheritedModel?: InheritedModelIdentity;
+               note?: string;
+            }
+         ) {
+            const current = yield* registry.get(id);
+            if (!current) return undefined;
+            if (!canRecoverTask(current)) {
+               return yield* new ControlError({
+                  message: `Task ${id} is not recoverable (requires status "recoverable" and a session file).`
+               });
+            }
+
+            const sessionFile = current.sessionFile!;
+            const ownerSessionId = options?.ownerSessionId ?? current.ownerSessionId;
+            if (!existsSync(sessionFile)) {
+               yield* updateSettledIfActive(
+                  id,
+                  "failed",
+                  { errorText: `Session file for ${id} no longer exists: ${sessionFile}` },
+                  ownerSessionId
+               );
+               return yield* registry.get(id);
+            }
+            const targetWorker = current.worker ?? "worker";
+            const agentDef = resolveAgentProfile(targetWorker, current.cwd ?? process.cwd());
+            if (!agentDef) {
+               return yield* new WorkerProfileNotFoundError({
+                  message: `Worker profile "${targetWorker}" is not enabled for recover of ${id}.`,
+                  worker: targetWorker
+               });
+            }
+
+            const activeSession = activeSessions.get(id);
+            if (activeSession) {
+               return yield* new ControlError({
+                  message: `Task ${id} is already running; wait for it to settle before recovering.`
+               });
+            }
+
+            const recoveredTask = yield* registry.updateStatus(id, "running", {
+               errorText: undefined,
+               resultData: undefined,
+               sessionFile
+            });
+            yield* Effect.void;
+
+            const startupController = new AbortController();
+            pendingStartup.set(id, startupController);
+
+            const recoverPrompt =
+               options?.note && options.note.trim().length > 0
+                  ? `Continue the unfinished task from this session. Do not restart: every read, tool result and note is already here. The main session requested: ${options.note.trim()} Finish the assignment, then call structured_output exactly once as your final action.`
+                  : "Continue the unfinished task from this session. Do not restart: every read, tool result and note is already here. Finish the assignment, then call structured_output exactly once as your final action.";
+
+            const recoverySession = yield* Effect.onInterrupt(
+               Effect.promise(() =>
+                  spawnWorkerSession({
+                     sessionName: `worker-recover: ${current.name ?? id} ${id}`,
+                     prompt: recoverPrompt,
+                     cwd: current.cwd ?? process.cwd(),
+                     parentSessionFile: options?.parentSessionFile,
+                     agentDef,
+                     specThinking: current.thinking,
+                     specTools: agentDef.tools,
+                     modelRegistry: options?.modelRegistry,
+                     inheritedModel: options?.inheritedModel,
+                     signal: startupController.signal,
+                     resumeSessionFile: sessionFile,
+                     onOutput: onLiveOutput(id),
+                     onSessionReady: (metadata) =>
+                        Effect.runPromise(
+                           updateRunningIfActive(
+                              id,
+                              {
+                                 ...metadata,
+                                 sessionFile: metadata.sessionFile ?? sessionFile,
+                                 sessionId: metadata.sessionId
+                              },
+                              ownerSessionId
+                           )
+                        ).then(() => undefined),
+                     onSettled: (resStatus, data, errorText) => {
+                        return Effect.runPromise(
+                           Effect.gen(function* () {
+                              clearActiveSession(id, ownerSessionId);
+                              takeLiveOutput(id);
+                              if (resStatus === "completed") {
+                                 yield* updateSettledIfActive(id, "completed", { resultData: data }, ownerSessionId);
+                              } else if (resStatus === "failed") {
+                                 yield* updateSettledIfActive(
+                                    id,
+                                    "recoverable",
+                                    { errorText: errorText ?? "Recover attempt failed" },
+                                    ownerSessionId
+                                 );
+                              } else {
+                                 yield* updateSettledIfActive(id, "cancelled", undefined, ownerSessionId);
+                              }
+                           })
+                        ).then(() => undefined);
+                     }
+                  }).catch(async (err) => {
+                     clearActiveSession(id, ownerSessionId);
+                     clearLiveOutput(id);
+                     await Effect.runPromise(
+                        updateSettledIfActive(
+                           id,
+                           "recoverable",
+                           { errorText: err instanceof Error ? err.message : String(err) },
+                           ownerSessionId
+                        )
+                     ).catch(() => {});
+                     return {
+                        completion: Promise.resolve(workerOutcomeError(err)),
+                        abort: () => Effect.void,
+                        control: () => Effect.fail(new ControlError({ message: "Session failed to initialize" }))
+                     };
+                  })
+               ),
+               () =>
+                  Effect.gen(function* () {
+                     startupController.abort();
+                     yield* updateSettledIfActive(id, "recoverable", undefined, ownerSessionId).pipe(Effect.ignore);
+                  })
+            ).pipe(Effect.ensuring(Effect.sync(() => pendingStartup.delete(id))));
+
+            if (startupController.signal.aborted) {
+               yield* recoverySession.abort().pipe(Effect.ignore);
+               return yield* registry.get(id);
+            }
+
+            activeSessions.set(id, {
+               abort: () => recoverySession.abort(),
+               control: (text, mode) => recoverySession.control(text, mode)
+            });
+            activeSessionOwners.set(id, ownerSessionId);
+
+            return yield* registry.get(id);
+         });
+
+         const cancelTask = Effect.fn("WorkerManager.cancelTask")(function* (id: string) {
             const active = activeSessions.get(id);
             if (active) {
                yield* active.abort().pipe(Effect.ignore);
@@ -538,41 +775,10 @@ export class WorkerManager extends Context.Service<WorkerManager, WorkerManagerS
             return yield* registry.updateStatus(id, "cancelled");
          });
 
-         const controlJob = Effect.fn("WorkerManager.controlJob")(function* (
-            id: string,
-            text: string,
-            mode: ControlMode
-         ) {
-            const active = activeSessions.get(id);
-            if (!active) {
-               return yield* new ControlError({ message: `Job ${id} has no active worker session` });
-            }
-
-            const job = yield* registry.get(id);
-            if (job?.status === "completed") {
-               yield* registry.updateStatus(id, "running", {
-                  resultData: undefined,
-                  errorText: undefined
-               });
-               return yield* active.control(text, mode).pipe(
-                  Effect.catch((error) =>
-                     registry
-                        .updateStatus(id, "completed", {
-                           resultData: job.resultData,
-                           errorText: job.errorText
-                        })
-                        .pipe(Effect.flatMap(() => Effect.fail(error)))
-                  )
-               );
-            }
-
-            return yield* active.control(text, mode);
-         });
-
-         const reserveWorkerSeq = Effect.fn("WorkerManager.reserveWorkerSeq")((maxRecoveredSeq: number) =>
+         const reserveTaskSeq = Effect.fn("WorkerManager.reserveTaskSeq")((maxRecoveredSeq: number) =>
             Effect.sync(() => {
-               if (maxRecoveredSeq > workerSeq) {
-                  workerSeq = maxRecoveredSeq;
+               if (maxRecoveredSeq > taskSeq) {
+                  taskSeq = maxRecoveredSeq;
                }
             })
          );
@@ -584,9 +790,9 @@ export class WorkerManager extends Context.Service<WorkerManager, WorkerManagerS
                yield* updateSettledIfActive(id, "cancelled").pipe(Effect.ignore);
             }
             for (const [id, session] of Array.from(activeSessions.entries())) {
-               const job = yield* registry.get(id);
+               const task = yield* registry.get(id);
                yield* session.abort().pipe(Effect.ignore);
-               if (job?.status !== "completed" && job?.status !== "failed" && job?.status !== "cancelled") {
+               if (task?.status !== "completed" && task?.status !== "failed" && task?.status !== "cancelled") {
                   yield* updateSettledIfActive(id, "cancelled").pipe(Effect.ignore);
                }
                clearActiveSession(id);
@@ -598,9 +804,9 @@ export class WorkerManager extends Context.Service<WorkerManager, WorkerManagerS
 
          return WorkerManager.of({
             spawnBatch,
-            cancelJob,
-            controlJob,
-            reserveWorkerSeq,
+            recoverTask,
+            cancelTask,
+            reserveTaskSeq,
             cancelActiveSessions
          });
       })

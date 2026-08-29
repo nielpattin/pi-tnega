@@ -1,12 +1,12 @@
 /**
- * Fullscreen /agents panel.
+ * Fullscreen /wr-profile panel.
  *
  * Single unified list (no section tabs):
- * - Regular agents with [built-in] / (override) tags.
+ * - Worker profiles with [built-in] / (override) tags.
  *
  * Detail & Edit Screen:
  * - Name, Enabled, Model, Thinking, Tools, Description, and System Prompt.
- * - Agents save to ~/.pi/agent/agents/<name>.md.
+ * - Profiles save to ~/.pi/agent/agents/<name>.md.
  */
 
 import type { ExtensionCommandContext, KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
@@ -20,7 +20,7 @@ import {
    saveAgentProfile,
    type AgentProfile,
    type AgentThinkingLevel
-} from "../services/agent-profiles.ts";
+} from "../services/worker-profiles.ts";
 
 type AgentDefinition = AgentProfile;
 type WorkflowAgentRuntime = unknown;
@@ -471,7 +471,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
             .toLowerCase()
             .replace(/[^a-z0-9_-]/g, "");
          if (!clean) {
-            this.statusMessage = "Invalid agent name. Use lowercase alphanumeric, dash, or underscore.";
+            this.statusMessage = "Invalid worker profile name. Use lowercase alphanumeric, dash, or underscore.";
             this.tui.requestRender();
             return;
          }
@@ -486,7 +486,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
       this.createIntentInput.onSubmit = async (val) => {
          this.newIntent = val.trim();
          this.viewState = "generating";
-         this.statusMessage = "Generating agent definition draft with model...";
+         this.statusMessage = "Generating worker profile draft with model...";
          this.tui.requestRender();
          await this.generateAndOpenDraft();
       };
@@ -510,8 +510,8 @@ export class FullScreenAgentsManager implements Component, Focusable {
       if (this.ctx?.model) {
          try {
             const systemPrompt =
-               "You are an expert AI subagent designer. Return a JSON object with description, guidance, and body.";
-            const userPrompt = `Create subagent definition for: Name="${this.newName}", Intent="${this.newIntent}". Return JSON ONLY.`;
+               "You are an expert worker profile designer. Return a JSON object with description, guidance, and body.";
+            const userPrompt = `Create worker profile definition for: Name="${this.newName}", Intent="${this.newIntent}". Return JSON ONLY.`;
             const auth = await this.ctx.modelRegistry?.getApiKeyAndHeaders?.(this.ctx.model);
             const apiKey = auth?.ok ? auth.apiKey : undefined;
             const headers = auth?.ok ? auth.headers : undefined;
@@ -538,13 +538,13 @@ export class FullScreenAgentsManager implements Component, Focusable {
          generationFailed = true;
       }
 
-      const fallbackBody = `# ${this.newName.toUpperCase()} PROFILE\n\nSpecialized profile for: ${this.newIntent || "custom agent work"}.\n\n## Role\nExecute the assigned profile task according to its intent.\n\n## Constraints\n- Follow the profile instructions strictly.`;
+      const fallbackBody = `# ${this.newName.toUpperCase()} PROFILE\n\nSpecialized profile for: ${this.newIntent || "custom worker work"}.\n\n## Role\nExecute the assigned profile task according to its intent.\n\n## Constraints\n- Follow the profile instructions strictly.`;
 
       const newAgent: AgentDefinition = {
          name: this.newName,
-         description: generatedFields?.description || this.newIntent || "Custom agent",
-         guidance: generatedFields?.guidance || `Use for ${this.newIntent || "custom agent work"}.`,
-         tools: ["read", "grep", "find"],
+         description: generatedFields?.description || this.newIntent || "Custom worker",
+         guidance: generatedFields?.guidance || `Use for ${this.newIntent || "custom worker work"}.`,
+         tools: ["read"],
          enabled: true,
          source: "global",
          systemPrompt: generatedFields?.body || fallbackBody
@@ -788,6 +788,11 @@ export class FullScreenAgentsManager implements Component, Focusable {
             promptSnippet: "Execute bash commands"
          },
          {
+            name: "powershell",
+            description: "Execute PowerShell commands in workspace shell.",
+            promptSnippet: "Execute PowerShell commands"
+         },
+         {
             name: "workflow",
             description: "Run a multi-agent workflow. Disabled inside workflow children.",
             promptSnippet: "Workflow orchestration"
@@ -811,6 +816,11 @@ export class FullScreenAgentsManager implements Component, Focusable {
             name: "web_fetch_exa",
             description: "Fetch text content from web URLs.",
             promptSnippet: "Fetch web URL content"
+         },
+         {
+            name: "deep_search_exa",
+            description: "Deep web search for complex questions requiring in-depth multi-source research.",
+            promptSnippet: "Deep web research"
          }
       ];
       for (const toolDef of BASELINE_TOOLS) {
@@ -1396,21 +1406,21 @@ export class FullScreenAgentsManager implements Component, Focusable {
 
       if (this.viewState === "create_name") {
          return [
-            theme.bold("Create New Agent (Step 1/2)"),
-            "Enter agent name/identifier (lowercase alphanumeric, dash, underscore):",
+            theme.bold("Create New Worker Profile (Step 1/2)"),
+            "Enter worker profile name/identifier (lowercase alphanumeric, dash, underscore):",
             ...this.createNameInput.render(width),
             this.statusMessage ? theme.fg("error", this.statusMessage) : ""
          ];
       }
       if (this.viewState === "create_intent") {
          return [
-            theme.bold(`Create New Agent: "${this.newName}" (Step 2/2)`),
-            "Describe what this agent should do:",
+            theme.bold(`Create New Worker Profile: "${this.newName}" (Step 2/2)`),
+            "Describe what this worker should do:",
             ...this.createIntentInput.render(width)
          ];
       }
       if (this.viewState === "generating") {
-         return [theme.fg("accent", "Generating agent definition draft with model...")];
+         return [theme.fg("accent", "Generating worker profile draft with model...")];
       }
 
       if (
@@ -1433,10 +1443,10 @@ export class FullScreenAgentsManager implements Component, Focusable {
 
       const lines: string[] = [];
       const vm = this.viewModel;
-      const headerLeft = theme.fg("accent", theme.bold("Workflow Agent Profiles"));
+      const headerLeft = theme.fg("accent", theme.bold("Worker Profiles"));
       const headerRight = theme.fg(
          "muted",
-         vm ? `${vm.agents.length} agent${vm.agents.length === 1 ? "" : "s"}` : "loading"
+         vm ? `${vm.agents.length} profile${vm.agents.length === 1 ? "" : "s"}` : "loading"
       );
       const headerPad = Math.max(1, width - visibleWidth(headerLeft) - visibleWidth(headerRight) - 4);
       lines.push(padLine(`  ${headerLeft}${" ".repeat(headerPad)}${headerRight}  `, width));
@@ -1651,7 +1661,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
       const agent = this.currentAgent();
       const isDirty = this.systemPromptEditor.getValue() !== this.initialBodyValue;
 
-      const title = `System Prompt Editor · ${agent?.name ?? "Agent"}${isDirty ? " (UNSAVED)" : ""}`;
+      const title = `System Prompt Editor · ${agent?.name ?? "Worker"}${isDirty ? " (UNSAVED)" : ""}`;
       if (this.pendingEscConfirm) {
          const escWarning = theme.bold(theme.fg("error", "  [Unsaved changes! Press Esc again to discard]"));
          lines.push(padLine(theme.fg("accent", theme.bold(title)) + escWarning, width));
@@ -1762,13 +1772,13 @@ export class FullScreenAgentsManager implements Component, Focusable {
       const vm = this.viewModel;
 
       if (!vm) {
-         out.push(theme.fg("dim", "  (loading agent profiles)"));
+         out.push(theme.fg("dim", "  (loading worker profiles)"));
          return out;
       }
 
       const list: AgentDefinition[] = vm.agents;
       if (list.length === 0) {
-         out.push(theme.fg("dim", "  (no agents available)"));
+         out.push(theme.fg("dim", "  (no worker profiles available)"));
          return out;
       }
 
@@ -1804,7 +1814,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
       const agent = this.currentAgent();
       const isDirtyDetail = Boolean(this.initialAgentSnapshot && JSON.stringify(agent) !== this.initialAgentSnapshot);
 
-      const titleBase = `Editing Agent: ${agent?.name ?? "?"}`;
+      const titleBase = `Editing Worker Profile: ${agent?.name ?? "?"}`;
       const title = `${titleBase}${isDirtyDetail ? " (UNSAVED)" : ""}`;
 
       lines.push(padLine(`  ${theme.fg("accent", theme.bold(title))}`, width));
@@ -1886,7 +1896,7 @@ export class FullScreenAgentsManager implements Component, Focusable {
       const out: string[] = [];
       const agent = this.currentAgent();
       if (!agent) {
-         out.push(theme.fg("dim", "  (no agent selected)"));
+         out.push(theme.fg("dim", "  (no worker profile selected)"));
          return out;
       }
 

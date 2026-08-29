@@ -1,6 +1,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { Job } from "../domain.js";
+import type { Task } from "../domain.js";
 
 export const ASYNC_WORKER_WIDGET_KEY = "workers-async-workers";
 
@@ -8,24 +8,44 @@ export interface AsyncWorkerStatusSummary {
    readonly running: number;
    readonly completed: number;
    readonly failed: number;
+   readonly recoverable: number;
    readonly activeNames: ReadonlyArray<string>;
 }
 
-/** Count workers and the names of those still in flight. */
-export function summarizeAsyncWorkerStatus(jobs: ReadonlyArray<Job>): AsyncWorkerStatusSummary {
-   const running = jobs.filter((job) => job.status === "running" || job.status === "pending").length;
-   const completed = jobs.filter((job) => job.status === "completed").length;
-   const failed = jobs.filter((job) => job.status === "failed" || job.status === "cancelled").length;
-   const activeNames = jobs
-      .filter((job) => job.status === "running" || job.status === "pending")
-      .map((job) => job.name)
+/** Scope tasks to the current active runtime batches, excluding historical runs. */
+export function scopeActiveRuntimeTasks(tasks: ReadonlyArray<Task>): ReadonlyArray<Task> {
+   const activeTasks = tasks.filter((task) => task.status === "running" || task.status === "pending");
+   if (activeTasks.length === 0) return [];
+   const activeBatchIds = new Set(
+      activeTasks
+         .map((task) => task.batchId)
+         .filter((batchId): batchId is string => typeof batchId === "string" && batchId.length > 0)
+   );
+   return tasks.filter(
+      (task) =>
+         (task.batchId !== undefined && activeBatchIds.has(task.batchId)) ||
+         task.status === "running" ||
+         task.status === "pending"
+   );
+}
+
+/** Count workers and the names of those still in flight for the current runtime. */
+export function summarizeAsyncWorkerStatus(tasks: ReadonlyArray<Task>): AsyncWorkerStatusSummary {
+   const currentRuntimeTasks = scopeActiveRuntimeTasks(tasks);
+   const running = currentRuntimeTasks.filter((task) => task.status === "running" || task.status === "pending").length;
+   const completed = currentRuntimeTasks.filter((task) => task.status === "completed").length;
+   const recoverable = currentRuntimeTasks.filter((task) => task.status === "recoverable").length;
+   const failed = currentRuntimeTasks.filter((task) => task.status === "failed" || task.status === "cancelled").length;
+   const activeNames = currentRuntimeTasks
+      .filter((task) => task.status === "running" || task.status === "pending")
+      .map((task) => task.name)
       .filter((name): name is string => Boolean(name));
-   return { running, completed, failed, activeNames };
+   return { running, completed, failed, recoverable, activeNames };
 }
 
 /** Build a one-line above-editor widget factory for active workers. */
-export function createAsyncWorkerWidget(jobs: ReadonlyArray<Job>): (tui: unknown, theme: Theme) => Component {
-   const { running, completed, failed, activeNames } = summarizeAsyncWorkerStatus(jobs);
+export function createAsyncWorkerWidget(tasks: ReadonlyArray<Task>): (tui: unknown, theme: Theme) => Component {
+   const { running, completed, failed, recoverable, activeNames } = summarizeAsyncWorkerStatus(tasks);
 
    return (_tui: unknown, theme: Theme): Component => {
       return {
@@ -33,6 +53,7 @@ export function createAsyncWorkerWidget(jobs: ReadonlyArray<Job>): (tui: unknown
             const parts: string[] = [];
             if (completed > 0) parts.push(`${completed} done`);
             if (running > 0) parts.push(`${running} running`);
+            if (recoverable > 0) parts.push(`${recoverable} recoverable`);
             if (failed > 0) parts.push(`${failed} failed`);
             if (parts.length === 0) parts.push("workers idle");
 

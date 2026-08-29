@@ -1,8 +1,8 @@
 import { Cause, Effect, Exit, Layer, ManagedRuntime } from "effect";
-import { JobRegistry } from "./services/job-registry.js";
+import { TaskRegistry } from "./services/task-registry.js";
 import { WorkerManager } from "./services/worker-manager.js";
-import { ParentSessionGate } from "./services/workers-job-recovery.js";
-import { WorkersJobPersistence } from "./services/workers-job-persistence.js";
+import { ParentSessionGate } from "./services/workers-task-recovery.js";
+import { WorkersTaskPersistence } from "./services/workers-task-persistence.js";
 
 // Shared base of stateful leaf services. provideMerge below feeds this same
 // instance set into every dependent layer's construction context (not just
@@ -10,7 +10,7 @@ import { WorkersJobPersistence } from "./services/workers-job-persistence.js";
 // inside WorkerManager resolve to the live singletons instead
 // of silently seeing None — Layer.mergeAll alone builds sibling layers in
 // isolation and does not share context between them.
-const Base = Layer.mergeAll(JobRegistry.layer, ParentSessionGate.layer, WorkersJobPersistence.layer);
+const Base = Layer.mergeAll(TaskRegistry.layer, ParentSessionGate.layer, WorkersTaskPersistence.layer);
 
 const WorkerManagerLive = WorkerManager.layer.pipe(Layer.provideMerge(Base));
 

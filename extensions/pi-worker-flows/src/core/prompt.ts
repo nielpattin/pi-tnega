@@ -55,8 +55,8 @@ export const WORKFLOW_PROMPT_SNIPPET =
 /** Guides the model on appropriate workflow fan-out and mandatory agent result checks. */
 export const WORKFLOW_PROMPT_GUIDELINES = [
    "Use workflow when a task needs several subagents with phase dependencies or dynamic fan-out; keep single small delegations in the main session.",
-   "Select a profile such as `fast`, `good`, `scout`, or `reviewer` instead of choosing a model, provider, or effort directly for work agents.",
-   "In workflow scripts, agent() never throws — always check `.ok` on its result before using `.output`/`.structured`.",
+   "Select a profile such as `worker`, `planner`, `explorer`, `critic`, `gatekeeper`, or `librarian` instead of choosing a model, provider, or effort directly for work agents.",
+   "In workflow scripts, agent() never throws, always check `.ok` on its result before using `.output`/`.structured`.",
    "Never create a manual final summary agent or a phase named `Summary`; the runtime adds one automatically.",
    "The mandatory Summary receives the immediately preceding phase's structured results and its text is the only workflow result. It uses its dedicated system prompt and no tools. Configure its model or thinking with `s` in the `/wf` dashboard, not in the workflow script."
 ];

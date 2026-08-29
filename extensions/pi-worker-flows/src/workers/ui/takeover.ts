@@ -2,21 +2,15 @@
  * Interactive Takeover Overlay for Workers Jobs (ported to real pi-tui overlay pattern).
  */
 
-import {
-   CustomEditor,
-   type ExtensionCommandContext,
-   type KeybindingsManager,
-   type Theme
-} from "@earendil-works/pi-coding-agent";
-import type { Component, EditorTheme, Focusable, TUI } from "@earendil-works/pi-tui";
+import { type ExtensionCommandContext, type KeybindingsManager, type Theme } from "@earendil-works/pi-coding-agent";
+import type { Component, TUI } from "@earendil-works/pi-tui";
 import { Key, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { type Job, type JobTranscriptEntry } from "../domain.js";
+import { type Task, type TaskTranscriptEntry } from "../domain.js";
 import type { WorkersRuntime } from "../extension.js";
 import { enterAlternateScreen } from "../../shared/alternate-screen.ts";
 import { copyToClipboard } from "../../shared/clipboard.ts";
 import { runTool } from "../runtime.js";
-import { JobRegistry } from "../services/job-registry.js";
-import { WorkerManager } from "../services/worker-manager.js";
+import { TaskRegistry } from "../services/task-registry.js";
 import { formatDuration } from "./formatters.js";
 import { getPiSessionContextTokens, readPiSessionTranscript } from "./session-transcript.js";
 import {
@@ -31,11 +25,13 @@ function configuredKeys(keybindings: KeybindingsManager, binding: Parameters<Key
    return keybindings.getKeys(binding).join("/") || "unbound";
 }
 
-function statusGlyph(job: Job, theme: Theme): string {
-   switch (job.status) {
+function statusGlyph(task: Task, theme: Theme): string {
+   switch (task.status) {
       case "running":
       case "pending":
          return theme.fg("warning", "■");
+      case "recoverable":
+         return theme.fg("warning", "↻");
       case "completed":
          return theme.fg("success", "■");
       case "failed":
@@ -46,12 +42,14 @@ function statusGlyph(job: Job, theme: Theme): string {
    }
 }
 
-function statusWord(job: Job, theme: Theme): string {
-   switch (job.status) {
+function statusWord(task: Task, theme: Theme): string {
+   switch (task.status) {
       case "running":
          return theme.fg("warning", "running");
       case "pending":
          return theme.fg("warning", "pending");
+      case "recoverable":
+         return theme.fg("warning", "recoverable");
       case "completed":
          return theme.fg("success", "completed");
       case "failed":
@@ -59,7 +57,7 @@ function statusWord(job: Job, theme: Theme): string {
       case "cancelled":
          return theme.fg("muted", "cancelled");
       default:
-         return theme.fg("muted", job.status);
+         return theme.fg("muted", task.status);
    }
 }
 
@@ -70,29 +68,29 @@ function formatTokens(count: number): string {
    return `${(count / 1000000).toFixed(1)}M`;
 }
 
-export function buildJobHeaderLines(job: Job, width: number, theme: Theme, now: number = Date.now()): string[] {
-   const elapsed = job.settledAt
-      ? formatDuration(job.settledAt - (job.startedAt ?? job.createdAt))
-      : formatDuration(now - (job.startedAt ?? job.createdAt));
-   const title = job.name ?? job.promptOrCommand.slice(0, 30);
+export function buildTaskHeaderLines(task: Task, width: number, theme: Theme, now: number = Date.now()): string[] {
+   const elapsed = task.settledAt
+      ? formatDuration(task.settledAt - (task.startedAt ?? task.createdAt))
+      : formatDuration(now - (task.startedAt ?? task.createdAt));
+   const title = task.name ?? task.promptOrCommand.slice(0, 30);
    const primary =
-      `${statusGlyph(job, theme)} ` +
-      theme.fg("accent", theme.bold(`${job.id} · ${title}`)) +
-      ` · ${statusWord(job, theme)} · ${theme.fg("muted", elapsed)}`;
-   const reasoningMetadata = job.thinking ? `thinking ${job.thinking}` : "thinking (inherit)";
+      `${statusGlyph(task, theme)} ` +
+      theme.fg("accent", theme.bold(`${task.id} · ${title}`)) +
+      ` · ${statusWord(task, theme)} · ${theme.fg("muted", elapsed)}`;
+   const reasoningMetadata = task.thinking ? `thinking ${task.thinking}` : "thinking (inherit)";
    const contextTokens =
-      job.contextTokens ?? (job.sessionFile ? getPiSessionContextTokens(job.sessionFile) : undefined);
+      task.contextTokens ?? (task.sessionFile ? getPiSessionContextTokens(task.sessionFile) : undefined);
    const metadata = [
-      job.agent ? `agent ${job.agent}` : undefined,
-      job.model ? `model ${job.model}` : "model (inherit)",
+      task.worker ? `worker ${task.worker}` : undefined,
+      task.model ? `model ${task.model}` : "model (inherit)",
       reasoningMetadata,
-      job.cwd ? `cwd ${job.cwd}` : undefined,
+      task.cwd ? `cwd ${task.cwd}` : undefined,
       contextTokens !== undefined ? `context ${formatTokens(contextTokens)} tokens` : "context 0 tokens"
    ].filter((value): value is string => value !== undefined);
    return [truncateToWidth(primary, width), ...wrapTextWithAnsi(theme.fg("muted", metadata.join(" · ")), width)];
 }
 
-const JOB_TOOL_NAMES = new Set(["worker_spawn", "worker_list", "worker_cancel"]);
+const WORKER_TOOL_NAMES = new Set(["worker_spawn", "worker_list", "worker_recover", "worker_cancel"]);
 
 function compactPreview(value: unknown, limit = 100): string {
    const text = typeof value === "string" ? value : JSON.stringify(value);
@@ -100,25 +98,33 @@ function compactPreview(value: unknown, limit = 100): string {
    return compact.length > limit ? `${compact.slice(0, limit - 1)}…` : compact;
 }
 
-function compactJobToolResult(entry: Extract<TranscriptViewEntry, { type: "tool-result" }>): string | undefined {
+function compactTaskToolResult(entry: Extract<TranscriptViewEntry, { type: "tool-result" }>): string | undefined {
    if (!entry.text) return undefined;
    try {
       const value = JSON.parse(entry.text) as Record<string, unknown>;
       if (value.ok === false) return `✗ run ${compactPreview(value.error)}`;
-      const jobs = Array.isArray(value.jobs) ? value.jobs : value.job ? [value.job] : [];
-      if (jobs.length > 0) {
-         return jobs
-            .filter((job): job is Record<string, unknown> => Boolean(job) && typeof job === "object")
-            .map((job) => {
-               const status = typeof job.status === "string" ? job.status : "unknown";
+      const tasks = (
+         Array.isArray(value.tasks)
+            ? value.tasks
+            : Array.isArray(value.jobs)
+              ? value.jobs
+              : value.task
+                ? [value.task]
+                : []
+      ) as ReadonlyArray<Record<string, unknown>>;
+      if (tasks.length > 0) {
+         return tasks
+            .filter((task): task is Record<string, unknown> => Boolean(task) && typeof task === "object")
+            .map((task) => {
+               const status = typeof task.status === "string" ? task.status : "unknown";
                const mark = status === "completed" ? "✓" : status === "failed" || status === "cancelled" ? "✗" : "●";
-               const output = compactPreview(job.errorText);
-               const id = typeof job.id === "string" ? job.id : "job";
+               const output = compactPreview(task.errorText);
+               const id = typeof task.id === "string" ? task.id : "task";
                return `${mark} ${id} ${status}${output ? ` · ${output}` : ""}`;
             })
             .join("\n");
       }
-      for (const key of ["jobs", "lines"] as const) {
+      for (const key of ["jobs", "tasks", "lines"] as const) {
          if (Array.isArray(value[key])) return `run ${key} · ${value[key].length} items`;
       }
       return "✓ run completed";
@@ -128,14 +134,14 @@ function compactJobToolResult(entry: Extract<TranscriptViewEntry, { type: "tool-
 }
 
 function workerResultSummary(entry: Extract<TranscriptViewEntry, { type: "tool-result" }>): string | undefined {
-   if (!JOB_TOOL_NAMES.has(entry.toolName)) return undefined;
-   const summary = compactJobToolResult(entry);
+   if (!WORKER_TOOL_NAMES.has(entry.toolName)) return undefined;
+   const summary = compactTaskToolResult(entry);
    if (!summary) return undefined;
    if (summary.startsWith("✓") || summary.startsWith("✗")) return summary;
    return `${entry.isError ? "✗" : "✓"} ${entry.toolName} · ${summary}`;
 }
 
-export interface JobTranscriptRenderOptions {
+export interface TaskTranscriptRenderOptions {
    readonly showThinking?: boolean;
    readonly showSystemPrompt?: boolean;
 }
@@ -153,11 +159,10 @@ export function createTakeoverScrollState(): TakeoverScrollState {
 export function computeTakeoverViewportHeight(
    terminalRows: number,
    headerLineCount: number,
-   inputLineCount: number,
    footerLineCount = 1
 ): number {
    const borderLineCount = 2;
-   const fixedLineCount = borderLineCount + footerLineCount + headerLineCount + inputLineCount;
+   const fixedLineCount = borderLineCount + footerLineCount + headerLineCount;
    return Math.max(1, terminalRows - fixedLineCount);
 }
 
@@ -165,19 +170,13 @@ export function wrapTakeoverHelp(text: string, width: number, theme: Theme): str
    return wrapTextWithAnsi(theme.fg("dim", text), Math.max(1, width));
 }
 
-export const WRAP_UP_STEER_PROMPT =
-   "Wrap up your current task now. Stop further tool calls, finalize your work based on what has already been done, and submit your final response using structured_output.";
-
 export function isSystemPromptToggleInput(data: string): boolean {
    return data === "\u0013" || data === Key.ctrl("s") || matchesKey(data, Key.ctrl("s"));
 }
 
-export function getTakeoverHelpText(showThinking: boolean, unseenLines: number, isSettled = false): string {
+export function getTakeoverHelpText(showThinking: boolean, unseenLines: number, _isSettled = false): string {
    const scrollHint = unseenLines > 0 ? ` · ${unseenLines} new lines · End latest` : " · End latest";
-   if (isSettled) {
-      return `s copy transcript · t ${showThinking ? "collapse" : "expand"} thinking · Ctrl+S system prompt · ↑/↓ scroll · PageUp/PageDown${scrollHint} · Esc back`;
-   }
-   return `Enter steer · Alt+Enter followUp · w wrap up · s copy transcript · t ${showThinking ? "collapse" : "expand"} thinking · Ctrl+S system prompt · ↑/↓ scroll · PageUp/PageDown${scrollHint} · Esc back`;
+   return `s copy transcript · t ${showThinking ? "collapse" : "expand"} thinking · Ctrl+S system prompt · ↑/↓ scroll · PageUp/PageDown${scrollHint} · Esc back`;
 }
 
 export function applyTranscriptUpdate(
@@ -222,36 +221,36 @@ export function moveTakeoverScroll(
 }
 
 export function buildCompactTranscriptSummary(
-   job: Job,
-   transcript: ReadonlyArray<JobTranscriptEntry> = job.transcript ?? []
+   task: Task,
+   transcript: ReadonlyArray<TaskTranscriptEntry> = task.transcript ?? []
 ): string {
    return buildTranscriptSummary(normalizeWorkerTranscript(transcript), workerResultSummary);
 }
 
 export function buildCopiedTranscriptPayload(
-   job: Job,
-   transcript: ReadonlyArray<JobTranscriptEntry> = job.transcript ?? []
+   task: Task,
+   transcript: ReadonlyArray<TaskTranscriptEntry> = task.transcript ?? []
 ): string {
-   const workerHandle = job.id;
-   const namePart = job.name ? ` name ${job.name}` : "";
+   const workerHandle = task.id;
+   const namePart = task.name ? ` name ${task.name}` : "";
    const header = `The ${workerHandle}${namePart} stucked and here is the current work done:`;
-   const body = buildCompactTranscriptSummary(job, transcript);
+   const body = buildCompactTranscriptSummary(task, transcript);
 
    return `${header}\n\n---TRANSCRIPT-START---\n\n${body}\n\n---TRANSCRIPT-END---`;
 }
 
-export function buildJobTranscriptLines(
-   job: Job,
+export function buildTaskTranscriptLines(
+   task: Task,
    width: number,
    theme: Theme,
-   options: JobTranscriptRenderOptions = {},
-   transcript: ReadonlyArray<JobTranscriptEntry> = job.transcript ?? []
+   options: TaskTranscriptRenderOptions = {},
+   transcript: ReadonlyArray<TaskTranscriptEntry> = task.transcript ?? []
 ): string[] {
    const lines: string[] = [];
    const contentWidth = Math.max(1, width);
-   if (job.systemPrompt) {
+   if (task.systemPrompt) {
       lines.push(
-         ...buildSystemPromptRows(job.systemPrompt, contentWidth, theme, options.showSystemPrompt === true, {
+         ...buildSystemPromptRows(task.systemPrompt, contentWidth, theme, options.showSystemPrompt === true, {
             label: "[SYSTEM_PROMPT]",
             toggleKey: "Ctrl+S"
          })
@@ -272,101 +271,58 @@ export function buildJobTranscriptLines(
          lines.push(...(wrapped.length > 0 ? wrapped : [""]));
       }
    };
-   const transcriptHasJobError =
-      typeof job.errorText === "string" &&
-      transcript.some((entry) => entry.type === "error" && entry.text === job.errorText);
-   if (job.errorText && !transcriptHasJobError) {
+   const transcriptHasTaskError =
+      typeof task.errorText === "string" &&
+      transcript.some((entry) => entry.type === "error" && entry.text === task.errorText);
+   if (task.errorText && !transcriptHasTaskError) {
       lines.push(theme.fg("dim", "--- Error ---"));
-      pushWrapped(job.errorText, "error");
+      pushWrapped(task.errorText, "error");
    }
 
-   if (transcript.length === 0 && !job.errorText) {
+   if (transcript.length === 0 && !task.errorText) {
       lines.push(theme.fg("dim", "(no transcript recorded yet)"));
    }
 
    return lines;
 }
 
-export function createTakeoverEditor(tui: TUI, theme: Theme, keybindings: KeybindingsManager): CustomEditor {
-   const editorTheme: EditorTheme = {
-      borderColor: (text) => theme.fg("borderAccent", text),
-      selectList: {
-         selectedPrefix: (text) => theme.fg("accent", text),
-         selectedText: (text) => theme.fg("accent", text),
-         description: (text) => theme.fg("muted", text),
-         scrollInfo: (text) => theme.fg("dim", text),
-         noMatch: (text) => theme.fg("warning", text)
-      }
-   };
-   return new CustomEditor(tui, editorTheme, keybindings);
-}
-
-export class TakeoverView implements Component, Focusable {
-   private input: CustomEditor;
+export class TakeoverView implements Component {
    private scrollState = createTakeoverScrollState();
    private lastTranscriptLineCount = 0;
-   private lastRenderedJob?: Job;
+   private lastRenderedTask?: Task;
    private closed = false;
-   private showThinking = true;
+   private showThinking = false;
    private showSystemPrompt = false;
    private ticker: ReturnType<typeof setInterval>;
-   private currentJob?: Job;
+   private currentTask?: Task;
    private currentSystemPrompt?: string;
-   private currentTranscript: ReadonlyArray<JobTranscriptEntry> = [];
-
-   private _focused = false;
-   get focused(): boolean {
-      return this._focused;
-   }
-   set focused(value: boolean) {
-      this._focused = value;
-      this.input.focused = value;
-   }
+   private currentTranscript: ReadonlyArray<TaskTranscriptEntry> = [];
 
    constructor(
       private tui: TUI,
       private theme: Theme,
       private keybindings: KeybindingsManager,
       private runtime: WorkersRuntime,
-      private jobId: string,
+      private taskId: string,
       private done: (value: null) => void
    ) {
-      this.input = createTakeoverEditor(tui, theme, keybindings);
-      this.input.onEscape = () => this.close();
-      this.input.onCtrlD = () => this.close();
       this.ticker = setInterval(() => {
          void this.refreshData();
       }, 500);
       void this.refreshData();
-
-      this.input.onSubmit = (value: string) => {
-         const text = value.trim();
-         if (!text) return;
-         this.input.setText("");
-         void runTool(
-            this.runtime,
-            WorkerManager.use((s) => s.controlJob(this.jobId, text, "steer"))
-         ).catch(() => {});
-         this.scrollState = moveTakeoverScroll(
-            this.scrollState,
-            "latest",
-            this.lastTranscriptLineCount,
-            this.viewportHeight()
-         );
-         this.tui.requestRender();
-      };
    }
 
    private async refreshData() {
       if (this.closed) return;
       try {
-         const job = await runTool(
+         const task = await runTool(
             this.runtime,
-            JobRegistry.use((r) => r.get(this.jobId))
+            TaskRegistry.use((r) => r.get(this.taskId))
          );
-         this.currentJob = job;
-         this.currentSystemPrompt = job?.systemPrompt;
-         this.currentTranscript = job?.transcript ?? (job?.sessionFile ? readPiSessionTranscript(job.sessionFile) : []);
+         this.currentTask = task;
+         this.currentSystemPrompt = task?.systemPrompt;
+         this.currentTranscript =
+            task?.transcript ?? (task?.sessionFile ? readPiSessionTranscript(task.sessionFile) : []);
          this.tui.requestRender();
       } catch {
          // ignore fetch errors
@@ -388,54 +344,24 @@ export class TakeoverView implements Component, Focusable {
       this.cleanup();
    }
 
-   private isSettled(): boolean {
-      const status = this.currentJob?.status;
-      return status === "completed" || status === "failed" || status === "cancelled";
-   }
-
    handleInput(data: string): void {
-      const isAltEnter = data === "\u001b\r" || data === "\u001b\n";
-      const settled = this.isSettled();
-      const canUseShortcuts = settled || this.input.getText().length === 0;
-
-      if (data === "\u0003") {
-         this.input.setText("");
-         this.tui.requestRender();
-         return;
-      }
-
-      if (this.keybindings.matches(data, "tui.select.cancel") || data === "\u001b") {
+      if (this.keybindings.matches(data, "tui.select.cancel") || matchesKey(data, Key.escape)) {
          this.close();
          return;
       }
 
-      if (data === "t" && canUseShortcuts) {
+      if (data === "t") {
          this.showThinking = !this.showThinking;
          this.tui.requestRender();
          return;
       }
 
-      if (data === "s" && canUseShortcuts) {
+      if (data === "s") {
          void this.copyTranscriptToClipboard();
          return;
       }
 
-      if (data === "w" && canUseShortcuts && !settled) {
-         void runTool(
-            this.runtime,
-            WorkerManager.use((s) => s.controlJob(this.jobId, WRAP_UP_STEER_PROMPT, "steer"))
-         ).catch(() => {});
-         this.scrollState = moveTakeoverScroll(
-            this.scrollState,
-            "latest",
-            this.lastTranscriptLineCount,
-            this.viewportHeight()
-         );
-         this.tui.requestRender();
-         return;
-      }
-
-      if (isSystemPromptToggleInput(data) && canUseShortcuts) {
+      if (isSystemPromptToggleInput(data)) {
          this.showSystemPrompt = !this.showSystemPrompt;
          if (this.showSystemPrompt) {
             this.scrollState = { scrollTop: 0, followTail: false, unseenLines: 0 };
@@ -444,28 +370,11 @@ export class TakeoverView implements Component, Focusable {
          return;
       }
 
-      if (isAltEnter && !settled) {
-         const val = this.input.getText().trim();
-         if (val) {
-            this.input.setText("");
-            void runTool(
-               this.runtime,
-               WorkerManager.use((s) => s.controlJob(this.jobId, val, "followUp"))
-            ).catch(() => {});
-            this.scrollState = moveTakeoverScroll(
-               this.scrollState,
-               "latest",
-               this.lastTranscriptLineCount,
-               this.viewportHeight()
-            );
-         }
-         this.tui.requestRender();
-         return;
-      }
-
       if (
-         canUseShortcuts &&
-         (this.keybindings.matches(data, "tui.editor.cursorUp") || data === "\u001b[A" || data === "k")
+         this.keybindings.matches(data, "tui.editor.cursorUp") ||
+         matchesKey(data, Key.up) ||
+         data === "up" ||
+         data === "k"
       ) {
          this.scrollState = moveTakeoverScroll(
             this.scrollState,
@@ -473,12 +382,11 @@ export class TakeoverView implements Component, Focusable {
             this.lastTranscriptLineCount,
             this.viewportHeight()
          );
-         this.tui.requestRender();
-         return;
-      }
-      if (
-         canUseShortcuts &&
-         (this.keybindings.matches(data, "tui.editor.cursorDown") || data === "\u001b[B" || data === "j")
+      } else if (
+         this.keybindings.matches(data, "tui.editor.cursorDown") ||
+         matchesKey(data, Key.down) ||
+         data === "down" ||
+         data === "j"
       ) {
          this.scrollState = moveTakeoverScroll(
             this.scrollState,
@@ -486,32 +394,25 @@ export class TakeoverView implements Component, Focusable {
             this.lastTranscriptLineCount,
             this.viewportHeight()
          );
-         this.tui.requestRender();
-         return;
-      }
-      if (canUseShortcuts && this.keybindings.matches(data, "tui.editor.pageUp")) {
+      } else if (this.keybindings.matches(data, "tui.editor.pageUp") || matchesKey(data, Key.pageUp)) {
          this.scrollState = moveTakeoverScroll(
             this.scrollState,
             "pageUp",
             this.lastTranscriptLineCount,
             this.viewportHeight()
          );
-         this.tui.requestRender();
-         return;
-      }
-      if (canUseShortcuts && this.keybindings.matches(data, "tui.editor.pageDown")) {
+      } else if (this.keybindings.matches(data, "tui.editor.pageDown") || matchesKey(data, Key.pageDown)) {
          this.scrollState = moveTakeoverScroll(
             this.scrollState,
             "pageDown",
             this.lastTranscriptLineCount,
             this.viewportHeight()
          );
-         this.tui.requestRender();
-         return;
-      }
-      if (
-         canUseShortcuts &&
-         (this.keybindings.matches(data, "tui.editor.cursorLineEnd") || data === "\u001b[F" || data === "G")
+      } else if (
+         this.keybindings.matches(data, "tui.editor.cursorLineEnd") ||
+         matchesKey(data, Key.end) ||
+         data === "end" ||
+         data === "G"
       ) {
          this.scrollState = moveTakeoverScroll(
             this.scrollState,
@@ -519,19 +420,13 @@ export class TakeoverView implements Component, Focusable {
             this.lastTranscriptLineCount,
             this.viewportHeight()
          );
-         this.tui.requestRender();
-         return;
       }
-
-      if (!settled) {
-         this.input.handleInput(data);
-         this.tui.requestRender();
-      }
+      this.tui.requestRender();
    }
 
    private async copyTranscriptToClipboard(): Promise<void> {
-      if (!this.currentJob) return;
-      const payload = buildCopiedTranscriptPayload(this.currentJob, this.currentTranscript);
+      if (!this.currentTask) return;
+      const payload = buildCopiedTranscriptPayload(this.currentTask, this.currentTranscript);
       await copyToClipboard(payload);
       this.tui.requestRender();
    }
@@ -539,34 +434,31 @@ export class TakeoverView implements Component, Focusable {
    private viewportHeight(): number {
       const rows = this.tui.terminal.rows || 30;
       const width = this.tui.terminal.columns || 80;
-      const headerLineCount = this.currentJob ? buildJobHeaderLines(this.currentJob, width, this.theme).length : 2;
-      const inputLineCount = this.isSettled() ? 0 : this.input.render(width).length;
+      const headerLineCount = this.currentTask ? buildTaskHeaderLines(this.currentTask, width, this.theme).length : 2;
       const helpLineCount = wrapTakeoverHelp(
-         getTakeoverHelpText(this.showThinking, this.scrollState.unseenLines, this.isSettled()),
+         getTakeoverHelpText(this.showThinking, this.scrollState.unseenLines),
          width,
          this.theme
       ).length;
-      return computeTakeoverViewportHeight(rows, headerLineCount, inputLineCount, helpLineCount);
+      return computeTakeoverViewportHeight(rows, headerLineCount, helpLineCount);
    }
 
    render(width: number): string[] {
       const theme = this.theme;
       const border = theme.fg("borderAccent", "─".repeat(Math.max(1, width)));
       const lines: string[] = [];
-      const job = this.currentJob;
-      const settled = this.isSettled();
+      const task = this.currentTask;
 
-      if (!job) {
+      if (!task) {
          lines.push(border);
-         lines.push(theme.fg("dim", `Run ${this.jobId} is no longer tracked or loading...`));
+         lines.push(theme.fg("dim", `Task ${this.taskId} is no longer tracked or loading...`));
          lines.push(border);
          return lines;
       }
 
-      const header = buildJobHeaderLines(job, width, theme);
-      const inputLines = settled ? [] : this.input.render(width);
+      const header = buildTaskHeaderLines(task, width, theme);
       const helpLines = wrapTakeoverHelp(
-         getTakeoverHelpText(this.showThinking, this.scrollState.unseenLines, settled),
+         getTakeoverHelpText(this.showThinking, this.scrollState.unseenLines),
          width,
          theme
       );
@@ -574,31 +466,26 @@ export class TakeoverView implements Component, Focusable {
       lines.push(...header);
       lines.push(border);
 
-      const transcriptJob =
-         this.currentSystemPrompt !== undefined && this.currentSystemPrompt !== job.systemPrompt
-            ? { ...job, systemPrompt: this.currentSystemPrompt }
-            : job;
-      const transcript = buildJobTranscriptLines(
-         transcriptJob,
+      const transcriptTask =
+         this.currentSystemPrompt !== undefined && this.currentSystemPrompt !== task.systemPrompt
+            ? { ...task, systemPrompt: this.currentSystemPrompt }
+            : task;
+      const transcript = buildTaskTranscriptLines(
+         transcriptTask,
          width,
          theme,
          { showThinking: this.showThinking, showSystemPrompt: this.showSystemPrompt },
          this.currentTranscript
       );
-      const viewport = computeTakeoverViewportHeight(
-         this.tui.terminal.rows || 30,
-         header.length,
-         inputLines.length,
-         helpLines.length
-      );
-      if (this.currentJob !== this.lastRenderedJob) {
+      const viewport = computeTakeoverViewportHeight(this.tui.terminal.rows || 30, header.length, helpLines.length);
+      if (this.currentTask !== this.lastRenderedTask) {
          this.scrollState = applyTranscriptUpdate(
             this.scrollState,
             this.lastTranscriptLineCount,
             transcript.length,
             viewport
          );
-         this.lastRenderedJob = this.currentJob;
+         this.lastRenderedTask = this.currentTask;
       }
       this.lastTranscriptLineCount = transcript.length;
       const maxScrollTop = Math.max(0, transcript.length - viewport);
@@ -615,26 +502,23 @@ export class TakeoverView implements Component, Focusable {
 
       while (body.length < viewport) body.push("");
       lines.push(...body.slice(0, viewport));
-      lines.push(...inputLines);
       lines.push(...helpLines);
       return lines;
    }
 
-   invalidate(): void {
-      this.input.invalidate();
-   }
+   invalidate(): void {}
 }
 
-export async function openJobTakeover(
+export async function openTaskTakeover(
    ctx: ExtensionCommandContext,
    runtime: WorkersRuntime,
-   jobId: string
+   taskId: string
 ): Promise<void> {
    let releaseAlternateScreen: (() => void) | undefined;
    try {
       await ctx.ui.custom<null>(
          (tui, theme, keybindings, done) => {
-            const screen = new TakeoverView(tui, theme, keybindings, runtime, jobId, done);
+            const screen = new TakeoverView(tui, theme, keybindings, runtime, taskId, done);
             releaseAlternateScreen = enterAlternateScreen(tui, screen);
             return screen;
          },

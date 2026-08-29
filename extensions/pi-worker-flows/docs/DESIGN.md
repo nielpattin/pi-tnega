@@ -11,7 +11,7 @@ The extension is implemented primarily in:
 - `extensions/pi-worker-flows/index.ts`
 - `extensions/pi-worker-flows/src/extension.ts`
 - `extensions/pi-worker-flows/src/core/runner.ts`
-- `extensions/pi-worker-flows/src/shared/agent-runner.ts`
+- `extensions/pi-worker-flows/src/shared/worker-runner.ts`
 - `extensions/pi-worker-flows/src/core/sandbox.ts`
 - `extensions/pi-worker-flows/src/core/sandbox-child.cjs`
 - `extensions/pi-worker-flows/src/core/controller.ts`
@@ -21,9 +21,9 @@ The extension is implemented primarily in:
 - `extensions/pi-worker-flows/src/core/prompt.ts`
 - `extensions/pi-worker-flows/src/core/settings.ts`
 - `extensions/pi-worker-flows/src/ui/dashboard.ts`
-- `extensions/pi-worker-flows/src/ui/agents-panel.ts`
+- `extensions/pi-worker-flows/src/ui/worker-profiles-panel.ts`
 - `extensions/pi-worker-flows/src/shared/child-session.ts`
-- `extensions/pi-worker-flows/src/services/agent-profiles.ts`
+- `extensions/pi-worker-flows/src/services/worker-profiles.ts`
 
 The design has two execution layers:
 
@@ -120,8 +120,8 @@ The important distinction is that the Workflow Worker uses a Pi session runtime 
 │  workflows(pi)                                                         │
 │  ├─ workflow tool                                                       │
 │  ├─ /wf command and dashboard                                          │
-│  ├─ /workers command and direct worker dashboard                       │
-│  ├─ /agents shared workflow and worker profile editor                  │
+│  ├─ /wr command and direct worker dashboard                             │
+│  ├─ /wr-profile shared workflow and worker profile editor              │
 │  ├─ activeRuns                                                         │
 │  └─ parent session lifecycle handlers                                  │
 └───────────────────────────────┬─────────────────────────────────────────┘
@@ -197,8 +197,8 @@ It registers:
 - The `worker_spawn`, `worker_list`, and `worker_cancel` tools for direct workers.
 - The `/wf` command.
 - The target `/workflows` library command.
-- The `/workers` command for direct worker jobs.
-- The `/agents` command for shared workflow and direct worker profiles.
+- The `/wr` command for direct worker runs.
+- The `/wr-profile` command for shared workflow and direct worker profiles.
 - The background workflow message renderer.
 - `session_start` handling for the activity indicator.
 - `session_shutdown` handling for abort and cleanup.
@@ -223,9 +223,9 @@ The script's return value is deliberately ignored. A workflow's public result is
 
 `/wf` lists and opens workflow runs. In TUI mode it opens the dashboard. In non-TUI mode it prints or notifies with a text listing and can show a selected run's report.
 
-### `/workers`
+### `/wr`
 
-`/workers` lists direct worker jobs and opens the direct worker dashboard in TUI mode. Direct workers run independently of workflow phases and do not create a mandatory Summary request. The shared `/agents` editor controls the profiles used by both execution modes.
+`/wr` lists direct worker runs and opens the direct worker dashboard in TUI mode. Direct workers run independently of workflow phases and do not create a mandatory Summary request. The shared `/wr-profile` editor controls the profiles used by both execution modes.
 
 ### `/workflows`
 
@@ -710,8 +710,8 @@ Built-in profiles are:
 | ---------- | ---------------------------------------- | -------------------- | -------- | ------------- | ----------------- |
 | `fast`     | Small implementation or focused research | Read and write tools | `low`    | `small`       | `worktree`        |
 | `good`     | General implementation and careful work  | Read and write tools | `high`   | `medium`      | `worktree`        |
-| `scout`    | Read-only codebase investigation         | Read, grep, and find | `low`    | `small`       | `shared`          |
-| `reviewer` | Read-only change review                  | Read, grep, and find | `high`   | `medium`      | `shared`          |
+| `scout`    | Read-only codebase investigation         | Read                 | `low`    | `small`       | `shared`          |
+| `reviewer` | Read-only change review                  | Read                 | `high`   | `medium`      | `shared`          |
 
 A profile is the Worker type. Changing the model route does not change the profile's tools, system prompt, or role.
 
@@ -1395,7 +1395,7 @@ Live updates use the same event model as recovered runs. The UI may throttle ren
 
 A recovery view must show the last durable event, lease status, stop reason, unresolved side-effect warning, and the exact decision required before more provider work can start.
 
-### `/agents` shared profile editor
+### `/wr-profile` shared profile editor
 
 The shared profile editor can:
 
@@ -1447,7 +1447,7 @@ Worker profiles are stored in the normal Pi profile locations. The editor writes
 | `src/extension.ts`                 | Extension registration, workflow tool and library command handlers, run lifecycle, records, background delivery, settings UI, and command wiring.                             |
 | `src/workers/extension.ts`         | Direct worker tool registration, job lifecycle, result delivery, worker dashboard wiring, and direct worker profile management.                                               |
 | `src/core/runner.ts`               | Compatibility exports for the shared child-agent runner.                                                                                                                      |
-| `src/shared/agent-runner.ts`       | Shared workflow and direct-worker Pi session creation, structured completion, compaction-aware progress, context tracking, fallback behavior, and cleanup.                    |
+| `src/shared/worker-runner.ts`      | Shared workflow and direct-worker Pi session creation, structured completion, compaction-aware progress, context tracking, fallback behavior, and cleanup.                    |
 | `src/core/sandbox.ts`              | Parent-side sandbox process startup, IPC authentication, validation, byte limits, abort handling, and termination.                                                            |
 | `src/core/sandbox-child.cjs`       | Restricted VM bootstrap, DSL implementation, pending-request tracking, and child-side IPC bridge.                                                                             |
 | `src/core/controller.ts`           | Semaphore, maximum call budget, run signals, invocation signals, and bounded settlement.                                                                                      |
@@ -1457,13 +1457,13 @@ Worker profiles are stored in the normal Pi profile locations. The editor writes
 | `src/core/prompt.ts`               | Workflow tool guidance, Worker profile and route guidance, Summary prompt, Summary record, phase result collection, and rendered reports.                                     |
 | `src/core/settings.ts`             | Summary model, thinking-level, logical route, and fallback-model configuration.                                                                                               |
 | `src/ui/dashboard.ts`              | Run loading, observability views, recovery display, Continue run, transcript/timeline loading, fullscreen/alternate-screen TUI, report/copy actions, and live run navigation. |
-| `src/ui/agents-panel.ts`           | Worker profile list, profile editing, profile creation, tool selection, and profile persistence interactions. The filename is a legacy storage name pending migration.        |
+| `src/ui/worker-profiles-panel.ts`  | Worker profile list, profile editing, profile creation, tool selection, and profile persistence interactions. The filename is a legacy storage name pending migration.        |
 | `src/ui/activity-status.ts`        | Compact parent-session activity indicator formatting.                                                                                                                         |
 | `src/utils/context-utilization.ts` | Shared context occupancy formatting.                                                                                                                                          |
 | `src/utils/serialization.ts`       | Bounded serialization helpers used at the workflow boundary.                                                                                                                  |
 | `src/utils/timeouts.ts`            | Shared child tool timeout helpers.                                                                                                                                            |
 | `src/shared/child-session.ts`      | Shared child-session resources, parent-scoped session managers, trust handling, and bounded shutdown used by workflows and direct workers.                                    |
-| `src/services/agent-profiles.ts`   | Built-in Worker profiles, profile file loading, merge precedence, serialization, saving, and deletion.                                                                        |
+| `src/services/worker-profiles.ts`  | Built-in Worker profiles, profile file loading, merge precedence, serialization, saving, and deletion.                                                                        |
 | `src/services/model-resolution.ts` | Exact model selection, registry validation, fallback resolution, and Parent Session model inheritance.                                                                        |
 | `src/shared/compaction.ts`         | Child auto-compaction policy and retry-aware completion state used by workflows and direct workers.                                                                           |
 | `src/utils/transcript.ts`          | Generic bounded transcript helper used by workflow infrastructure.                                                                                                            |
@@ -1683,5 +1683,5 @@ Those additions should preserve the current core properties:
 - [Workflow model](../src/core/model.ts)
 - [Workflow persistence](../src/core/artifacts.ts)
 - [Workflow dashboard](../src/ui/dashboard.ts)
-- [Profile implementation](../src/services/agent-profiles.ts)
+- [Profile implementation](../src/services/worker-profiles.ts)
 - [Child session implementation](../src/shared/child-session.ts)

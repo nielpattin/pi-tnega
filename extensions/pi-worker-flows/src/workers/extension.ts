@@ -14,21 +14,25 @@ import { Box, Text, type Component, wrapTextWithAnsi } from "@earendil-works/pi-
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeWorkersRuntime, runTool } from "./runtime.js";
-import { JobRegistry } from "./services/job-registry.js";
+import { TaskRegistry } from "./services/task-registry.js";
 import { WorkerManager } from "./services/worker-manager.js";
 import {
    activateParentSession,
    ensureParentSessionRecovery,
    flushPendingWrites
-} from "./services/workers-job-recovery.js";
-import { listAgentProfiles } from "../services/agent-profiles.ts";
+} from "./services/workers-task-recovery.js";
+import { listWorkerProfiles } from "../services/worker-profiles.ts";
+import { deactivateWorkerOnlyToolsFromParent } from "../shared/child-session.ts";
 import {
    handleWorkerSpawn,
    handleWorkerList,
    handleWorkerCancel,
+   handleWorkerRecover,
    createWorkerSpawnToolParamsSchema,
    WorkerListToolParamsSchema,
    WorkerCancelToolParamsSchema,
+   WorkerRecoverToolParamsSchema,
+   type WorkerRecoverToolParams,
    WORKER_SPAWN_TOOL_BASE_DESCRIPTION,
    WORKER_SPAWN_TOOL_BASE_PROMPT_SNIPPET,
    augmentWorkerToolMetadata
@@ -44,11 +48,14 @@ import {
    renderWorkerResult,
    renderWorkerCancelCall,
    renderWorkerCancelResult,
+   renderWorkerRecoverCall,
+   renderWorkerRecoverResult,
    renderWorkerListCall,
    renderWorkerListResult,
-   workerTraceLines
+   workerTraceLines,
+   extractMarkdownText
 } from "./ui/tool-renderers.js";
-import type { Job } from "./domain.js";
+import type { Task } from "./domain.js";
 
 export type WorkersRuntime = ReturnType<typeof makeWorkersRuntime>;
 
@@ -91,8 +98,7 @@ class LimitedText implements Component {
 }
 
 function fullResultText(payload: unknown): string {
-   if (typeof payload === "string") return payload;
-   return JSON.stringify(payload, null, 2) ?? String(payload);
+   return extractMarkdownText(payload);
 }
 
 function collapsedResultText(payload: unknown): string {
@@ -101,7 +107,7 @@ function collapsedResultText(payload: unknown): string {
       const summary = (payload as { summary?: unknown }).summary;
       if (typeof summary === "string") return summary;
    }
-   return fullResultText(payload);
+   return extractMarkdownText(payload);
 }
 
 function asTextResult(payload: unknown) {
@@ -123,45 +129,45 @@ interface ParentToolDelivery {
    readonly notifyAsyncWidget: (ctx: ExtensionContext) => void;
 }
 
-function isBatchJob(job: Job): job is Job & { readonly batchId: string; readonly batchSize: number } {
+function isBatchTask(task: Task): task is Task & { readonly batchId: string; readonly batchSize: number } {
    return (
-      typeof job.batchId === "string" &&
-      job.batchId.length > 0 &&
-      typeof job.batchSize === "number" &&
-      Number.isInteger(job.batchSize) &&
-      job.batchSize > 1
+      typeof task.batchId === "string" &&
+      task.batchId.length > 0 &&
+      typeof task.batchSize === "number" &&
+      Number.isInteger(task.batchSize) &&
+      task.batchSize > 1
    );
 }
 
 function createDeferredResultDelivery() {
-   const pending = new Map<string, Job>();
+   const pending = new Map<string, Task>();
 
-   const pendingGroups = (): Job[][] => {
-      const singles: Job[][] = [];
-      const batches = new Map<string, Job[]>();
+   const pendingGroups = (): Task[][] => {
+      const singles: Task[][] = [];
+      const batches = new Map<string, Task[]>();
 
-      for (const job of pending.values()) {
-         if (!isBatchJob(job)) {
-            singles.push([job]);
+      for (const task of pending.values()) {
+         if (!isBatchTask(task)) {
+            singles.push([task]);
             continue;
          }
 
-         const jobs = batches.get(job.batchId);
-         if (jobs) jobs.push(job);
-         else batches.set(job.batchId, [job]);
+         const tasks = batches.get(task.batchId);
+         if (tasks) tasks.push(task);
+         else batches.set(task.batchId, [task]);
       }
 
-      const completeBatches = Array.from(batches.values()).filter((jobs) => {
-         const expected = jobs[0]?.batchSize;
-         return expected !== undefined && jobs.length >= expected;
+      const completeBatches = Array.from(batches.values()).filter((tasks) => {
+         const expected = tasks[0]?.batchSize;
+         return expected !== undefined && tasks.length >= expected;
       });
 
       return [...singles, ...completeBatches];
    };
 
    return {
-      defer(job: Job): void {
-         pending.set(job.id, job);
+      defer(task: Task): void {
+         pending.set(task.id, task);
       },
       consume(ids: Iterable<string>): void {
          for (const id of ids) pending.delete(id);
@@ -197,11 +203,11 @@ function makeAsyncWorkerWidgetState(runtime: WorkersRuntime): AsyncWorkerWidgetS
    const update = async (ctx: ExtensionContext) => {
       if (!ctx.hasUI || typeof ctx.ui?.setWidget !== "function") return;
       try {
-         const jobs = await runTool(
+         const tasks = await runTool(
             runtime,
-            JobRegistry.use((registry) => registry.list())
+            TaskRegistry.use((registry) => registry.list())
          );
-         const { running, completed, failed, activeNames } = summarizeAsyncWorkerStatus(jobs);
+         const { running, completed, failed, activeNames } = summarizeAsyncWorkerStatus(tasks);
          if (running === 0) {
             clear(ctx);
             return;
@@ -210,7 +216,7 @@ function makeAsyncWorkerWidgetState(runtime: WorkersRuntime): AsyncWorkerWidgetS
          if (nextSnapshot === snapshot && running === runningCount) return;
          runningCount = running;
          snapshot = nextSnapshot;
-         ctx.ui.setWidget(ASYNC_WORKER_WIDGET_KEY, createAsyncWorkerWidget(jobs));
+         ctx.ui.setWidget(ASYNC_WORKER_WIDGET_KEY, createAsyncWorkerWidget(tasks));
       } catch {
          // ignore widget update races
       }
@@ -220,19 +226,19 @@ function makeAsyncWorkerWidgetState(runtime: WorkersRuntime): AsyncWorkerWidgetS
 }
 
 interface WorkerToolAugmentation {
-   readonly agentNames: ReadonlyArray<string>;
+   readonly workerNames: ReadonlyArray<string>;
    readonly descriptionAppendix: string;
 }
 
 const EMPTY_WORKER_TOOL_AUGMENTATION: WorkerToolAugmentation = {
-   agentNames: [],
+   workerNames: [],
    descriptionAppendix: ""
 };
 
 async function resolveWorkerToolAugmentation(runtime: WorkersRuntime, cwd?: string): Promise<WorkerToolAugmentation> {
    if (!cwd) return EMPTY_WORKER_TOOL_AUGMENTATION;
    try {
-      return augmentWorkerToolMetadata(listAgentProfiles(cwd));
+      return augmentWorkerToolMetadata(listWorkerProfiles(cwd));
    } catch {
       return EMPTY_WORKER_TOOL_AUGMENTATION;
    }
@@ -251,7 +257,7 @@ function createWorkerToolDefinition(
       label: "worker_spawn",
       description,
       promptSnippet: WORKER_SPAWN_TOOL_BASE_PROMPT_SNIPPET,
-      parameters: createWorkerSpawnToolParamsSchema(augmentation.agentNames),
+      parameters: createWorkerSpawnToolParamsSchema(augmentation.workerNames),
       renderCall: renderWorkerCall,
       renderResult: renderWorkerResult,
       async execute(
@@ -276,8 +282,7 @@ function createWorkerToolDefinition(
                { signal, interruptMessage: "worker spawn aborted" }
             );
             if (ctx.hasUI) delivery.notifyAsyncWidget(ctx);
-            const toolResult = asTextResult(result);
-            return result.ok === true ? { ...toolResult, terminate: true as const } : toolResult;
+            return asTextResult(result);
          } catch (err) {
             return asErrorResult(err instanceof Error ? err.message : String(err));
          }
@@ -308,7 +313,7 @@ interface ParentActionToolDefinition {
    readonly parameters: any;
    readonly renderCall: any;
    readonly renderResult: any;
-   readonly handler: (params: any) => any;
+   readonly handler: (params: any, ctx: ExtensionContext) => any;
    readonly interruptMessage: string;
 }
 
@@ -326,10 +331,16 @@ function createParentActionToolDefinition(
       parameters: definition.parameters,
       renderCall: definition.renderCall,
       renderResult: definition.renderResult,
-      async execute(_toolCallId: string, params: any, signal: AbortSignal | undefined) {
+      async execute(
+         _toolCallId: string,
+         params: any,
+         signal: AbortSignal | undefined,
+         _onUpdate: any,
+         ctx: ExtensionContext
+      ) {
          try {
             await delivery.ready;
-            const result = await runTool(runtime, definition.handler(params), {
+            const result = await runTool(runtime, definition.handler(params, ctx), {
                signal,
                interruptMessage: definition.interruptMessage
             });
@@ -347,8 +358,9 @@ function registerParentTools(pi: ExtensionAPI, runtime: WorkersRuntime, delivery
       createParentActionToolDefinition(runtime, delivery, {
          name: "worker_list",
          label: "Worker List",
-         description: "List worker runs.",
-         promptSnippet: "List workers.",
+         description:
+            "List worker tasks with status (pending, running, completed, recoverable, failed, cancelled), error text, and session file. recoverable tasks can be resumed with worker_recover.",
+         promptSnippet: "List worker tasks.",
          parameters: WorkerListToolParamsSchema,
          renderCall: renderWorkerListCall,
          renderResult: renderWorkerListResult,
@@ -358,10 +370,34 @@ function registerParentTools(pi: ExtensionAPI, runtime: WorkersRuntime, delivery
    );
    pi.registerTool(
       createParentActionToolDefinition(runtime, delivery, {
+         name: "worker_recover",
+         label: "Worker Recover",
+         description:
+            "Resume a failed or stalled worker task in place. Reopens the worker's own persisted session (all reads and tool results are still there), sends one continuation turn, and waits for structured_output. Never re-spawn the same prompt to a fresh worker.",
+         promptSnippet: "Recover a worker task.",
+         parameters: WorkerRecoverToolParamsSchema,
+         renderCall: renderWorkerRecoverCall,
+         renderResult: renderWorkerRecoverResult,
+         handler: (params: WorkerRecoverToolParams, ctx: ExtensionContext) => {
+            const note =
+               typeof (params as { note?: unknown }).note === "string" ? (params as { note: string }).note : undefined;
+            return handleWorkerRecover(params, {
+               ownerSessionId: ctx.sessionManager.getSessionId?.() ?? "parent",
+               parentSessionFile: ctx.sessionManager.getSessionFile?.(),
+               modelRegistry: ctx.modelRegistry,
+               inheritedModel: ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined,
+               note
+            });
+         },
+         interruptMessage: "worker_recover aborted"
+      })
+   );
+   pi.registerTool(
+      createParentActionToolDefinition(runtime, delivery, {
          name: "worker_cancel",
          label: "Worker Cancel",
-         description: "Cancel a worker by run ID.",
-         promptSnippet: "Cancel a worker.",
+         description: "Cancel a worker task by its task id.",
+         promptSnippet: "Cancel a worker task.",
          parameters: WorkerCancelToolParamsSchema,
          renderCall: renderWorkerCancelCall,
          renderResult: renderWorkerCancelResult,
@@ -379,12 +415,12 @@ function registerParentCommands(
 ): void {
    const openRuns = async (ctx: ExtensionContext) => {
       if (ctx.hasUI && openDashboard) await openDashboard(ctx, runtime, "worker");
-      const jobs = await runTool(
+      const tasks = await runTool(
          runtime,
-         JobRegistry.use((r) => r.list())
+         TaskRegistry.use((r) => r.list())
       );
       pi.appendEntry("workers-snapshot", {
-         text: ["Worker Runs", "", formatRunTable(jobs)].join("\n"),
+         text: ["Worker Tasks", "", formatRunTable(tasks)].join("\n"),
          at: Date.now()
       });
    };
@@ -417,11 +453,11 @@ export function registerWorkersExtension(pi: ExtensionAPI, options?: WorkersExte
    let switchingParent = false;
    let unsubscribeSettled: (() => void) | undefined;
 
-   const deliverResult = (job: Job, triggerTurn = true) => {
-      const output = job.errorText ?? job.resultData ?? "(no result returned)";
+   const deliverResult = (task: Task, triggerTurn = true) => {
+      const output = task.errorText ?? task.resultData ?? "(no result returned)";
       const duration =
-         job.settledAt === undefined ? undefined : formatDuration(job.settledAt - (job.startedAt ?? job.createdAt));
-      const summary = `worker_spawn ${job.name ?? job.id} (${job.id}) ${job.status}${
+         task.settledAt === undefined ? undefined : formatDuration(task.settledAt - (task.startedAt ?? task.createdAt));
+      const summary = `worker ${task.name ?? task.id} (${task.id}) ${task.status}${
          duration === undefined ? "" : ` in ${duration}`
       }.`;
       pi.sendMessage(
@@ -430,15 +466,16 @@ export function registerWorkersExtension(pi: ExtensionAPI, options?: WorkersExte
             content: `${summary}\n${fullResultText(output)}`,
             display: true,
             details: {
-               id: job.id,
-               name: job.name,
-               status: job.status,
+               id: task.id,
+               name: task.name,
+               worker: task.worker,
+               status: task.status,
                duration,
-               transcript: job.transcript,
+               transcript: task.transcript,
                result: output
             }
          },
-         { deliverAs: "steer", triggerTurn }
+         { deliverAs: "followUp", triggerTurn }
       );
    };
    const flushResults = () => {
@@ -447,7 +484,7 @@ export function registerWorkersExtension(pi: ExtensionAPI, options?: WorkersExte
             for (let index = 0; index < group.length; index++) {
                deliverResult(group[index], index === group.length - 1);
             }
-            resultDelivery.consume(group.map((job) => job.id));
+            resultDelivery.consume(group.map((task) => task.id));
          } catch {
             // Keep failed deliveries queued for the next idle lifecycle event.
          }
@@ -458,12 +495,15 @@ export function registerWorkersExtension(pi: ExtensionAPI, options?: WorkersExte
    };
    const deliveryReady = runTool(
       runtime,
-      JobRegistry.use((registry) =>
-         registry.onSettled((job) => {
-            if (switchingParent || !parentContext || job.ownerSessionId !== activeOwnerSessionId) return;
+      TaskRegistry.use((registry) =>
+         registry.onSettled((task) => {
+            if (switchingParent || !parentContext || task.ownerSessionId !== activeOwnerSessionId) return;
             void asyncWidget.update(parentContext);
-            if (job.status === "cancelled") return;
-            resultDelivery.defer({ ...job });
+            // A recoverable task is deliberately surfaced to the parent so it can
+            // decide to resume it with worker_recover. Background and foreground
+            // tasks behave identically: no pause/continue.
+            if (task.status === "cancelled" || task.background !== true) return;
+            resultDelivery.defer({ ...task });
             if (parentContext.isIdle()) flushDeferredResults();
          })
       )
@@ -494,7 +534,8 @@ export function registerWorkersExtension(pi: ExtensionAPI, options?: WorkersExte
       const duration = details.duration ?? summaryLine.match(/\bin (.+)\.$/)?.[1];
       const durationStr = duration ? ` · ${duration}` : "";
       const failed = status === "failed" || status === "cancelled";
-      const bgColor = failed ? "toolErrorBg" : "toolSuccessBg";
+      const recoverable = status === "recoverable";
+      const bgColor = failed ? "toolErrorBg" : recoverable ? "toolSuccessBg" : "toolSuccessBg";
       const body = content.split("\n").slice(1).join("\n").trim();
       const bodyLines = body.length > 0 ? body.split("\n") : [];
       const bgBadge = theme.fg("customMessageLabel", "[bg]");
@@ -615,6 +656,13 @@ export function registerWorkersExtension(pi: ExtensionAPI, options?: WorkersExte
       // Refresh worker tool metadata with the enabled agents for this cwd before the system prompt is built.
       const workerAugmentation = await resolveWorkerToolAugmentation(runtime, ctx.cwd);
       pi.registerTool(createWorkerToolDefinition(runtime, delivery, workerAugmentation));
+      deactivateWorkerOnlyToolsFromParent(pi);
+   });
+
+   pi.on("before_agent_start", async (_event, ctx) => {
+      if (ctx.hasUI && ctx.mode !== "print") {
+         deactivateWorkerOnlyToolsFromParent(pi);
+      }
    });
 
    pi.on("agent_end", flushDeferredResults);

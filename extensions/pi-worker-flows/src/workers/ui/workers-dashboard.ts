@@ -6,24 +6,24 @@ import * as path from "node:path";
 import type { ExtensionCommandContext, KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
 import type { Component, Focusable, TUI } from "@earendil-works/pi-tui";
 import { Input, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import type { Job } from "../domain.js";
+import type { Task } from "../domain.js";
 import type { WorkersRuntime } from "../extension.js";
 import { runTool } from "../runtime.js";
-import { JobRegistry } from "../services/job-registry.js";
+import { TaskRegistry } from "../services/task-registry.js";
 import { WorkerManager } from "../services/worker-manager.js";
 import { enterAlternateScreen } from "../../shared/alternate-screen.ts";
 import { copyToClipboard } from "../../shared/clipboard.ts";
 import { formatDuration } from "./formatters.js";
-import { buildCopiedTranscriptPayload, openJobTakeover } from "./takeover.js";
+import { buildCopiedTranscriptPayload, openTaskTakeover } from "./takeover.js";
 import { readPiSessionTranscript } from "./session-transcript.js";
 
-export type DashboardTab = "jobs" | "takeover";
+export type DashboardTab = "tasks" | "takeover";
 
 export interface WorkersDashboardState {
    activeTab: DashboardTab;
    selectedIndex: number;
    isOpen: boolean;
-   takeoverJobId?: string;
+   takeoverTaskId?: string;
    takeoverInput?: string;
 }
 
@@ -36,20 +36,21 @@ export interface KeyInput {
 
 export interface DashboardContext {
    itemCount?: number;
-   jobs?: Array<{ id: string; [key: string]: any }>;
+   tasks?: Array<{ id: string; [key: string]: any }>;
    inputText?: string;
 }
 
 export type DashboardIntent =
    | { type: "open_takeover"; id: string }
    | { type: "takeover_control"; id: string; text: string; mode: "steer" | "followUp" }
-   | { type: "cancel_job"; id: string }
+   | { type: "recover_task"; id: string }
+   | { type: "cancel_task"; id: string }
    | { type: "copy_transcript"; id: string }
    | { type: "copy_path"; path: string }
    | { type: "close" }
    | { type: "none" };
 
-export const DASHBOARD_TABS: DashboardTab[] = ["jobs", "takeover"];
+export const DASHBOARD_TABS: DashboardTab[] = ["tasks", "takeover"];
 
 export function wrapIndex(index: number, delta: number, length: number): number {
    if (length <= 0) return 0;
@@ -58,7 +59,7 @@ export function wrapIndex(index: number, delta: number, length: number): number 
 
 export function createWorkersDashboardState(initial?: Partial<WorkersDashboardState>): WorkersDashboardState {
    return {
-      activeTab: "jobs",
+      activeTab: "tasks",
       selectedIndex: 0,
       isOpen: true,
       ...initial
@@ -70,8 +71,8 @@ export function computeWorkersDashboardBodyHeight(terminalRows: number, helpLine
    return Math.max(1, terminalRows - fixedLineCount);
 }
 
-export function computeWorkersDashboardPaneHeights(bodyHeight: number): { jobs: number } {
-   return { jobs: Math.max(1, bodyHeight) };
+export function computeWorkersDashboardPaneHeights(bodyHeight: number): { tasks: number } {
+   return { tasks: Math.max(1, bodyHeight) };
 }
 
 export function wrapDashboardHelp(text: string, width: number, theme: Theme): string[] {
@@ -88,7 +89,7 @@ export function reduceWorkersDashboardKey(
    context?: DashboardContext
 ): { state: WorkersDashboardState; intent?: DashboardIntent } {
    const key = input.key.toLowerCase();
-   const jobCount = context?.itemCount ?? context?.jobs?.length ?? 0;
+   const taskCount = context?.itemCount ?? context?.tasks?.length ?? 0;
 
    if (key === "escape" || key === "q") {
       return {
@@ -101,7 +102,7 @@ export function reduceWorkersDashboardKey(
       return {
          state: {
             ...state,
-            activeTab: state.activeTab === "jobs" ? "takeover" : "jobs",
+            activeTab: state.activeTab === "tasks" ? "takeover" : "tasks",
             selectedIndex: 0
          }
       };
@@ -111,7 +112,7 @@ export function reduceWorkersDashboardKey(
       return {
          state: {
             ...state,
-            selectedIndex: jobCount > 0 ? wrapIndex(state.selectedIndex, 1, jobCount) : state.selectedIndex + 1
+            selectedIndex: taskCount > 0 ? wrapIndex(state.selectedIndex, 1, taskCount) : state.selectedIndex + 1
          }
       };
    }
@@ -121,37 +122,37 @@ export function reduceWorkersDashboardKey(
          state: {
             ...state,
             selectedIndex:
-               jobCount > 0 ? wrapIndex(state.selectedIndex, -1, jobCount) : Math.max(0, state.selectedIndex - 1)
+               taskCount > 0 ? wrapIndex(state.selectedIndex, -1, taskCount) : Math.max(0, state.selectedIndex - 1)
          }
       };
    }
 
    if (key === "enter") {
-      if (input.alt && state.activeTab === "jobs" && context?.jobs?.[state.selectedIndex]) {
-         const job = context.jobs[state.selectedIndex];
+      if (input.alt && state.activeTab === "tasks" && context?.tasks?.[state.selectedIndex]) {
+         const task = context.tasks[state.selectedIndex];
          return {
             state,
             intent: {
                type: "takeover_control",
-               id: job.id,
+               id: task.id,
                text: context.inputText ?? state.takeoverInput ?? "",
                mode: "followUp"
             }
          };
       }
 
-      if (state.activeTab === "jobs") {
-         const job = context?.jobs?.[state.selectedIndex];
-         return job ? { state, intent: { type: "open_takeover", id: job.id } } : { state };
+      if (state.activeTab === "tasks") {
+         const task = context?.tasks?.[state.selectedIndex];
+         return task ? { state, intent: { type: "open_takeover", id: task.id } } : { state };
       }
 
-      const jobId = state.takeoverJobId;
-      if (jobId) {
+      const taskId = state.takeoverTaskId;
+      if (taskId) {
          return {
             state,
             intent: {
                type: "takeover_control",
-               id: jobId,
+               id: taskId,
                text: context?.inputText ?? state.takeoverInput ?? "",
                mode: "steer"
             }
@@ -159,23 +160,34 @@ export function reduceWorkersDashboardKey(
       }
    }
 
-   if ((key === "c" || key === "x") && context?.jobs?.[state.selectedIndex]) {
+   if (key === "r" && context?.tasks?.[state.selectedIndex]) {
       return {
          state,
-         intent: { type: "cancel_job", id: context.jobs[state.selectedIndex].id }
+         intent: { type: "recover_task", id: context.tasks[state.selectedIndex].id }
       };
    }
 
-   if (key === "s" && context?.jobs?.[state.selectedIndex]) {
+   if (key === "x" && context?.tasks?.[state.selectedIndex]) {
       return {
          state,
-         intent: { type: "copy_transcript", id: context.jobs[state.selectedIndex].id }
+         intent: { type: "cancel_task", id: context.tasks[state.selectedIndex].id }
       };
    }
 
-   if ((key === "y" || key === "p") && context?.jobs?.[state.selectedIndex]) {
-      const job = context.jobs[state.selectedIndex];
-      const sessionPath = job.sessionFile ? path.resolve(job.sessionFile) : job.cwd ? path.resolve(job.cwd) : undefined;
+   if (key === "s" && context?.tasks?.[state.selectedIndex]) {
+      return {
+         state,
+         intent: { type: "copy_transcript", id: context.tasks[state.selectedIndex].id }
+      };
+   }
+
+   if (key === "y" && context?.tasks?.[state.selectedIndex]) {
+      const task = context.tasks[state.selectedIndex];
+      const sessionPath = task.sessionFile
+         ? path.resolve(task.sessionFile)
+         : task.cwd
+           ? path.resolve(task.cwd)
+           : undefined;
       if (sessionPath) {
          return {
             state,
@@ -187,7 +199,7 @@ export function reduceWorkersDashboardKey(
    return { state };
 }
 
-export type DashboardPickResult = { type: "takeover"; jobId: string };
+export type DashboardPickResult = { type: "takeover"; taskId: string };
 
 function configuredKeys(keybindings: KeybindingsManager, binding: Parameters<KeybindingsManager["getKeys"]>[0]) {
    return keybindings.getKeys(binding).join("/") || "unbound";
@@ -198,6 +210,8 @@ function statusGlyph(status: string, theme: Theme): string {
       case "running":
       case "pending":
          return theme.fg("warning", "■");
+      case "recoverable":
+         return theme.fg("warning", "↻");
       case "completed":
          return theme.fg("success", "■");
       case "failed":
@@ -213,6 +227,8 @@ function statusWord(status: string, theme: Theme): string {
       case "running":
       case "pending":
          return theme.fg("warning", status);
+      case "recoverable":
+         return theme.fg("warning", "recoverable");
       case "completed":
          return theme.fg("success", status);
       case "failed":
@@ -229,7 +245,7 @@ export class WorkersDashboardScreen implements Component, Focusable {
    private closed = false;
    private _focused = false;
    private ticker: ReturnType<typeof setInterval>;
-   private jobs: Job[] = [];
+   private tasks: Task[] = [];
    private initialSelectionApplied = false;
    private notice?: string;
    private noticeTime = 0;
@@ -261,23 +277,24 @@ export class WorkersDashboardScreen implements Component, Focusable {
 
    private applyInitialSelection() {
       if (this.lastViewedItem) {
-         const index = this.jobs.findIndex((job) => job.id === this.lastViewedItem?.jobId);
+         const index = this.tasks.findIndex((task) => task.id === this.lastViewedItem?.taskId);
          if (index !== -1) {
-            this.state.activeTab = "jobs";
+            this.state.activeTab = "tasks";
             this.state.selectedIndex = index;
             return;
          }
       }
 
-      const running = this.jobs
-         .map((job, index) => ({ job, index }))
-         .filter(({ job }) => job.status === "running" || job.status === "pending")
+      const running = this.tasks
+         .map((task, index) => ({ task, index }))
+         .filter(({ task }) => task.status === "running" || task.status === "pending")
          // oxlint-disable-next-line unicorn/no-array-sort -- ES2022 target does not provide Array.prototype.toSorted.
          .sort(
-            ({ job: left }, { job: right }) => (right.startedAt ?? right.createdAt) - (left.startedAt ?? left.createdAt)
+            ({ task: left }, { task: right }) =>
+               (right.startedAt ?? right.createdAt) - (left.startedAt ?? left.createdAt)
          )[0];
       if (running) {
-         this.state.activeTab = "jobs";
+         this.state.activeTab = "tasks";
          this.state.selectedIndex = running.index;
       }
    }
@@ -285,11 +302,11 @@ export class WorkersDashboardScreen implements Component, Focusable {
    private async refreshData() {
       if (this.closed) return;
       try {
-         const jobs = await runTool(
+         const tasks = await runTool(
             this.runtime,
-            JobRegistry.use((registry) => registry.list())
+            TaskRegistry.use((registry) => registry.list())
          );
-         this.jobs = [...jobs];
+         this.tasks = [...tasks];
          if (!this.initialSelectionApplied) {
             this.initialSelectionApplied = true;
             this.applyInitialSelection();
@@ -335,7 +352,7 @@ export class WorkersDashboardScreen implements Component, Focusable {
             ctrl: false
          },
          {
-            jobs: this.jobs
+            tasks: this.tasks
          }
       );
       this.state = result.state;
@@ -346,10 +363,23 @@ export class WorkersDashboardScreen implements Component, Focusable {
             this.close();
             return;
          }
-         if (intent.type === "cancel_job") {
+         if (intent.type === "recover_task") {
             void runTool(
                this.runtime,
-               WorkerManager.use((manager) => manager.cancelJob(intent.id))
+               WorkerManager.use((manager) => manager.recoverTask(intent.id))
+            )
+               .then(() => {
+                  this.notice = "Worker recovering in place";
+                  this.noticeTime = Date.now();
+                  void this.refreshData();
+               })
+               .catch(() => {});
+            return;
+         }
+         if (intent.type === "cancel_task") {
+            void runTool(
+               this.runtime,
+               WorkerManager.use((manager) => manager.cancelTask(intent.id))
             ).catch(() => {});
             void this.refreshData();
             return;
@@ -362,37 +392,38 @@ export class WorkersDashboardScreen implements Component, Focusable {
             return;
          }
          if (intent.type === "copy_transcript") {
-            void this.copyTranscriptForJob(intent.id);
+            void this.copyTranscriptForTask(intent.id);
             return;
          }
          if (intent.type === "open_takeover") {
-            this.close({ type: "takeover", jobId: intent.id });
+            this.close({ type: "takeover", taskId: intent.id });
             return;
          }
          if (intent.type === "takeover_control") {
+            // Takeover input resumes the selected task's session with the typed text.
             void runTool(
                this.runtime,
-               WorkerManager.use((manager) => manager.controlJob(intent.id, intent.text, intent.mode))
+               WorkerManager.use((manager) => manager.recoverTask(intent.id, { note: intent.text }))
             ).catch(() => {});
-            this.close({ type: "takeover", jobId: intent.id });
+            this.close({ type: "takeover", taskId: intent.id });
             return;
          }
       }
 
-      if (key === "enter" && this.state.activeTab === "jobs") {
-         const job = this.jobs[this.state.selectedIndex];
-         if (job) this.close({ type: "takeover", jobId: job.id });
+      if (key === "enter" && this.state.activeTab === "tasks") {
+         const task = this.tasks[this.state.selectedIndex];
+         if (task) this.close({ type: "takeover", taskId: task.id });
       }
 
       this.tui.requestRender();
    }
 
-   private async copyTranscriptForJob(jobId: string) {
-      const job = this.jobs.find((item) => item.id === jobId);
-      if (!job) return;
-      const transcript = job.transcript ?? (job.sessionFile ? readPiSessionTranscript(job.sessionFile) : []);
-      await copyToClipboard(buildCopiedTranscriptPayload(job, transcript));
-      this.notice = `Copied run transcript for ${job.name ?? jobId}`;
+   private async copyTranscriptForTask(taskId: string) {
+      const task = this.tasks.find((item) => item.id === taskId);
+      if (!task) return;
+      const transcript = task.transcript ?? (task.sessionFile ? readPiSessionTranscript(task.sessionFile) : []);
+      await copyToClipboard(buildCopiedTranscriptPayload(task, transcript));
+      this.notice = `Copied run transcript for ${task.name ?? taskId}`;
       this.noticeTime = Date.now();
       void this.refreshData();
    }
@@ -415,24 +446,24 @@ export class WorkersDashboardScreen implements Component, Focusable {
    render(width: number): string[] {
       const rows = this.tui.terminal.rows || 30;
       const innerWidth = width - 2;
-      const helpText = `  ${configuredKeys(this.keybindings, "tui.select.up")}/${configuredKeys(this.keybindings, "tui.select.down")}/jk: select · Enter: inspect run · s: copy transcript · y: copy path · x: cancel run · Esc: close`;
+      const helpText = `  ${configuredKeys(this.keybindings, "tui.select.up")}/${configuredKeys(this.keybindings, "tui.select.down")}/jk: select · Enter: inspect task · r: recover · s: copy transcript · y: copy path · x: cancel task · Esc: close`;
       const helpLines = wrapDashboardHelp(helpText, width, this.theme);
       const bodyHeight = computeWorkersDashboardBodyHeight(rows, helpLines.length);
       const paneHeights = computeWorkersDashboardPaneHeights(bodyHeight);
-      const activeJobs = this.jobs.filter((job) => job.status === "running" || job.status === "pending").length;
+      const activeTasks = this.tasks.filter((task) => task.status === "running" || task.status === "pending").length;
       const showNotice = this.notice && Date.now() - this.noticeTime < 3500;
       const headerLeft = this.theme.fg("accent", this.theme.bold("Worker Runs"));
       const headerRight = showNotice
          ? this.theme.fg("success", this.theme.bold(this.notice!))
-         : this.theme.fg("muted", `${this.jobs.length} run${this.jobs.length === 1 ? "" : "s"}`);
+         : this.theme.fg("muted", `${this.tasks.length} run${this.tasks.length === 1 ? "" : "s"}`);
       const headerPad = Math.max(1, width - visibleWidth(headerLeft) - visibleWidth(headerRight) - 4);
       const lines = [truncateToWidth(`  ${headerLeft}${" ".repeat(headerPad)}${headerRight}  `, width)];
       const divider = this.theme.fg("border", "│");
-      const title = `Runs (${activeJobs}/${this.jobs.length})`;
+      const title = `Tasks (${activeTasks}/${this.tasks.length})`;
       lines.push(this.theme.fg("border", "╭") + this.borderSegment(innerWidth, title) + this.theme.fg("border", "╮"));
-      const jobRows = this.renderJobRows(innerWidth, paneHeights.jobs, this.state.activeTab === "jobs");
-      for (let index = 0; index < paneHeights.jobs; index++) {
-         lines.push(divider + this.pad(jobRows[index] ?? "", innerWidth) + divider);
+      const taskRows = this.renderTaskRows(innerWidth, paneHeights.tasks, this.state.activeTab === "tasks");
+      for (let index = 0; index < paneHeights.tasks; index++) {
+         lines.push(divider + this.pad(taskRows[index] ?? "", innerWidth) + divider);
       }
       lines.push(
          this.theme.fg("border", "╰") +
@@ -443,31 +474,31 @@ export class WorkersDashboardScreen implements Component, Focusable {
       return lines;
    }
 
-   private renderJobRows(width: number, height: number, focused = true): string[] {
+   private renderTaskRows(width: number, height: number, focused = true): string[] {
       if (height <= 0) return [];
-      if (this.jobs.length === 0) return [this.theme.fg("dim", "  (no worker runs)")];
+      if (this.tasks.length === 0) return [this.theme.fg("dim", "  (no worker runs)")];
 
-      const selectedIndex = Math.max(0, Math.min(this.state.selectedIndex, this.jobs.length - 1));
+      const selectedIndex = Math.max(0, Math.min(this.state.selectedIndex, this.tasks.length - 1));
       if (focused) this.state.selectedIndex = selectedIndex;
       const start =
-         this.jobs.length > height
-            ? Math.min(Math.max(0, selectedIndex - Math.floor(height / 2)), this.jobs.length - height)
+         this.tasks.length > height
+            ? Math.min(Math.max(0, selectedIndex - Math.floor(height / 2)), this.tasks.length - height)
             : 0;
-      const visible = this.jobs.slice(start, start + height);
+      const visible = this.tasks.slice(start, start + height);
       const now = Date.now();
 
-      return visible.map((job, offset) => {
+      return visible.map((task, offset) => {
          const index = start + offset;
          const selected = focused && index === selectedIndex;
          const marker = selected ? this.theme.fg("accent", "❯") : " ";
-         const titleText = job.name ?? job.promptOrCommand.slice(0, 35);
+         const titleText = task.name ?? task.promptOrCommand.slice(0, 35);
          const title = selected ? this.theme.fg("accent", titleText) : this.theme.fg("text", titleText);
-         const agent = job.agent ? this.theme.fg("dim", ` · ${job.agent}`) : "";
-         const left = ` ${marker} ${statusGlyph(job.status, this.theme)} ${title}${agent} ${this.theme.fg("dim", job.id)}`;
-         const elapsedMs = job.settledAt
-            ? job.settledAt - (job.startedAt ?? job.createdAt)
-            : now - (job.startedAt ?? job.createdAt);
-         const right = `${this.theme.fg("muted", formatDuration(elapsedMs))} · ${statusWord(job.status, this.theme)} `;
+         const worker = task.worker ? this.theme.fg("dim", ` · ${task.worker}`) : "";
+         const left = ` ${marker} ${statusGlyph(task.status, this.theme)} ${title}${worker} ${this.theme.fg("dim", task.id)}`;
+         const elapsedMs = task.settledAt
+            ? task.settledAt - (task.startedAt ?? task.createdAt)
+            : now - (task.startedAt ?? task.createdAt);
+         const right = `${this.theme.fg("muted", formatDuration(elapsedMs))} · ${statusWord(task.status, this.theme)} `;
          const leftMax = Math.max(0, width - visibleWidth(right) - 2);
          const leftTruncated = truncateToWidth(left, leftMax);
          const gap = Math.max(2, width - visibleWidth(leftTruncated) - visibleWidth(right));
@@ -484,7 +515,7 @@ export async function openWorkersDashboard(ctx: ExtensionCommandContext, runtime
    if (!ctx.hasUI || typeof ctx.ui?.custom !== "function") return;
 
    let lastViewedItem: DashboardPickResult | null = null;
-   const selectionState: Partial<WorkersDashboardState> = { activeTab: "jobs", selectedIndex: 0 };
+   const selectionState: Partial<WorkersDashboardState> = { activeTab: "tasks", selectedIndex: 0 };
 
    async function iterate(): Promise<void> {
       let releaseAlternateScreen: (() => void) | undefined;
@@ -512,7 +543,7 @@ export async function openWorkersDashboard(ctx: ExtensionCommandContext, runtime
 
       if (!picked) return;
       lastViewedItem = picked;
-      await openJobTakeover(ctx, runtime, picked.jobId);
+      await openTaskTakeover(ctx, runtime, picked.taskId);
       return iterate();
    }
 

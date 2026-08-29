@@ -1,15 +1,15 @@
 import { Context, Deferred, Effect, Layer } from "effect";
 import { deriveChildSessionDirectory } from "../../shared/child-session-dir.ts";
-import { JobRegistry } from "../services/job-registry.js";
+import { TaskRegistry } from "../services/task-registry.js";
 import { WorkerManager } from "../services/worker-manager.js";
 import { ParentSessionActivationError } from "../domain.js";
 import {
-   WorkersJobPersistence,
-   convertInterruptedJob,
+   WorkersTaskPersistence,
+   convertInterruptedTask,
    createRegistryChangeWriter,
-   computeNextWorkerSeq
-} from "../services/workers-job-persistence.js";
-import type { Job } from "../domain.js";
+   computeNextTaskSeq
+} from "../services/workers-task-persistence.js";
+import type { Task } from "../domain.js";
 
 export type ParentSessionGateState = "idle" | "activating" | "ready" | "failed";
 
@@ -119,7 +119,7 @@ export class ParentSessionGate extends Context.Service<ParentSessionGate, Parent
  * another. It is responsible for:
  * - disabling/unsubscribing the previous persistence listener and flushing it
  * - clearing session-scoped extension state (handled by the caller)
- * - replacing the JobRegistry atomically with the recovered manifest
+ * - replacing the TaskRegistry atomically with the recovered manifest
  * - reserving worker IDs from the validated full index
  * - persisting the recovered manifest once
  * - enabling exactly one change listener for the new session
@@ -129,8 +129,8 @@ export class ParentSessionGate extends Context.Service<ParentSessionGate, Parent
 export const activateParentSession = Effect.fn("activateParentSession")(function* (
    parentSessionFile: string | undefined | null
 ) {
-   const persistence = yield* WorkersJobPersistence;
-   const registry = yield* JobRegistry;
+   const persistence = yield* WorkersTaskPersistence;
+   const registry = yield* TaskRegistry;
    const workerManager = yield* WorkerManager;
    const gate = yield* ParentSessionGate;
 
@@ -170,21 +170,21 @@ export const activateParentSession = Effect.fn("activateParentSession")(function
          const index = yield* persistence.load();
 
          // 5. Build the replacement registry contents in memory.
-         const restored: Job[] = [];
+         const restored: Task[] = [];
          for (const stored of index.jobs) {
             const isTerminal =
                stored.status === "completed" || stored.status === "failed" || stored.status === "cancelled";
 
-            const job: Job = isTerminal ? stored : convertInterruptedJob(stored);
+            const task: Task = isTerminal ? stored : convertInterruptedTask(stored);
 
-            restored.push(job);
+            restored.push(task);
          }
 
-         // 6. Atomic replace: no per-job onChange notifications, no partial persistence.
+         // 6. Atomic replace: no per-Task onChange notifications, no partial persistence.
          yield* registry.replaceAll(restored);
 
-         // 7. Reserve worker IDs from the validated full index.
-         yield* workerManager.reserveWorkerSeq(index.reservedWorkerSeq ?? computeNextWorkerSeq(restored));
+         // 7. Reserve task IDs from the validated full index.
+         yield* workerManager.reserveTaskSeq(index.reservedTaskSeq ?? computeNextTaskSeq(restored));
 
          // 8. Persist the recovered manifest once, but do not recreate a missing/corrupt file as empty.
          if (index.source !== "missing" || restored.length > 0) {
@@ -237,7 +237,7 @@ export const activateParentSession = Effect.fn("activateParentSession")(function
    );
 });
 
-export const configureAndRecoverJobs = activateParentSession;
+export const configureAndRecoverTasks = activateParentSession;
 
 /**
  * Safe first-worker/session-file readiness refresh.
@@ -250,7 +250,7 @@ export const configureAndRecoverJobs = activateParentSession;
 export const ensureParentSessionRecovery = Effect.fn("ensureParentSessionRecovery")(function* (
    parentSessionFile: string | undefined | null
 ) {
-   const persistence = yield* WorkersJobPersistence;
+   const persistence = yield* WorkersTaskPersistence;
    const gate = yield* ParentSessionGate;
 
    const currentTarget = yield* persistence.currentTarget();
@@ -277,7 +277,7 @@ export const ensureParentSessionRecovery = Effect.fn("ensureParentSessionRecover
 });
 
 export const flushPendingWrites = Effect.fn("flushPendingWrites")(function* () {
-   const persistence = yield* WorkersJobPersistence;
+   const persistence = yield* WorkersTaskPersistence;
    const writer = yield* persistence.takeChangeWriter();
    if (writer) {
       yield* Effect.promise(() => writer.flush());
@@ -301,9 +301,9 @@ export const flushPendingWrites = Effect.fn("flushPendingWrites")(function* () {
  * outside of activateParentSession. It ensures at most one listener is active
  * by storing/unsubscribing the previous one in the persistence service.
  */
-export const startJobPersistenceListener = Effect.fn("startJobPersistenceListener")(function* () {
-   const persistence = yield* WorkersJobPersistence;
-   const registry = yield* JobRegistry;
+export const startTaskPersistenceListener = Effect.fn("startTaskPersistenceListener")(function* () {
+   const persistence = yield* WorkersTaskPersistence;
+   const registry = yield* TaskRegistry;
 
    const previousUnsubscribe = yield* persistence.takeChangeListener();
    if (previousUnsubscribe) {

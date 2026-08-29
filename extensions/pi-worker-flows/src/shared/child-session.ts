@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import {
    DefaultResourceLoader,
    getAgentDir,
@@ -15,6 +15,40 @@ const CHILD_SHUTDOWN_TIMEOUT_MS = 5_000;
 
 /** Tools that headless children must not receive. */
 export const CHILD_EXCLUDED_TOOL_NAMES = ["workflow", "ask_user"] as const;
+export const EXA_TOOL_NAMES = new Set([
+   "web_search_exa",
+   "web_search_advanced_exa",
+   "web_fetch_exa",
+   "deep_search_exa"
+]);
+
+/** Filter worker-only tools out of the parent session active tool list. */
+export function filterParentSessionTools(activeTools: readonly string[]): string[] {
+   return activeTools.filter((name) => !EXA_TOOL_NAMES.has(name));
+}
+
+/** Deactivate worker-only tools in the parent session if currently active. */
+export function deactivateWorkerOnlyToolsFromParent(pi: {
+   getActiveTools(): string[];
+   setActiveTools(names: string[]): void;
+}): void {
+   try {
+      const active = pi.getActiveTools();
+      const filtered = filterParentSessionTools(active);
+      if (filtered.length !== active.length) {
+         pi.setActiveTools(filtered);
+      }
+   } catch {
+      // ignore
+   }
+}
+
+/** Resolve explicitly requested web tools to the bundled Exa extension. */
+export function getChildExtensionPathsForTools(tools: readonly string[], agentDir = getAgentDir()): string[] {
+   if (!tools.some((tool) => EXA_TOOL_NAMES.has(tool))) return [];
+   const exaExtensionPath = path.join(agentDir, "extensions", "pi-exa", "index.ts");
+   return existsSync(exaExtensionPath) ? [exaExtensionPath] : [];
+}
 
 /** Build the denylist for headless children. */
 export function childToolPolicy() {
@@ -31,6 +65,8 @@ export interface ChildResourceOptions {
    readonly appendSystemPrompt?: ReadonlyArray<string>;
    /** Optional Pi agent directory override. */
    readonly agentDir?: string;
+   /** Explicit extensions needed by selected child tools. */
+   readonly additionalExtensionPaths?: ReadonlyArray<string>;
 }
 
 /**
@@ -50,6 +86,7 @@ export async function createChildResources(options: ChildResourceOptions) {
       agentDir,
       settingsManager,
       noExtensions: true,
+      ...(options.additionalExtensionPaths ? { additionalExtensionPaths: [...options.additionalExtensionPaths] } : {}),
       ...(options.appendSystemPrompt ? { appendSystemPrompt: [...options.appendSystemPrompt] } : {})
    });
    await loader.reload();

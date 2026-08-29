@@ -551,7 +551,7 @@ export class WorkflowDashboard {
    private detailFocus: DetailFocus = "phases";
    private transcriptScroll = 0;
    private followTail = true;
-   private showThinking = true;
+   private showThinking = false;
    private showSystemPrompt = false;
    private transcriptRowCount = 0;
    private transcriptViewportSize = 1;
@@ -1078,7 +1078,7 @@ export class WorkflowDashboard {
                this.detailFocus = "phases";
             } else if (confirm && this.selectedAgent()) {
                this.transcriptScroll = 0;
-               this.showThinking = true;
+               this.showThinking = false;
                this.showSystemPrompt = this.selectedAgent()?.profile === "summary";
                this.followTail = true;
                this.view = "transcript";
@@ -1265,7 +1265,7 @@ export class WorkflowDashboard {
    private panel(title: string, rows: string[], width: number, height: number): string[] {
       const theme = this.theme;
       const inner = Math.max(0, width - 2);
-      const border = (s: string) => theme.fg("borderMuted", s);
+      const border = (s: string) => theme.fg("border", s);
       const titleText = truncateToWidth(` ${title} `, Math.max(0, inner - 2));
       const dashes = Math.max(0, inner - visibleWidth(titleText) - 1);
       const lines: string[] = [border("╭─") + titleText + border("─".repeat(dashes) + "╮")];
@@ -1280,7 +1280,10 @@ export class WorkflowDashboard {
       return lines;
    }
 
-   /** Scroll window keeping `selected` visible. */
+   public isListView(): boolean {
+      return this.view === "list";
+   }
+
    private windowed<T>(items: T[], selected: number, size: number): { items: T[]; offset: number } {
       if (items.length <= size) return { items, offset: 0 };
       const offset = Math.max(0, Math.min(selected - Math.floor(size / 2), items.length - size));

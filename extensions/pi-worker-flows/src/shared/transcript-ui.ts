@@ -58,6 +58,7 @@ const TOOL_MARKER_COLORS: Partial<Record<string, TranscriptColor>> = {
    grep: "toolTitle",
    ffgrep: "customMessageText",
    bash: "mdCode",
+   powershell: "mdCode",
    structured_output: "mdHeading"
 };
 
@@ -88,7 +89,7 @@ const RESULT_COUNT_TOOLS = new Set([
    "cortex_list"
 ]);
 
-const LINE_COUNT_TOOLS = new Set(["read", "write", "edit", "ls", "bash", "web_fetch_exa", "web_reader"]);
+const LINE_COUNT_TOOLS = new Set(["read", "write", "edit", "ls", "bash", "powershell", "web_fetch_exa", "web_reader"]);
 
 export function toolMarkerColor(toolName: string | undefined): TranscriptColor {
    const known = toolName ? TOOL_MARKER_COLORS[toolName] : undefined;
@@ -235,6 +236,7 @@ export function toolArgumentSummary(toolName: string, args: unknown): string {
          case "ls":
             return [textArgument(args, "path")];
          case "bash":
+         case "powershell":
          case "worker_list":
             return [textArgument(args, "command")];
          case "worker_spawn":
@@ -413,7 +415,7 @@ export function buildTranscriptRows(
       }
       const label = entry.type === "user" ? "User" : entry.type === "assistant" ? "Assistant" : "Thinking";
       const color: TranscriptColor = entry.type === "user" ? "accent" : entry.type === "assistant" ? "success" : "dim";
-      if (entry.type === "thinking" && options.showThinking === false) {
+      if (entry.type === "thinking" && !options.showThinking) {
          rows.push(` ${theme.fg(color, "■")} ${theme.bold(theme.fg(color, `${label}...`))}`);
       } else {
          rows.push(` ${theme.fg(color, "■")} ${theme.bold(theme.fg(color, label))}`);

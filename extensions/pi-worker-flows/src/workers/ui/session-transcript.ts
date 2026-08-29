@@ -1,5 +1,5 @@
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import type { JobTranscriptContent, JobTranscriptEntry } from "../domain.js";
+import type { TaskTranscriptContent, TaskTranscriptEntry } from "../domain.js";
 
 type SessionMessage = {
    readonly role?: string;
@@ -34,9 +34,9 @@ function contentText(content: unknown): string {
       .join("\n");
 }
 
-function transcriptContent(content: unknown): ReadonlyArray<JobTranscriptContent> {
+function transcriptContent(content: unknown): ReadonlyArray<TaskTranscriptContent> {
    if (!Array.isArray(content)) return [];
-   return content.flatMap((block): JobTranscriptContent[] => {
+   return content.flatMap((block): TaskTranscriptContent[] => {
       if (!block || typeof block !== "object") return [];
       const value = block as { readonly type?: string; readonly text?: unknown; readonly mimeType?: unknown };
       if (value.type === "text" && typeof value.text === "string") return [{ type: "text", text: value.text }];
@@ -47,7 +47,7 @@ function transcriptContent(content: unknown): ReadonlyArray<JobTranscriptContent
    });
 }
 
-function messageEntries(entry: { readonly timestamp?: string; readonly message?: unknown }): JobTranscriptEntry[] {
+function messageEntries(entry: { readonly timestamp?: string; readonly message?: unknown }): TaskTranscriptEntry[] {
    if (!entry.message || typeof entry.message !== "object") return [];
    const message = entry.message as SessionMessage;
    const timestamp = timestampOf(entry, message);
@@ -58,7 +58,7 @@ function messageEntries(entry: { readonly timestamp?: string; readonly message?:
 
    if (message.role === "assistant") {
       const entries = Array.isArray(message.content)
-         ? message.content.flatMap((block): JobTranscriptEntry[] => {
+         ? message.content.flatMap((block): TaskTranscriptEntry[] => {
               if (!block || typeof block !== "object") return [];
               const value = block as {
                  readonly type?: string;
@@ -148,7 +148,7 @@ export function getPiSessionContextTokens(sessionFile: string): number | undefin
 }
 
 /** Read the active Pi worker conversation directly from its persisted JSONL session. */
-export function readPiSessionTranscript(sessionFile: string): ReadonlyArray<JobTranscriptEntry> {
+export function readPiSessionTranscript(sessionFile: string): ReadonlyArray<TaskTranscriptEntry> {
    try {
       const session = SessionManager.open(sessionFile);
       return session.getBranch().flatMap((entry) => (entry.type === "message" ? messageEntries(entry) : []));

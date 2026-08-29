@@ -1,14 +1,14 @@
-import type { Job, JobStatus, JobTranscriptContent, JobTranscriptEntry } from "../domain.js";
+import type { Task, TaskStatus, TaskTranscriptContent, TaskTranscriptEntry } from "../domain.js";
 
-export const WORKERS_JOB_MANIFEST_VERSION = 1;
+export const WORKERS_TASK_MANIFEST_VERSION = 1;
 
 /**
- * Mutable bounds and retention policy for persisted job manifests.
+ * Mutable bounds and retention policy for persisted Task manifests.
  *
  * Exported as a mutable object so tests can temporarily tighten limits and
  * reset them with {@link resetManifestLimits}.
  */
-export const WORKERS_JOB_MANIFEST_LIMITS = {
+export const WORKERS_TASK_MANIFEST_LIMITS = {
    /** Registry-level cap on tracked jobs. */
    maxTrackedJobs: 64,
 
@@ -24,7 +24,7 @@ export const WORKERS_JOB_MANIFEST_LIMITS = {
    /** Maximum nesting depth inside any normalized payload. */
    maxPersistedNestingDepth: 8,
 
-   /** Soft ceiling for a single persisted job record. */
+   /** Soft ceiling for a single persisted Task record. */
    maxPersistedJobBytes: 65536,
 
    /** Hard ceiling for the whole serialized manifest. */
@@ -36,14 +36,14 @@ export const WORKERS_JOB_MANIFEST_LIMITS = {
 
 /** Reset all manifest limits and retention constants to their defaults. */
 export function resetManifestLimits(): void {
-   WORKERS_JOB_MANIFEST_LIMITS.maxTrackedJobs = 64;
-   WORKERS_JOB_MANIFEST_LIMITS.maxTerminalAgeMs = 30 * 24 * 60 * 60 * 1000;
-   WORKERS_JOB_MANIFEST_LIMITS.maxPersistedStringChars = 8192;
-   WORKERS_JOB_MANIFEST_LIMITS.maxPersistedArrayLength = 64;
-   WORKERS_JOB_MANIFEST_LIMITS.maxPersistedNestingDepth = 8;
-   WORKERS_JOB_MANIFEST_LIMITS.maxPersistedJobBytes = 65536;
-   WORKERS_JOB_MANIFEST_LIMITS.maxPersistedManifestBytes = 1024 * 1024;
-   WORKERS_JOB_MANIFEST_LIMITS.persistDebounceMs = 50;
+   WORKERS_TASK_MANIFEST_LIMITS.maxTrackedJobs = 64;
+   WORKERS_TASK_MANIFEST_LIMITS.maxTerminalAgeMs = 30 * 24 * 60 * 60 * 1000;
+   WORKERS_TASK_MANIFEST_LIMITS.maxPersistedStringChars = 8192;
+   WORKERS_TASK_MANIFEST_LIMITS.maxPersistedArrayLength = 64;
+   WORKERS_TASK_MANIFEST_LIMITS.maxPersistedNestingDepth = 8;
+   WORKERS_TASK_MANIFEST_LIMITS.maxPersistedJobBytes = 65536;
+   WORKERS_TASK_MANIFEST_LIMITS.maxPersistedManifestBytes = 1024 * 1024;
+   WORKERS_TASK_MANIFEST_LIMITS.persistDebounceMs = 50;
 }
 
 function byteLength(value: unknown): number {
@@ -60,16 +60,16 @@ export interface ManifestSummary {
 }
 
 /** Persisted representation of the jobs tracked for a parent session. */
-export interface WorkersJobIndex {
+export interface WorkersTaskIndex {
    readonly version: number;
    readonly parentSessionFile?: string;
    readonly writtenAt?: number;
    /** Distinguishes a valid empty index from a missing/corrupt one. */
    readonly source?: "valid" | "missing";
-   /** Highest worker sequence number used by the parent session, independent of retained jobs. */
-   readonly reservedWorkerSeq?: number;
+   /** Highest reserved task sequence used by the parent session, independent of retained tasks. */
+   readonly reservedTaskSeq?: number;
    readonly summary?: ManifestSummary;
-   readonly jobs: ReadonlyArray<Job>;
+   readonly jobs: ReadonlyArray<Task>;
 }
 
 type JsonPrimitive = string | number | boolean | null;
@@ -154,15 +154,15 @@ function truncateString(value: string, maxLength: number, state: NormalizationSt
 }
 
 function boundString(value: string, state: NormalizationState): string {
-   return truncateString(value, WORKERS_JOB_MANIFEST_LIMITS.maxPersistedStringChars, state);
+   return truncateString(value, WORKERS_TASK_MANIFEST_LIMITS.maxPersistedStringChars, state);
 }
 
 function boundStringWithoutAccounting(value: string): string {
-   return truncateString(value, WORKERS_JOB_MANIFEST_LIMITS.maxPersistedStringChars, createRootNormalizationState());
+   return truncateString(value, WORKERS_TASK_MANIFEST_LIMITS.maxPersistedStringChars, createRootNormalizationState());
 }
 
 function boundedMarker(message: string): string {
-   return boundedMetadataText(message, WORKERS_JOB_MANIFEST_LIMITS.maxPersistedStringChars, "[truncated]");
+   return boundedMetadataText(message, WORKERS_TASK_MANIFEST_LIMITS.maxPersistedStringChars, "[truncated]");
 }
 
 function truncatedMarker(message: string): { readonly [TRUNCATED_KEY]: string } {
@@ -224,7 +224,7 @@ export function toPersistableValue(value: unknown, ctx: NormalizeContext, state:
          return boundString((value as Date).toISOString(), state);
       }
 
-      if (ctx.depth >= WORKERS_JOB_MANIFEST_LIMITS.maxPersistedNestingDepth) {
+      if (ctx.depth >= WORKERS_TASK_MANIFEST_LIMITS.maxPersistedNestingDepth) {
          state.truncated = true;
          return truncatedMarker("max nesting depth exceeded");
       }
@@ -238,7 +238,7 @@ export function toPersistableValue(value: unknown, ctx: NormalizeContext, state:
 
          try {
             if (Array.isArray(value)) {
-               const max = WORKERS_JOB_MANIFEST_LIMITS.maxPersistedArrayLength;
+               const max = WORKERS_TASK_MANIFEST_LIMITS.maxPersistedArrayLength;
                const out: JsonValue[] = [];
                for (let i = 0; i < Math.min(value.length, max); i++) {
                   out.push(
@@ -301,76 +301,76 @@ function createRootNormalizationState(): NormalizationState {
    return { truncated: false, droppedStringChars: 0, droppedArrayItems: 0 };
 }
 
-/** Result of normalizing a single job for persistence. */
-export interface NormalizedJobResult {
-   readonly job: Job;
+/** Result of normalizing a single Task for persistence. */
+export interface NormalizedTaskResult {
+   readonly task: Task;
    readonly truncated: boolean;
    readonly droppedStringChars: number;
    readonly droppedArrayItems: number;
 }
 
 /**
- * Create a bounded, JSON-safe persisted copy of a job while keeping child
+ * Create a bounded, JSON-safe persisted copy of a Task while keeping child
  * session references and the captured worker system prompt.
  */
-export function normalizePersistedJob(job: Job): NormalizedJobResult {
+export function normalizePersistedTask(task: Task): NormalizedTaskResult {
    const state = createRootNormalizationState();
 
    const normalizedResultData =
-      job.resultData !== undefined
-         ? (toPersistableValue(job.resultData, { depth: 0, seen: new Set(), path: "resultData" }, state) as unknown)
+      task.resultData !== undefined
+         ? (toPersistableValue(task.resultData, { depth: 0, seen: new Set(), path: "resultData" }, state) as unknown)
          : undefined;
 
-   const normalizedErrorText = job.errorText !== undefined ? boundString(job.errorText, state) : undefined;
+   const normalizedErrorText = task.errorText !== undefined ? boundString(task.errorText, state) : undefined;
    const normalizedTranscript =
-      job.transcript === undefined
+      task.transcript === undefined
          ? undefined
          : (toPersistableValue(
-              job.transcript,
+              task.transcript,
               { depth: 0, seen: new Set(), path: "transcript" },
               state
-           ) as unknown as ReadonlyArray<JobTranscriptEntry>);
+           ) as unknown as ReadonlyArray<TaskTranscriptEntry>);
 
-   const normalized: Job = {
-      id: boundString(job.id, state),
-      ownerSessionId: boundString(job.ownerSessionId, state),
-      name: job.name === null || job.name === undefined ? job.name : boundString(job.name, state),
-      agent: job.agent === undefined ? undefined : boundString(job.agent, state),
-      model: job.model === undefined ? undefined : boundString(job.model, state),
-      thinking: job.thinking === undefined ? undefined : boundString(job.thinking, state),
-      cwd: job.cwd === undefined ? undefined : boundString(job.cwd, state),
-      context: job.context === undefined ? undefined : boundString(job.context, state),
-      contextTokens: job.contextTokens,
-      batchId: job.batchId === undefined ? undefined : boundString(job.batchId, state),
-      batchSize: job.batchSize,
-      promptOrCommand: boundString(job.promptOrCommand, state),
-      systemPrompt: job.systemPrompt === undefined ? undefined : boundString(job.systemPrompt, state),
-      status: job.status,
-      createdAt: job.createdAt,
-      startedAt: job.startedAt,
-      settledAt: job.settledAt,
+   const normalized: Task = {
+      id: boundString(task.id, state),
+      ownerSessionId: boundString(task.ownerSessionId, state),
+      name: task.name === null || task.name === undefined ? task.name : boundString(task.name, state),
+      worker: task.worker === undefined ? undefined : boundString(task.worker, state),
+      model: task.model === undefined ? undefined : boundString(task.model, state),
+      thinking: task.thinking === undefined ? undefined : boundString(task.thinking, state),
+      cwd: task.cwd === undefined ? undefined : boundString(task.cwd, state),
+      context: task.context === undefined ? undefined : boundString(task.context, state),
+      contextTokens: task.contextTokens,
+      batchId: task.batchId === undefined ? undefined : boundString(task.batchId, state),
+      batchSize: task.batchSize,
+      promptOrCommand: boundString(task.promptOrCommand, state),
+      systemPrompt: task.systemPrompt === undefined ? undefined : boundString(task.systemPrompt, state),
+      status: task.status,
+      createdAt: task.createdAt,
+      startedAt: task.startedAt,
+      settledAt: task.settledAt,
       resultData: normalizedResultData,
       errorText: normalizedErrorText,
       transcript: normalizedTranscript,
-      sessionFile: job.sessionFile === undefined ? undefined : boundString(job.sessionFile, state),
-      sessionId: job.sessionId === undefined ? undefined : boundString(job.sessionId, state)
+      sessionFile: task.sessionFile === undefined ? undefined : boundString(task.sessionFile, state),
+      sessionId: task.sessionId === undefined ? undefined : boundString(task.sessionId, state)
    };
 
-   if (byteLength(normalized) > WORKERS_JOB_MANIFEST_LIMITS.maxPersistedJobBytes) {
+   if (byteLength(normalized) > WORKERS_TASK_MANIFEST_LIMITS.maxPersistedJobBytes) {
       state.truncated = true;
-      let reduced: Job = {
+      let reduced: Task = {
          ...normalized,
-         resultData: truncatedMarker("per-job byte limit exceeded"),
+         resultData: truncatedMarker("per-Task byte limit exceeded"),
          systemPrompt: undefined,
          promptOrCommand: normalized.promptOrCommand.slice(0, Math.min(normalized.promptOrCommand.length, 80))
       };
       // Recompute after reductions; if the prompt still pushes the record over
-      // the limit, drop it entirely so the persisted job remains structural.
-      if (byteLength(reduced) > WORKERS_JOB_MANIFEST_LIMITS.maxPersistedJobBytes) {
+      // the limit, drop it entirely so the persisted Task remains structural.
+      if (byteLength(reduced) > WORKERS_TASK_MANIFEST_LIMITS.maxPersistedJobBytes) {
          reduced = { ...reduced, promptOrCommand: "" };
       }
       return {
-         job: reduced,
+         task: reduced,
          truncated: true,
          droppedStringChars: state.droppedStringChars,
          droppedArrayItems: state.droppedArrayItems
@@ -378,19 +378,19 @@ export function normalizePersistedJob(job: Job): NormalizedJobResult {
    }
 
    return {
-      job: normalized,
+      task: normalized,
       truncated: state.truncated,
       droppedStringChars: state.droppedStringChars,
       droppedArrayItems: state.droppedArrayItems
    };
 }
 
-function isTerminalStatus(status: JobStatus): boolean {
+function isTerminalStatus(status: TaskStatus): boolean {
    return status === "completed" || status === "failed" || status === "cancelled";
 }
 
-function jobAgeMs(job: Job, now: number): number {
-   const anchor = job.settledAt ?? job.createdAt;
+function jobAgeMs(task: Task, now: number): number {
+   const anchor = task.settledAt ?? task.createdAt;
    return now - anchor;
 }
 
@@ -399,17 +399,17 @@ function jobAgeMs(job: Job, now: number): number {
  * preferring the oldest terminal jobs. Also removes terminal jobs that exceed
  * the configured age cap so retention remains finite for background jobs.
  */
-export function pruneTerminalJobsForRetention(
-   jobs: ReadonlyArray<Job>,
+export function pruneTerminalTasksForRetention(
+   jobs: ReadonlyArray<Task>,
    now: number,
-   targetSize: number = WORKERS_JOB_MANIFEST_LIMITS.maxTrackedJobs
-): Job[] {
-   const maxAge = WORKERS_JOB_MANIFEST_LIMITS.maxTerminalAgeMs;
+   targetSize: number = WORKERS_TASK_MANIFEST_LIMITS.maxTrackedJobs
+): Task[] {
+   const maxAge = WORKERS_TASK_MANIFEST_LIMITS.maxTerminalAgeMs;
 
-   const removable: Job[] = [];
-   for (const job of jobs) {
-      if (isTerminalStatus(job.status)) {
-         removable.push(job);
+   const removable: Task[] = [];
+   for (const task of jobs) {
+      if (isTerminalStatus(task.status)) {
+         removable.push(task);
       }
    }
 
@@ -420,25 +420,25 @@ export function pruneTerminalJobsForRetention(
       return a.createdAt - b.createdAt;
    });
 
-   const removedByAge = removable.filter((job) => jobAgeMs(job, now) > maxAge);
+   const removedByAge = removable.filter((task) => jobAgeMs(task, now) > maxAge);
    const removedByCapacity = removable.slice(0, Math.max(0, jobs.length - Math.min(targetSize, jobs.length)));
 
    const removedIds = new Set<string>([
-      ...removedByAge.map((job) => job.id),
-      ...removedByCapacity.map((job) => job.id)
+      ...removedByAge.map((task) => task.id),
+      ...removedByCapacity.map((task) => task.id)
    ]);
 
-   return jobs.filter((job) => !removedIds.has(job.id));
+   return jobs.filter((task) => !removedIds.has(task.id));
 }
 
 /**
  * Compute the highest worker sequence number used by a set of jobs so id
  * monotonicity survives manifest pruning.
  */
-export function computeReservedWorkerSeq(jobs: ReadonlyArray<Job>): number {
+export function computeReservedTaskSeq(jobs: ReadonlyArray<Task>): number {
    let max = 0;
-   for (const job of jobs) {
-      const match = /^worker-(\d+)$/.exec(job.id);
+   for (const task of jobs) {
+      const match = /^(?:worker-|task-)(\d+)$/.exec(task.id);
       if (match) {
          const n = Number(match[1]);
          if (n > max) max = n;
@@ -449,12 +449,12 @@ export function computeReservedWorkerSeq(jobs: ReadonlyArray<Job>): number {
 
 /** Normalized manifest index together with its truncation summary. */
 export interface NormalizedIndexResult {
-   readonly index: WorkersJobIndex;
+   readonly index: WorkersTaskIndex;
    readonly summary: ManifestSummary;
 }
 
-function indexByteSize(index: WorkersJobIndex): number {
-   // This is the exact serialization used by WorkersJobPersistence. Keeping the
+function indexByteSize(index: WorkersTaskIndex): number {
+   // This is the exact serialization used by WorkersTaskPersistence. Keeping the
    // indentation here prevents a compact-size check from producing an oversized
    // pretty-printed file on disk.
    return byteLength(index);
@@ -462,11 +462,11 @@ function indexByteSize(index: WorkersJobIndex): number {
 
 function truncationText(label: string, omitted: number): string {
    const full = `[__truncated: ${label}; ${Math.max(0, omitted)} characters omitted]`;
-   return boundedMetadataText(full, WORKERS_JOB_MANIFEST_LIMITS.maxPersistedStringChars, "[__truncated]");
+   return boundedMetadataText(full, WORKERS_TASK_MANIFEST_LIMITS.maxPersistedStringChars, "[__truncated]");
 }
 
-function compactJobSummaries(job: Job): {
-   readonly job: Job;
+function compactTaskSummaries(task: Task): {
+   readonly task: Task;
    readonly droppedStringChars: number;
    readonly changed: boolean;
 } {
@@ -474,12 +474,12 @@ function compactJobSummaries(job: Job): {
    let changed = false;
 
    const resultData =
-      job.resultData === undefined
+      task.resultData === undefined
          ? undefined
          : (() => {
               changed = true;
               try {
-                 droppedStringChars += JSON.stringify(job.resultData).length;
+                 droppedStringChars += JSON.stringify(task.resultData).length;
               } catch {
                  // The normalizer has already made this value JSON-safe.
               }
@@ -491,7 +491,7 @@ function compactJobSummaries(job: Job): {
       changed = true;
       const result = truncateWithSuffix(
          value,
-         WORKERS_JOB_MANIFEST_LIMITS.maxPersistedStringChars,
+         WORKERS_TASK_MANIFEST_LIMITS.maxPersistedStringChars,
          (dropped) => truncationText(label, dropped),
          "[__truncated]",
          128
@@ -500,85 +500,80 @@ function compactJobSummaries(job: Job): {
       return result.value;
    };
 
-   const errorText = compactText(job.errorText, "errorText");
-   const promptOrCommand = compactText(job.promptOrCommand, "promptOrCommand") ?? truncationText("promptOrCommand", 0);
-   if (promptOrCommand !== job.promptOrCommand) changed = true;
+   const errorText = compactText(task.errorText, "errorText");
+   const promptOrCommand = compactText(task.promptOrCommand, "promptOrCommand") ?? truncationText("promptOrCommand", 0);
+   if (promptOrCommand !== task.promptOrCommand) changed = true;
 
    return {
-      job: {
-         ...job,
-         resultData,
-         errorText,
-         promptOrCommand
-      },
+      task: { ...task, resultData, errorText, promptOrCommand },
       droppedStringChars,
       changed
    };
 }
 
 /**
- * The final per-job form keeps every field needed to identify and restart a job
+ * The final per-Task form keeps every field needed to identify and restart a Task
  * while replacing all optional payloads with small, parser-valid summaries.
  */
-function minimalRecoveryJob(job: Job): {
-   readonly job: Job;
+function minimalRecoveryTask(task: Task): {
+   readonly task: Task;
    readonly droppedStringChars: number;
    readonly changed: boolean;
 } {
-   const hasResult = job.resultData !== undefined;
-   const hasError = job.errorText !== undefined;
-   const prompt = truncationText("promptOrCommand", job.promptOrCommand.length);
+   const hasResult = task.resultData !== undefined;
+   const hasError = task.errorText !== undefined;
+   const prompt = truncationText("promptOrCommand", task.promptOrCommand.length);
    return {
-      job: {
-         id: job.id,
-         ownerSessionId: job.ownerSessionId,
-         name: job.name,
-         agent: job.agent,
-         model: job.model,
-         thinking: job.thinking,
-         cwd: job.cwd,
-         context: job.context,
-         contextTokens: job.contextTokens,
-         batchId: job.batchId,
-         batchSize: job.batchSize,
+      task: {
+         id: task.id,
+         ownerSessionId: task.ownerSessionId,
+         name: task.name,
+         worker: task.worker,
+         model: task.model,
+         thinking: task.thinking,
+         cwd: task.cwd,
+         context: task.context,
+         contextTokens: task.contextTokens,
+         batchId: task.batchId,
+         batchSize: task.batchSize,
          promptOrCommand: prompt,
-         systemPrompt: job.systemPrompt,
-         status: job.status,
-         createdAt: job.createdAt,
-         startedAt: job.startedAt,
-         settledAt: job.settledAt,
+         systemPrompt: task.systemPrompt,
+         status: task.status,
+         createdAt: task.createdAt,
+         startedAt: task.startedAt,
+         settledAt: task.settledAt,
          resultData: hasResult ? truncatedMarker("resultData summary omitted") : undefined,
-         errorText: hasError ? truncationText("errorText", job.errorText?.length ?? 0) : undefined,
-         sessionFile: job.sessionFile,
-         sessionId: job.sessionId
+         errorText: hasError ? truncationText("errorText", task.errorText?.length ?? 0) : undefined,
+         sessionFile: task.sessionFile,
+         sessionId: task.sessionId
       },
-      droppedStringChars: job.promptOrCommand.length + (job.errorText?.length ?? 0),
+      droppedStringChars: task.promptOrCommand.length + (task.errorText?.length ?? 0),
       changed: true
    };
 }
 
 /**
  * Build a persisted manifest index from the registry snapshot. Optional data is
- * reduced for every job before any job is dropped. Every candidate is measured
+ * reduced for every Task before any Task is dropped. Every candidate is measured
  * using UTF-8 bytes after each reduction and the deterministic drop fallback is
  * applied only when the reduced index still exceeds the hard ceiling.
  */
-export function buildPersistedIndex(jobs: ReadonlyArray<Job>, parentSessionFile?: string): NormalizedIndexResult {
-   const normalizedJobs: Job[] = [];
+export function buildPersistedIndex(jobs: ReadonlyArray<Task>, parentSessionFile?: string): NormalizedIndexResult {
+   const normalizedJobs: Task[] = [];
    const truncatedJobIds = new Set<string>();
    let droppedStringChars = 0;
    let droppedArrayItems = 0;
 
-   for (const job of jobs) {
-      const normalized = normalizePersistedJob(job);
-      normalizedJobs.push(normalized.job);
-      if (normalized.truncated) truncatedJobIds.add(job.id);
+   for (const task of jobs) {
+      const normalized = normalizePersistedTask(task);
+      normalizedJobs.push(normalized.task);
+      if (normalized.truncated) truncatedJobIds.add(task.id);
       droppedStringChars += normalized.droppedStringChars;
       droppedArrayItems += normalized.droppedArrayItems;
    }
 
-   const retainedIds = new Set(pruneTerminalJobsForRetention(jobs, Date.now()).map((job) => job.id));
-   let retainedForSize = normalizedJobs.filter((job) => retainedIds.has(job.id));
+   const retainedIds = new Set(pruneTerminalTasksForRetention(jobs, Date.now()).map((task) => task.id));
+   let retainedForSize = normalizedJobs.filter((task) => retainedIds.has(task.id));
    let droppedJobs = normalizedJobs.length - retainedForSize.length;
    let summary: ManifestSummary = {
       totalJobs: retainedForSize.length,
@@ -588,25 +583,25 @@ export function buildPersistedIndex(jobs: ReadonlyArray<Job>, parentSessionFile?
       droppedJobs
    };
 
-   const makeIndex = (): WorkersJobIndex => ({
-      version: WORKERS_JOB_MANIFEST_VERSION,
+   const makeIndex = (): WorkersTaskIndex => ({
+      version: WORKERS_TASK_MANIFEST_VERSION,
       parentSessionFile: parentSessionFile === undefined ? undefined : boundStringWithoutAccounting(parentSessionFile),
-      reservedWorkerSeq: computeReservedWorkerSeq(jobs),
+      reservedTaskSeq: computeReservedTaskSeq(jobs),
       summary,
       jobs: retainedForSize
    });
 
    let index = makeIndex();
-   const maxManifestBytes = WORKERS_JOB_MANIFEST_LIMITS.maxPersistedManifestBytes;
+   const maxManifestBytes = WORKERS_TASK_MANIFEST_LIMITS.maxPersistedManifestBytes;
 
    const applyReduction = (
-      reduction: (job: Job) => { readonly job: Job; readonly droppedStringChars: number; readonly changed: boolean }
+      reduction: (task: Task) => { readonly task: Task; readonly droppedStringChars: number; readonly changed: boolean }
    ) => {
-      const nextJobs: Job[] = [];
-      for (const job of retainedForSize) {
-         const next = reduction(job);
-         nextJobs.push(next.job);
-         if (next.changed) truncatedJobIds.add(job.id);
+      const nextJobs: Task[] = [];
+      for (const task of retainedForSize) {
+         const next = reduction(task);
+         nextJobs.push(next.task);
+         if (next.changed) truncatedJobIds.add(task.id);
          droppedStringChars += next.droppedStringChars;
       }
       retainedForSize = nextJobs;
@@ -622,10 +617,10 @@ export function buildPersistedIndex(jobs: ReadonlyArray<Job>, parentSessionFile?
 
    // Measure before and after every whole-registry reduction. Recovery-critical
    // configuration fields remain exact; jobs are dropped only after this pass.
-   if (indexByteSize(index) > maxManifestBytes) applyReduction(compactJobSummaries);
-   if (indexByteSize(index) > maxManifestBytes) applyReduction(minimalRecoveryJob);
+   if (indexByteSize(index) > maxManifestBytes) applyReduction(compactTaskSummaries);
+   if (indexByteSize(index) > maxManifestBytes) applyReduction(minimalRecoveryTask);
 
-   const compareDropPriority = (a: Job, b: Job): number => {
+   const compareDropPriority = (a: Task, b: Task): number => {
       const aTerminal = isTerminalStatus(a.status);
       const bTerminal = isTerminalStatus(b.status);
       if (aTerminal !== bTerminal) return aTerminal ? -1 : 1;
@@ -638,14 +633,14 @@ export function buildPersistedIndex(jobs: ReadonlyArray<Job>, parentSessionFile?
    while (indexByteSize(index) > maxManifestBytes && retainedForSize.length > 0) {
       const ordered = retainedForSize.toSorted(compareDropPriority);
       const victim = ordered[0];
-      retainedForSize = retainedForSize.filter((job) => job.id !== victim.id);
+      retainedForSize = retainedForSize.filter((task) => task.id !== victim.id);
       droppedJobs++;
       summary = { ...summary, totalJobs: retainedForSize.length, droppedJobs };
       index = makeIndex();
       indexByteSize(index);
    }
 
-   // At the hard fallback boundary, retaining an oversized job record is worse
+   // At the hard fallback boundary, retaining an oversized Task record is worse
    // than retaining no jobs. The empty index remains parseable and reserves all
    // worker IDs through the original snapshot's sequence maximum.
    if (indexByteSize(index) > maxManifestBytes) {
@@ -659,7 +654,14 @@ export function buildPersistedIndex(jobs: ReadonlyArray<Job>, parentSessionFile?
    return { index, summary };
 }
 
-const JOB_STATUSES: ReadonlySet<JobStatus> = new Set(["pending", "running", "completed", "failed", "cancelled"]);
+const TASK_STATUSES: ReadonlySet<TaskStatus> = new Set([
+   "pending",
+   "running",
+   "completed",
+   "recoverable",
+   "failed",
+   "cancelled"
+]);
 
 /** JSON value accepted in persisted tool arguments, resultData, and raw event data. */
 export type PersistedJsonValue = JsonValue;
@@ -677,7 +679,7 @@ function parseOptionalString(value: unknown): string | undefined {
 }
 
 function isPersistedString(value: unknown): value is string {
-   return typeof value === "string" && value.length <= WORKERS_JOB_MANIFEST_LIMITS.maxPersistedStringChars;
+   return typeof value === "string" && value.length <= WORKERS_TASK_MANIFEST_LIMITS.maxPersistedStringChars;
 }
 
 function parseFiniteNumber(value: unknown): number | undefined {
@@ -697,8 +699,8 @@ function parsePersistedJsonValue(value: unknown, depth = 0): JsonValue | undefin
    if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
 
    if (Array.isArray(value)) {
-      if (value.length > WORKERS_JOB_MANIFEST_LIMITS.maxPersistedArrayLength) return undefined;
-      if (depth >= WORKERS_JOB_MANIFEST_LIMITS.maxPersistedNestingDepth) return undefined;
+      if (value.length > WORKERS_TASK_MANIFEST_LIMITS.maxPersistedArrayLength) return undefined;
+      if (depth >= WORKERS_TASK_MANIFEST_LIMITS.maxPersistedNestingDepth) return undefined;
       const parsed: JsonValue[] = [];
       for (const item of value) {
          const next = parsePersistedJsonValue(item, depth + 1);
@@ -715,7 +717,7 @@ function parsePersistedJsonValue(value: unknown, depth = 0): JsonValue | undefin
    if (keys.some((key) => !isPersistedString(key))) return undefined;
    if (TRUNCATED_KEY in value) {
       if (keys.length !== 1 || !isPersistedString(value[TRUNCATED_KEY])) return undefined;
-   } else if (depth >= WORKERS_JOB_MANIFEST_LIMITS.maxPersistedNestingDepth) {
+   } else if (depth >= WORKERS_TASK_MANIFEST_LIMITS.maxPersistedNestingDepth) {
       return undefined;
    }
 
@@ -728,9 +730,9 @@ function parsePersistedJsonValue(value: unknown, depth = 0): JsonValue | undefin
    return parsed;
 }
 
-function parseTranscriptContent(value: unknown): ReadonlyArray<JobTranscriptContent> | undefined {
-   if (!Array.isArray(value) || value.length > WORKERS_JOB_MANIFEST_LIMITS.maxPersistedArrayLength) return undefined;
-   const content: JobTranscriptContent[] = [];
+function parseTranscriptContent(value: unknown): ReadonlyArray<TaskTranscriptContent> | undefined {
+   if (!Array.isArray(value) || value.length > WORKERS_TASK_MANIFEST_LIMITS.maxPersistedArrayLength) return undefined;
+   const content: TaskTranscriptContent[] = [];
    for (const item of value) {
       if (!isRecord(item) || typeof item.type !== "string") return undefined;
       if (item.type === "text" && isPersistedString(item.text)) {
@@ -746,9 +748,9 @@ function parseTranscriptContent(value: unknown): ReadonlyArray<JobTranscriptCont
    return content;
 }
 
-function parseTranscript(value: unknown): ReadonlyArray<JobTranscriptEntry> | undefined {
-   if (!Array.isArray(value) || value.length > WORKERS_JOB_MANIFEST_LIMITS.maxPersistedArrayLength) return undefined;
-   const entries: JobTranscriptEntry[] = [];
+function parseTranscript(value: unknown): ReadonlyArray<TaskTranscriptEntry> | undefined {
+   if (!Array.isArray(value) || value.length > WORKERS_TASK_MANIFEST_LIMITS.maxPersistedArrayLength) return undefined;
+   const entries: TaskTranscriptEntry[] = [];
    for (const item of value) {
       if (!isRecord(item) || typeof item.type !== "string") return undefined;
       const timestamp = parseOptionalTimestamp(item);
@@ -758,7 +760,7 @@ function parseTranscript(value: unknown): ReadonlyArray<JobTranscriptEntry> | un
          if (!hasOnlyKeys(item, new Set(["type", "text", "timestamp"])) || !isPersistedString(item.text)) {
             return undefined;
          }
-         entries.push({ type: item.type, text: item.text, timestamp } as JobTranscriptEntry);
+         entries.push({ type: item.type, text: item.text, timestamp } as TaskTranscriptEntry);
          continue;
       }
 
@@ -839,18 +841,19 @@ function parseManifestSummary(value: unknown): ManifestSummary | undefined {
 }
 
 /**
- * Strictly parse a single persisted job record into the in-memory {@link Job}
+ * Strictly parse a single persisted Task record into the in-memory {@link Task}
  * shape. The record is rejected if any required field is missing or any present
  * optional field has an unsupported type or value.
  */
-export function parsePersistedJobEntry(raw: unknown): Job | undefined {
+export function parsePersistedTaskEntry(raw: unknown): Task | undefined {
    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
    const record = raw as Record<string, unknown>;
-   const jobKeys = new Set([
+   const taskKeys = new Set([
       "id",
       "ownerSessionId",
       "name",
       "agent",
+      "worker",
       "async",
       "model",
       "thinking",
@@ -874,12 +877,12 @@ export function parsePersistedJobEntry(raw: unknown): Job | undefined {
       "sessionFile",
       "sessionId"
    ]);
-   if (!hasOnlyKeys(record, jobKeys)) return undefined;
+   if (!hasOnlyKeys(record, taskKeys)) return undefined;
    if (Object.keys(record).some((key) => !isPersistedString(key))) return undefined;
    try {
       if (
          Buffer.byteLength(JSON.stringify(record, undefined, 2), "utf8") >
-         WORKERS_JOB_MANIFEST_LIMITS.maxPersistedJobBytes
+         WORKERS_TASK_MANIFEST_LIMITS.maxPersistedJobBytes
       )
          return undefined;
    } catch {
@@ -890,7 +893,7 @@ export function parsePersistedJobEntry(raw: unknown): Job | undefined {
    if (!isPersistedString(record.ownerSessionId)) return undefined;
    if (!isPersistedString(record.promptOrCommand)) return undefined;
 
-   if (typeof record.status !== "string" || !JOB_STATUSES.has(record.status as JobStatus)) return undefined;
+   if (typeof record.status !== "string" || !TASK_STATUSES.has(record.status as TaskStatus)) return undefined;
 
    const createdAt = parseFiniteNumber(record.createdAt);
    if (createdAt === undefined) return undefined;
@@ -915,6 +918,7 @@ export function parsePersistedJobEntry(raw: unknown): Job | undefined {
    if (record.settledAt !== undefined && settledAt === undefined) return undefined;
 
    if (record.agent !== undefined && !isPersistedString(record.agent)) return undefined;
+   if (record.worker !== undefined && !isPersistedString(record.worker)) return undefined;
    if (record.async !== undefined && typeof record.async !== "boolean") return undefined;
    if (record.model !== undefined && !isPersistedString(record.model)) return undefined;
    if (record.thinking !== undefined && !isPersistedString(record.thinking)) return undefined;
@@ -936,11 +940,16 @@ export function parsePersistedJobEntry(raw: unknown): Job | undefined {
    const transcript = record.transcript === undefined ? undefined : parseTranscript(record.transcript);
    if (record.transcript !== undefined && transcript === undefined) return undefined;
 
+   const status =
+      record.status === "recoverable" && typeof record.sessionFile !== "string"
+         ? "failed"
+         : (record.status as TaskStatus);
+
    return {
-      id: record.id,
+      id: normalizePersistedTaskId(record.id),
       ownerSessionId: record.ownerSessionId,
       name,
-      agent: parseOptionalString(record.agent),
+      worker: parseOptionalString(record.worker) ?? parseOptionalString(record.agent),
       model: parseOptionalString(record.model),
       thinking: parseOptionalString(record.thinking),
       cwd: parseOptionalString(record.cwd),
@@ -950,7 +959,7 @@ export function parsePersistedJobEntry(raw: unknown): Job | undefined {
       batchSize,
       promptOrCommand: record.promptOrCommand,
       systemPrompt: parseOptionalString(record.systemPrompt),
-      status: record.status as JobStatus,
+      status,
       createdAt,
       startedAt,
       settledAt,
@@ -962,38 +971,52 @@ export function parsePersistedJobEntry(raw: unknown): Job | undefined {
    };
 }
 
+/** Map a legacy persisted `worker-<seq>` id to the task vocabulary. */
+export function normalizePersistedTaskId(id: string): string {
+   return id.replace(/^worker-(\d+)$/, "task-$1");
+}
+
 /**
  * Fail-closed parser for the persisted manifest index. Any structural mismatch,
- * invalid job, or duplicate job ID rejects the entire manifest so load can
+ * invalid Task, or duplicate Task ID rejects the entire manifest so load can
  * quarantine it instead of silently recovering a partial/empty index.
  */
-export function parsePersistedIndex(record: Record<string, unknown>): WorkersJobIndex | undefined {
+export function parsePersistedIndex(record: Record<string, unknown>): WorkersTaskIndex | undefined {
    if (!isRecord(record)) return undefined;
-   const indexKeys = new Set(["version", "parentSessionFile", "writtenAt", "reservedWorkerSeq", "summary", "jobs"]);
+   const indexKeys = new Set([
+      "version",
+      "parentSessionFile",
+      "writtenAt",
+      "reservedWorkerSeq",
+      "reservedTaskSeq",
+      "summary",
+      "jobs"
+   ]);
    if (!hasOnlyKeys(record, indexKeys)) return undefined;
    if (Object.keys(record).some((key) => !isPersistedString(key))) return undefined;
    if (typeof record.version !== "number" || !Number.isFinite(record.version)) return undefined;
    // Version 1 is the only supported boundary. Do not guess at forward migrations.
-   if (record.version !== WORKERS_JOB_MANIFEST_VERSION) return undefined;
+   if (record.version !== WORKERS_TASK_MANIFEST_VERSION) return undefined;
 
    if (record.parentSessionFile !== undefined && !isPersistedString(record.parentSessionFile)) return undefined;
    if (record.writtenAt !== undefined && parseFiniteNumber(record.writtenAt) === undefined) return undefined;
-   if (record.reservedWorkerSeq !== undefined) {
-      const reservedWorkerSeq = parseFiniteNumber(record.reservedWorkerSeq);
-      if (reservedWorkerSeq === undefined || reservedWorkerSeq < 0 || !Number.isInteger(reservedWorkerSeq))
-         return undefined;
+   const rawReservedSeq = record.reservedTaskSeq ?? record.reservedWorkerSeq;
+   if (rawReservedSeq !== undefined) {
+      const reservedSeq = parseFiniteNumber(rawReservedSeq);
+      if (reservedSeq === undefined || reservedSeq < 0 || !Number.isInteger(reservedSeq)) return undefined;
    }
+   const reservedTaskSeq = rawReservedSeq === undefined ? undefined : (parseFiniteNumber(rawReservedSeq) ?? undefined);
 
-   if (!Array.isArray(record.jobs) || record.jobs.length > WORKERS_JOB_MANIFEST_LIMITS.maxPersistedArrayLength)
+   if (!Array.isArray(record.jobs) || record.jobs.length > WORKERS_TASK_MANIFEST_LIMITS.maxPersistedArrayLength)
       return undefined;
 
    const summary = record.summary === undefined ? undefined : parseManifestSummary(record.summary);
    if (record.summary !== undefined && summary === undefined) return undefined;
 
-   const jobs: Job[] = [];
+   const jobs: Task[] = [];
    const seenIds = new Set<string>();
    for (const raw of record.jobs) {
-      const parsed = parsePersistedJobEntry(raw);
+      const parsed = parsePersistedTaskEntry(raw);
       if (parsed === undefined) return undefined;
       if (seenIds.has(parsed.id)) return undefined;
       seenIds.add(parsed.id);
@@ -1005,7 +1028,7 @@ export function parsePersistedIndex(record: Record<string, unknown>): WorkersJob
       parentSessionFile: record.parentSessionFile as string | undefined,
       writtenAt: record.writtenAt as number | undefined,
       source: "valid" as const,
-      reservedWorkerSeq: record.reservedWorkerSeq as number | undefined,
+      reservedTaskSeq,
       summary,
       jobs
    };

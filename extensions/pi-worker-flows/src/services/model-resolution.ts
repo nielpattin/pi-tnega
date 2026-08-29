@@ -1,4 +1,4 @@
-import type { AgentProfile } from "./agent-profiles.ts";
+import type { AgentProfile } from "./worker-profiles.ts";
 
 /** Minimal model registry capability needed by profile resolution. */
 export interface ProfileModelRegistry<Model> {
