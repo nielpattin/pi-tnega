@@ -56,12 +56,12 @@ Package status below reflects the manifests in this checkout. A workspace packag
 | [pi-compact-pro](./extensions/pi-compact-pro/README.md)             | Configurable compaction thresholds, summary models, and structured summaries.              | Local extension, no `package.json`                                                                                                              |
 | [pi-constellation](./extensions/pi-constellation/README.md)         | Deterministic compaction and incremental session inspection.                               | Private package, no version                                                                                                                     |
 | [pi-cortex](./extensions/pi-cortex/README.md)                       | Code search, AST analysis, call graphs, and agent memory.                                  | Workspace package, `0.1.0`; optional Rust sidecar                                                                                               |
-| [pi-exa](./extensions/pi-exa/README.md)                             | Exa web search, page fetching, and deep research.                                          | Workspace package, `0.5.0`                                                                                                                      |
 | pi-ide-pro                                                          | VS Code and Neovim context, file autocomplete, and diagnostics for Pi.                     | Workspace package, `0.1.0`; [VS Code](./extensions/pi-ide-pro/vscode/README.md) and [Neovim](./extensions/pi-ide-pro/nvim/README.md) companions |
 | [pi-processes](./extensions/pi-processes/README.md)                 | Retained background process supervision and a process dashboard.                           | `@nielpattin/pi-processes` `0.1.0`                                                                                                              |
 | [pi-reference](./extensions/pi-reference/README.md)                 | Local and Git project references with `@alias` autocomplete.                               | `@nielpattin/pi-reference` `0.2.1`; publish workflow target                                                                                     |
 | [pi-skill-toggle](./extensions/pi-skill-toggle/README.md)           | Toggle automatic skill invocation between enabled and manual-only modes.                   | Private package, `0.1.0`                                                                                                                        |
 | [pi-station](./extensions/pi-station/README.md)                     | Status bar, fixed editor layout, bash mode, stash, history, undo/redo, and hashline tools. | `@nielpattin/pi-station` `0.9.0`; publish workflow target                                                                                       |
+| [pi-web-access](./extensions/pi-web-access/README.md)               | Multi-engine web search, deep research, site outline discovery, and content extraction.    | `@nielpattin/pi-web-access` `0.1.0`                                                                                                             |
 | [pi-worker-flows](./extensions/pi-worker-flows/README.md)           | Profile-based workflow orchestration and direct worker delegation.                         | `@nielpattin/pi-worker-flows` `0.1.0`                                                                                                           |
 | [tool-selector](./extensions/tool-selector/README.md)               | Inspect active and inactive tools in the current session.                                  | Local extension, no `package.json`                                                                                                              |
 | [treepluss](./extensions/treepluss/README.md)                       | Enhanced conversation tree and TUI turn rendering.                                         | Local extension, no `package.json`                                                                                                              |
@@ -70,29 +70,28 @@ Package status below reflects the manifests in this checkout. A workspace packag
 
 These files live directly under `extensions/` and do not have package manifests:
 
-| File                                                                        | Capability                                                                      |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| [`continue-after-compaction.ts`](./extensions/continue-after-compaction.ts) | Resumes the active task after successful compaction.                            |
-| [`describe-image.ts`](./extensions/describe-image.ts)                       | Provides the `describe_image` vision tool with configured fallback models.      |
-| [`double-esc.ts`](./extensions/double-esc.ts)                               | Requires a second `Esc` press to abort an active generation.                    |
-| [`files.ts`](./extensions/files.ts)                                         | Provides `/files` to list session files and open a selected file in VS Code.    |
-| [`startup-timer.ts`](./extensions/startup-timer.ts)                         | Provides `/startup-time` to measure extension startup overhead.                 |
-| [`stats.ts`](./extensions/stats.ts)                                         | Provides `/stats` for daily token usage across Pi sessions.                     |
-| [`tps.ts`](./extensions/tps.ts)                                             | Reports turn timing, token counts, and measured tokens per second.              |
-| [`web-reader.ts`](./extensions/web-reader.ts)                               | Provides the `web_reader` tool through Jina Reader and requires `JINA_API_KEY`. |
+| File                                                                        | Capability                                                                   |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| [`continue-after-compaction.ts`](./extensions/continue-after-compaction.ts) | Resumes the active task after successful compaction.                         |
+| [`describe-image.ts`](./extensions/describe-image.ts)                       | Provides the `describe_image` vision tool with configured fallback models.   |
+| [`double-esc.ts`](./extensions/double-esc.ts)                               | Requires a second `Esc` press to abort an active generation.                 |
+| [`files.ts`](./extensions/files.ts)                                         | Provides `/files` to list session files and open a selected file in VS Code. |
+| [`startup-timer.ts`](./extensions/startup-timer.ts)                         | Provides `/startup-time` to measure extension startup overhead.              |
+| [`stats.ts`](./extensions/stats.ts)                                         | Provides `/stats` for daily token usage across Pi sessions.                  |
+| [`tps.ts`](./extensions/tps.ts)                                             | Reports turn timing, token counts, and measured tokens per second.           |
 
 ## Common entrypoints
 
 Read each extension's documentation for complete commands and configuration. The main entrypoints include:
 
-- `pi-worker-flows`: `/wf`, `/wr`, `/wr-profile`, `workflow`, `worker_spawn`, `worker_list`, and `worker_cancel`
+- `pi-worker-flows`: `/wf`, `/workers`, `/wr`, `/wr-profile`, `workflow`, `worker_spawn`, `worker_list`, `worker_recover`, and `worker_cancel`
 - `pi-station`: `/station`, `/stash-history`, `/bash-mode`, and `/bash-reset`
 - `pi-compact-pro`: `/compaction`
 - `pi-processes`: `/processes`
 - `pi-reference`: `/references`
 - `pi-acks`: `/accounts`
 - `pi-cortex`: `/cc-index`, `/cc-status`, `/cc-clean`, `/cc-ast`, `/cc-remember`, `/cc-recall`, and `/cc-forget`
-- `pi-exa`: `/exa-login`, `/exa-status`, `/exa-advanced-search`, and `/exa-deep-search`
+- `pi-web-access`: `/websearch`, `web_search`, `web_research`, `fetch_content`, and `outline_site`
 - `btw`: `/btw` and `/btw:inject`
 - Local utilities: `/copy-all`, `/codeblocks`, `/codex-usage`, `/toggle-skills`, `/tools`, `/files`, `/stats`, and `/startup-time`
 
@@ -100,15 +99,15 @@ Read each extension's documentation for complete commands and configuration. The
 
 Run commands from the repository root:
 
-| Command           | Purpose                                                                                          |
-| ----------------- | ------------------------------------------------------------------------------------------------ |
-| `pnpm test`       | Run Node's test runner for `tests/*/**/*.mjs`. Current tests are under `tests/pi-worker-flows/`. |
-| `pnpm lint`       | Check files with `oxlint`.                                                                       |
-| `pnpm lint:fix`   | Apply available `oxlint` fixes.                                                                  |
-| `pnpm typecheck`  | Run TypeScript with the root config and every existing `extensions/*/tsconfig.json`.             |
-| `pnpm fmt`        | Format files with `oxfmt`.                                                                       |
-| `pnpm package`    | Build the `pi-ide-pro` VS Code VSIX at `extensions/pi-ide-pro/dist/pi-ide-pro.vsix`.             |
-| `pnpm sync:repos` | Synchronize configured reference repositories.                                                   |
+| Command           | Purpose                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------ |
+| `pnpm test`       | Run Node's test runner across all extension tests (`tests/*/**/*.mjs`).              |
+| `pnpm lint`       | Check files with `oxlint`.                                                           |
+| `pnpm lint:fix`   | Apply available `oxlint` fixes.                                                      |
+| `pnpm typecheck`  | Run TypeScript with the root config and every existing `extensions/*/tsconfig.json`. |
+| `pnpm fmt`        | Format files with `oxfmt`.                                                           |
+| `pnpm package`    | Build the `pi-ide-pro` VS Code VSIX at `extensions/pi-ide-pro/dist/pi-ide-pro.vsix`. |
+| `pnpm sync:repos` | Synchronize configured reference repositories.                                       |
 
 For a package-specific check:
 
@@ -128,7 +127,7 @@ pnpm --dir extensions/pi-cortex build:rust
 agent-root/
 ├── extensions/                  # Pi extension directories and standalone .ts files
 │   └── pi-ide-pro/              # Pi extension plus VS Code and Neovim companions
-├── tests/                       # Node test files, currently pi-worker-flows tests
+├── tests/                       # Node test files for extensions (pi-web-access, pi-worker-flows)
 ├── scripts/                     # release, repository sync, and typecheck scripts
 ├── .github/workflows/           # manual npm publishing workflow
 ├── .githooks/                   # versioned Git hooks

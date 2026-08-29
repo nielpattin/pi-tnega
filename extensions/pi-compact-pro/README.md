@@ -57,7 +57,7 @@ The UI keeps these values separate:
 | Field              | Type     | Default  | Description                                                                                                                                                                                  |
 | ------------------ | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `maxContext`       | number   | `128000` | Global context window ceiling applied to all models with larger windows. Use `-1` for no cap (each model keeps its native provider window).                                                  |
-| `compactionTarget` | number   | `64000`  | Token count threshold where auto-compaction triggers.                                                                                                                                        |
+| `compactionTarget` | number   | `64000`  | Token count threshold where auto-compaction triggers. Use `-1` or `native` to allow context to flow up to the native model window ceiling without an early compaction target.                |
 | `keepRecentTokens` | number   | `20000`  | Token budget of uncompacted recent conversation turns kept intact.                                                                                                                           |
 | `enabled`          | boolean  | `true`   | Enables or disables automatic compaction.                                                                                                                                                    |
 | `summaryModels`    | string[] | `[]`     | Optional ordered list of up to 3 models to use for compaction summaries (in fallback order). Format: `"provider/modelId"`. If omitted or all candidates fail, uses the active session model. |
@@ -70,7 +70,7 @@ The UI keeps these values separate:
 Run `/compaction` without arguments in TUI mode to open the settings interface. Everything is configurable from the UI, no JSON editing required:
 
 - **Auto-compaction**: toggle on/off.
-- **Compaction target**: preset trigger thresholds (40k to 200k) or type a custom value via the "Custom value…" entry.
+- **Compaction target**: preset trigger thresholds (40k to 200k), "Native (flow normally / no hard target)", or a custom token count via the "Custom value…" entry.
 - **Keep recent**: preset token budgets (5k to 60k) or a custom value.
 - **Reserve tokens**: read-only, shows the native Pi reserve computed from the active model's effective window minus the target.
 - **Max context**: global ceiling, including a "No cap (native windows)" option (stored as `-1`) and custom values up to 1M.
@@ -89,6 +89,7 @@ Search-as-you-type filtering is available inside model pickers (type to filter a
 /compaction summaryModel default
 /compaction maxContext 128000
 /compaction target 64000
+/compaction target native
 /compaction keepRecent 20000
 /compaction enabled true
 /compaction reset
