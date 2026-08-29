@@ -67,7 +67,7 @@ Reference aliases (the keys under `references`) must be non-empty and must not c
 
 ## Git cache
 
-Git references are cloned into `~/.cache/checkouts/<host>/<org>/<repo>` — the same cache path used by the librarian skill. Repos are fetched/refreshed on session start (throttled to every 5 minutes).
+Git references are cloned into `~/.cache/checkouts/<host>/<org>/<repo>` — the same cache path used by the `repo-cache` skill. Repos are fetched/refreshed on session start (throttled to every 5 minutes).
 
 ## Usage
 

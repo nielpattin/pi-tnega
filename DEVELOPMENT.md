@@ -77,6 +77,7 @@ Run checks from root:
 
 | Command          | Purpose                                            |
 | ---------------- | -------------------------------------------------- |
+| `pnpm test`      | Run native test runner across all extension tests  |
 | `pnpm typecheck` | Run TypeScript 7 type check across project configs |
 | `pnpm lint`      | Run `oxlint` across all files                      |
 | `pnpm lint:fix`  | Auto-fix linting issues                            |

@@ -2,6 +2,7 @@
 
 ## Non-negotiable rules
 
+- **Always use `rg` and `fd`:** Use `rg` for search and `fd` for finding files. Never use slow PowerShell search cmdlets (`Get-ChildItem`, `Select-String`).
 - **No unprompted releases or Git mutations:** Do not run `git commit`, `git push`, or release/publish flows unless the user explicitly requests it.
 - **Use surgical edits:** Touch only what the assignment requires. Preserve existing comments and structure unless changing them is necessary.
 
@@ -65,15 +66,22 @@ The contributor monorepo workflow for creating and publishing packages lives in 
 
 - Multi-file extensions live in `extensions/<extension-name>/` with their entry point at `extensions/<extension-name>/index.ts`.
 - Single-file extensions live directly at `extensions/<extension-name>.ts`.
+- Each extension owns its tests in an independent directory under `tests/<extension-name>/` (for example, `tests/pi-worker-flows/orchestrator.mjs`). Never place loose test files directly in the root of `tests/`.
+
+## Testing conventions
+
+- Follow the `test-driven-development` skill for all new features, bugfixes, refactors, and behavior modifications.
+- Write the failing test first, verify that it fails for the expected reason, then write minimal code to pass.
+- Tests are tracked in version control and run with Node's built-in test runner. Run all tests with `pnpm test`, or scope to an extension with `node --test tests/<extension-name>/**/*.mjs`.
+- Import extension modules in test files using `loadExtension` from `tests/_bootstrap.mjs`.
 
 ## Verification workflow
 
 Follow this order for code changes:
 
-1. Run `pnpm lint`.
-2. Run `pnpm typecheck`.
-3. Run `pnpm fmt`.
+1. Run tests: `pnpm test` (or scoped extension tests: `node --test tests/<extension-name>/**/*.mjs`).
+2. Run `pnpm lint`.
+3. Run `pnpm typecheck`.
+4. Run `pnpm fmt`.
 
-If linting or type checking fails, fix the problem and continue again from the failed step.
-
-When the change adds or alters extension behavior, follow `.pi/skills/tdd/SKILL.md` first: write the failing test in `tests/` (node:test, run with `node tests/<file>.mjs`), watch it fail, then make it pass.
+If any verification step fails, fix the problem and continue again from the failed step.

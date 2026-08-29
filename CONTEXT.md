@@ -1,119 +1,148 @@
-# Architecture & Domain Context
+# Delegated work domain glossary
 
-This repository is a monorepo containing native extensions, tools, sub-agent execution engines, and TUI components built for the [Pi coding agent](https://pi.dev) runtime (`@earendil-works/pi-coding-agent` v0.84+).
+This context defines the canonical language for delegated work in this repository. Prefer these terms in code, tests, documentation, and worker prompts.
 
-Code in this monorepo is written in TypeScript using **Effect v4** (`effect` v4.0.0-beta), **TypeBox**, and Pi's native extension APIs (`@earendil-works/pi-agent-core`, `@earendil-works/pi-tui`).
+## Sessions and ownership
 
----
+**Session**:
+A Pi conversation and its retained history. A Parent Session and a Worker Session have different ownership and execution roles.
 
-## 🏛️ System Architecture
+**Parent Session**:
+The interactive Pi conversation that starts work and receives outcomes. It may own a Workflow Run or one or more direct Tasks.
+_Avoid_: Controller, manager, current session
 
-```text
-                               ┌──────────────────────────────────────────┐
-                               │              Parent Session              │
-                               │  (Interactive TUI / Orchestrator Mode)   │
-                               └────────────────────┬─────────────────────┘
-                                                    │
-                ┌───────────────────────────────┼────────────────┐
-                │                               │
-                ▼                               ▼
-┌───────────────────────────────┐   ┌───────────────────────────────┐
-│         pi-worker-flows       │   │        pi-processes           │
-│     JavaScript DSL Engine     │   │   Process Supervision         │
-│  (parallel, phase, profiles)  │   │ (start, stop, logs, ready)    │
-└───────────────┬───────────────┘   └───────────────┬───────────────┘
-                │                                   │
-                ▼                                   ▼
-┌───────────────────────────────┐   ┌───────────────────────────────┐
-│  Workflow and Direct Workers  │   │    Supervised OS Processes    │
-│   (Persistent Pi Sessions)    │   │   (Servers, watchers, logs)   │
-└───────────────────────────────┘   └───────────────────────────────┘
-```
+**Owner Session**:
+The session responsible for a Task's lifecycle and result delivery. It is usually the Parent Session, but the term makes ownership explicit when discussing a Task independently.
+_Avoid_: Worker Session
 
----
+**Worker Session**:
+An isolated Pi conversation in which a Worker performs delegated work. A recoverable Task resumes its existing Worker Session instead of creating a replacement.
+_Avoid_: Child worker, worker process
 
-## 👥 Participants & Domain Vocabulary
+## Workers and tasks
 
-### Participants & Roles
+**Worker**:
+A delegated executor selected through a Worker Profile and run in a Worker Session. A Worker is not the Task it performs or the Session in which it runs.
+_Avoid_: Subagent, child worker, agent as a role noun
 
-- **Parent Session**: The primary interactive conversation session that launches workflows, receives agent outcomes, and inspects workflow runs. _(Avoid: controller, manager)_
-- **Workflow Agent**: A child Pi session created to execute one profile-configured workflow assignment independently. _(Avoid: subagent, child worker)_
-- **Orchestrator**: The primary agent operating in workflow mode to coordinate profile-configured agents with `phase()` and `parallel()` rather than performing broad exploration itself.
-- **Owner Session**: The parent session that created and owns a job's lifecycle and delivery boundary. _(Avoid: current session, worker session)_
+**Worker Profile**:
+A named role and capability definition for a Worker. It determines the Worker's instructions, permitted tools, model preferences, and thinking level.
+_Avoid_: Worker type when the profile is meant
 
-### Work & Execution Units
+**Task**:
+One tracked request for a direct Worker. It has an identity, an Owner Session, a Worker Profile, a lifecycle state, and an eventual result or error.
+_Avoid_: Job, assignment, process
 
-- **Workflow Assignment**: A unit of agent work delegated by a workflow. Runs independently and reaches a terminal outcome. _(Avoid: background job, process)_
-- **Workflow Run**: A tracked orchestration run with an identity, owner session, phases, agent records, lifecycle, and aggregate result.
-- **Process**: An external command or service supervised independently of worker assignments (e.g. `pnpm dev`, watchers). _(Avoid: worker when referring to a process)_
+**Worker Specification**:
+The request that describes one proposed Task before the system accepts and tracks it. It includes the work prompt, display name, and Worker Profile.
+_Avoid_: Task result
 
-### Lifecycle & Outcomes
+**Worker Batch**:
+A group of Worker Specifications submitted together. Each specification becomes its own Task; the batch is not one combined Task.
 
-- **Pending**: The assignment or process has been accepted but has not started executing.
-- **Spawned**: Immediate tool acknowledgement that a job was created and handed off. _(Avoid: running, completed)_
-- **Running**: The assignment or process is currently executing.
-- **Completed**: The job reached its intended terminal outcome successfully. _(Avoid: delivered)_
-- **Failed**: Execution or validation could not succeed. _(Avoid: cancelled)_
-- **Cancelled**: Execution was intentionally stopped before normal completion.
-- **Agent Result**: The terminal payload submitted by a workflow agent for its assignment. Separate from progress updates.
+**Direct Worker**:
+A Worker started outside a Workflow Run. Direct Workers have no Workflow phases or mandatory Summary.
+_Avoid_: Standalone job
 
-### Interaction & Delivery
+**Workflow Worker**:
+A Worker created by a Workflow Run and associated with one of that run's phases. It is distinct from a Direct Worker even though both use Worker Profiles and Worker Sessions.
 
-- **Submit**: The worker's final act of submitting a worker result or error.
-- **Parent Delivery**: Automatic presentation of a settled worker result to the parent session (no polling required).
-- **Workflow Dashboard**: Parent-led inspection of workflow phases, agents, transcripts, usage, and recovered runs.
-- **Targeted Inspection**: Direct reading of specific key files by the orchestrator using `read` after receiving research findings, before delegating code changes.
+**Task Result**:
+The terminal output or error associated with a direct Task. It is distinct from progress updates and Parent Delivery.
 
----
+**Background Task**:
+A direct Task whose Owner Session receives a spawn acknowledgement before execution settles. Its settled result is sent to the Owner Session automatically.
+_Avoid_: Detached task
 
-## 🧩 Monorepo Extensions
+**Parent Delivery**:
+The automatic presentation of a settled Background Task result to its Owner Session. Delivery is an interaction outcome, not a Task lifecycle state.
+_Avoid_: Completion, delivered status
 
-The monorepo contains native extensions located under `extensions/`:
+## Workflows
 
-| Extension              | Category                | Description                                                                                                                                                                    | Key Directives / Commands                                |
-| ---------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
-| `pi-worker-flows`      | Multi-Agent DSL         | Workflow orchestration plus direct worker delegation with profiles, compaction-aware persistent child sessions, parallel fan-out, structured results, and worker job controls. | `workflow`, `worker_spawn`, `/wf`, `/workers`, `/agents` |
-| `pi-compact-pro`       | Compaction              | Configurable auto-compaction thresholds, reversible model context caps, custom summary model fallbacks, and structured summaries.                                              | `/compaction`, `session_before_compact`                  |
-| `pi-processes`         | Process Supervision     | Standalone retained process supervision, readiness checks, logs, lifecycle controls, and process dashboard.                                                                    | `process_start`, `/processes`                            |
-| `btw`                  | Interaction             | Independent modal side-chat with explicit handoff into the parent session.                                                                                                     | `/btw`, `/btw:inject`                                    |
-| `pi-constellation`     | Inspection & Compaction | Deterministic zero-LLM compaction and incremental session transcript navigation, search, and message inspection.                                                               | `session_inspect`, `session_before_compact`              |
-| `pi-reference`         | Code Accessibility      | Project reference manager auto-cloning Git repos into `~/.cache/checkouts/` and auto-allowing directories.                                                                     | `@alias/path`, `/references`                             |
-| `pi-cortex`            | Code Intelligence       | Semantic and AST pattern search, call graphs, ONNX embeddings, SQLite knowledge triples, and agent memory.                                                                     | `code_search`, `code_ast_grep`, `/cc-index`              |
-| `pi-exa`               | Web & Research          | Exa-powered web search, webpage content fetching, and multi-source deep research.                                                                                              | `web_search_exa`, `web_fetch_exa`, `deep_search_exa`     |
-| `pi-acks`              | Auth & Accounts         | Subscription OAuth account manager and credential switcher for OpenAI Codex.                                                                                                   | `/accounts`                                              |
-| `pi-rtk`               | Token Optimization      | Token-optimized bash command rewriting (`rtk rewrite`) and RTK tools (`rtk_grep`, `rtk_find`).                                                                                 | `/pi-rtk`                                                |
-| `pi-station`           | TUI Compositor          | Fixed-layout TUI compositor status bar, bash mode, hashline file anchors (`LINE#HASH`), prompt history, undo/redo.                                                             | `/station`, `/stash-history`                             |
-| `pi-code-block-picker` | Utilities               | Code block extractor from session history, fuzzy selector, and cross-platform clipboard copy.                                                                                  | `/codeblocks`, `Ctrl+Shift+Y`                            |
-| `pi-codex-usage`       | Monitoring              | OpenAI Codex token limit monitoring and response verbosity control.                                                                                                            | `/codex-usage`                                           |
-| `pi-skill-toggle`      | Skill Governance        | Interactive checklist to toggle skills between automatic agent invocation and manual-only mode.                                                                                | `/toggle-skills`                                         |
-| `ask-user`             | Interaction             | Structured multiple-choice user question tool with custom text input.                                                                                                          | `ask_user`                                               |
-| `notification`         | Audio Alerts            | Audio completion notifications (`agent_end`) with configurable sounds and volume.                                                                                              | `~/.pi/agent/settings.json`                              |
-| `copy-all`             | Utilities               | Copies the active post-compaction conversation window to the system clipboard.                                                                                                 | `/copy-all`                                              |
-| `tool-selector`        | Inspection              | Read-only inspector displaying active and inactive status for all session tools.                                                                                               | `/tools`                                                 |
-| `treepluss`            | TUI Compositor          | Enhanced conversation branch tree component renderer for interactive mode.                                                                                                     | TUI session visualizer                                   |
+**Workflow**:
+A model-authored orchestration that coordinates Workers through named phases and produces a final synthesis. A Workflow is not a Worker Session.
+_Avoid_: Job queue, parent worker
 
----
+**Orchestrator**:
+The coordination role that selects phases, delegates Workers, and carries results forward. It is not an additional Worker or a separate owner.
+_Avoid_: Controller, manager
 
-## ⚡ Effect v4 Engineering Standards
+**Workflow Run**:
+One execution of a Workflow. It owns the run's phases, Workflow Workers, final Summary, lifecycle, and aggregate result.
+_Avoid_: Task, direct worker run
 
-When writing TypeScript code in this monorepo:
+**Phase**:
+A named stage in a Workflow Run that organizes Workflow Workers and their result handoff. A Phase is not a Task lifecycle state.
+_Avoid_: Step when referring to a named workflow stage
 
-1. **Source of Truth**: Follow [`repos/effect/LLMS.md`](./repos/effect/LLMS.md) for idiomatic Effect usage, tests, module structure, and API design.
-2. **Cheat Sheet**: Refer to [`docs/effect-v4-cheatsheet.md`](./docs/effect-v4-cheatsheet.md) for project-specific Effect v4 idioms.
-3. **Idioms**:
-    - Use `Effect.gen` for async control flow.
-    - Define services using `Context.Tag` and `Layer`.
-    - Handle errors explicitly using typed error channels and `Cause` inspection.
-    - Avoid unhandled promise rejections or raw `try/catch` blocks inside Effect code.
+**Summary**:
+The mandatory final synthesis of a Workflow Run. It receives the preceding work's results and supplies the run's final public text.
+_Avoid_: Worker result, report when referring to the final synthesis
 
----
+**Workflow Result**:
+The final text produced by a Workflow Run's Summary. It is distinct from the results of individual Workflow Workers.
 
-## ⚙️ Package Management & Tooling
+## Task lifecycle
 
-- **Package Manager**: Use `pnpm` exclusively. Do **not** use `npm`, `bun`, `npx`, or `bunx`. Use `pnpx` for binary execution without global installation.
-- **Python Manager**: Use `uv` exclusively for Python execution and environment management.
-- **Surgical Edits**: Touch only what the assignment requires. Preserve existing comments and file structures.
-- **Verification Workflow**: Run the following checks in order before completing work:
-    1. `pnpm lint`
-    2. `pnpm typecheck`
-    3. `pnpm fmt`
+**Pending**:
+The Task has been accepted and tracked, but its Worker has not started.
+
+**Spawned**:
+An acknowledgement that work was accepted and handed off. Spawned is not a persisted Task lifecycle state.
+
+**Running**:
+The Worker is actively performing the Task in its Worker Session.
+
+**Completed**:
+The Task reached its intended successful terminal outcome.
+
+**Failed**:
+The Task stopped without a successful outcome and is terminal. Work that can continue in the existing Worker Session is represented as Recoverable instead.
+
+**Recoverable**:
+The Task stopped while retaining enough Worker Session history to resume in place. It is Settled but not Terminal.
+
+**Cancelled**:
+The Task was intentionally stopped before successful completion. It is terminal.
+
+**Settled**:
+The Task's active execution has stopped. Completed, Failed, Recoverable, and Cancelled are settled outcomes.
+
+**Terminal**:
+The Task will not change state through ordinary execution. Completed, Failed, and Cancelled are terminal; Recoverable is not.
+
+## Boundary concepts
+
+**Process**:
+An external command or service supervised independently from Worker execution. A Process is not a Worker, Task, or Worker Session.
+_Avoid_: Worker when referring to an external command or service
+
+**Side Chat**:
+An independent conversation used for exploration and explicit handoff to the Parent Session. A Side Chat is not a Worker Session and does not participate in Task ownership.
+
+**Compaction**:
+A change to the historical context of a Pi Session. Compaction does not change Task identity or Task lifecycle.
+
+**Session Inspection**:
+Reading retained session history or compacted context to understand prior work. Session Inspection is not Worker execution or Task recovery.
+
+## Terms to avoid
+
+**Agent**:
+An ambiguous label for a delegated executor or coordinator. Use Worker for delegated execution and Orchestrator for coordination; retain `agent` only when referring to an existing compatibility or API name.
+
+**Job**:
+A legacy label for a tracked Task.
+
+**Assignment**:
+An ambiguous label for work. Use Task for direct Worker work and Workflow Worker for work created by a Workflow Run.
+
+**Paused**:
+A removed Task state. Use Recoverable when work stopped but can resume in place.
+
+**Continue**:
+An ambiguous recovery action. Use Recover or resume in place when referring to a Recoverable Task.
+
+**Delivered**:
+A delivery outcome, not a lifecycle state. Use Completed, Failed, Recoverable, or Cancelled for Task state, and Parent Delivery for automatic result presentation.
