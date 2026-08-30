@@ -161,25 +161,63 @@ test("renderFetchCall and renderFetchResult produce informative TUI displays", (
    assert.match(renderText(expandedComp), /Cost: 1 credit/);
 });
 
-test("renderResearchCall and renderResearchResult produce informative TUI displays", () => {
-   const callComp = toolRenderers.renderResearchCall(
-      { query: "Quantum computing breakthroughs", depth: "deep", provider: "firecrawl" },
+test("renderSearchCall formats explicit structured parameter badges", () => {
+   const callComp = toolRenderers.renderSearchCall(
+      { query: "TypeScript 5.8", provider: "exa", mode: "answer", category: "publication", freshness: "week", limit: 10 },
       testTheme
    );
-   assert.ok(callComp);
+   const text = renderText(callComp);
+   assert.match(text, /\[p:exa\]/);
+   assert.match(text, /\[m:answer\]/);
+   assert.match(text, /\[c:publication\]/);
+   assert.match(text, /\[f:week\]/);
+   assert.match(text, /\[limit:10\]/);
+});
 
-   const resultComp = toolRenderers.renderResearchResult(
+test("renderResearchCall formats explicit structured parameter badges", () => {
+   const callComp = toolRenderers.renderResearchCall(
       {
-         content: [{ type: "text", text: "## Quantum Findings\n\nDetailed analysis text" }],
+         query: "LLM Agent compaction",
+         scope: "academic",
+         depth: "deep",
+         provider: "firecrawl",
+         authors: "Vaswani",
+         categories: ["cs.LG", "cs.CL"]
+      },
+      testTheme
+   );
+   const text = renderText(callComp);
+   assert.match(text, /\[s:academic\]/);
+   assert.match(text, /\[e:deep\]/);
+   assert.match(text, /\[p:firecrawl\]/);
+   assert.match(text, /\[a:Vaswani\]/);
+   assert.match(text, /\[c:cs\.LG,cs\.CL\]/);
+});
+
+test("renderResearchResult renders live partial progress with activities and count", () => {
+   const partialComp = toolRenderers.renderResearchResult(
+      {
+         content: [{ type: "text", text: "" }],
          details: {
-            query: "Quantum computing breakthroughs",
-            provider: "firecrawl",
-            synthesis: "Detailed analysis text",
-            sources: [{ title: "Nature Paper", url: "https://nature.com/articles/123" }]
+            query: "LLM Agent compaction",
+            provider: "firecrawl (academic)",
+            durationMs: 3500,
+            activities: [
+               { type: "search", message: "Found 10 papers for 'compaction'" },
+               { type: "expand", message: "Discovered 5 related papers" }
+            ],
+            sources: [
+               { title: "Paper 1", url: "https://arxiv.org/abs/1" },
+               { title: "Paper 2", url: "https://arxiv.org/abs/2" }
+            ]
          }
       },
-      { expanded: false },
+      { expanded: false, isPartial: true },
       testTheme
    );
-   assert.ok(resultComp);
+   const text = renderText(partialComp);
+   assert.match(text, /3\.5s/);
+   assert.match(text, /Found 10 papers/);
+   assert.match(text, /Discovered 5 related papers/);
+   assert.match(text, /Discovered 2 sources so far/);
 });

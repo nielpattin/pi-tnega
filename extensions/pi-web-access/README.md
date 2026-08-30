@@ -4,7 +4,7 @@ Fast, secure web search, content extraction, and deep research extension for the
 
 ## Features
 
-- **Deep Web Research**: Conducts multi-query in-harness search decomposition, scraping, and synthesized analysis with optional Exa Deep Reasoning.
+- **Deep Web & Academic Research**: Conducts multi-query search decomposition, scientific literature indexing (~43M papers via Firecrawl Research covering arXiv, PubMed, bioRxiv, DOI), citation graph expansion, passage extraction, and synthesized analysis.
 - **Smart Content Scraping & Extraction**: Fetches web pages, remote/local PDFs, HTML, or raw GitHub files with automatic headless browser fallback (Firecrawl/Exa) for SPAs and Cloudflare-protected pages.
 - **High-Performance PDF Parsing**: Uses Firecrawl's `@firecrawl/pdf-inspector` (native Rust engine) for spatial multi-column layout detection, tables, and Markdown extraction.
 - **Multi-provider web search**: Queries Firecrawl, Exa, or Tavily with automatic sequential error fallback.
@@ -18,17 +18,29 @@ Fast, secure web search, content extraction, and deep research extension for the
 
 ### `web_research`
 
-Conducts in-depth web research on a complex topic by decomposing questions into multi-angle search queries, fetching and evaluating passages across search providers, and synthesizing the findings using Pi's authenticated LLMs with source citations.
+Conducts in-depth web and academic research on a complex topic by decomposing questions into multi-angle search queries, fetching and evaluating passages across search providers or scientific literature indexes, and synthesizing the findings using Pi's authenticated LLMs with source citations.
 
 Parameters:
 
 - `query` (string, optional): Main topic, question, or assertion to research.
 - `queries` (array of strings, optional): 2-4 varied query angles searched in parallel.
-- `depth` (string, optional): Research depth (`fast`, `deep`, `exhaustive`). Defaults to `deep`.
+- `scope` (string, optional): Research scope (`general` for open-web intelligence, `academic` for scientific paper indexing covering ~43M papers across arXiv, PubMed, bioRxiv, and DOI citations via Firecrawl Research Index). Defaults to `general`.
+- `depth` (string, optional): Research effort and rigor (`fast`, `deep`, `exhaustive`). Defaults to `deep`.
+- `authors` (string, optional): Author filter for academic research (e.g. `Vaswani`, `Dhariwal`).
+- `categories` (array of strings, optional): Academic category filters (e.g. `['cs.LG', 'cs.CV', 'stat.ML']`).
 - `includeDomains` (array of strings, optional): Restricts research to specified domains.
 - `excludeDomains` (array of strings, optional): Excludes specified domains from research.
 - `systemPrompt` (string, optional): Steering guidance for the research synthesis.
 - `userLocation` (string, optional): Two-letter ISO country code.
+
+#### Academic Research Pipeline (`scope: "academic"`)
+
+When `scope: "academic"` is selected, `web_research` runs a dedicated literature discovery and citation analysis pipeline:
+
+1. **Seed Paper Discovery**: Queries Firecrawl's Research Index (`GET /v2/search/research/papers`) across 43M+ paper abstracts matching topic queries, authors, and arXiv/PubMed categories.
+2. **Citation Graph Expansion**: For `depth: "deep"` or `"exhaustive"`, expands citation graphs (`GET /v2/search/research/papers/{id}/similar`) to discover co-cited literature, foundational precursors (`references`), and follow-up work (`citers`).
+3. **Passage Extraction**: Extracts targeted full-text passages (`GET /v2/search/research/papers/{id}?query=...`) to verify methodologies, datasets, and benchmark metrics without parsing full PDF files.
+4. **Synthesis & Citation Lineage**: Synthesizes a structured literature review with problem taxonomy, methodology comparison, empirical benchmarks, and canonical links (`arxiv:`, `doi:`, `pmid:`).
 
 ### `web_search`
 
@@ -39,13 +51,13 @@ Parameters:
 - `query` (string, optional): Search query keywords.
 - `queries` (array of strings, optional): Multiple search queries run in parallel.
 - `mode` (string, optional): Search mode (`search` default for link retrieval/docs, `answer` for direct factual answer synthesis).
-- `category` (string, optional): Exa category filter (`company`, `publication`, `news`, `personal site`, `financial report`, `people`).
+- `category` (string, optional): Exa/Firecrawl category filter (`developer`, `research`, `pdf`, `company`, `publication`, `news`, `personal site`, `financial report`, `people`).
+- `freshness` (string, optional): Recency filter restricting results to published/updated time windows (`day` for 24h, `week` for 7 days, `month` for 30 days, `year` for 365 days).
 - `includeDomains` (array of strings, optional): Scopes results to specific domains or paths.
 - `excludeDomains` (array of strings, optional): Excludes specific domains from results.
 - `userLocation` (string, optional): Two-letter ISO country code.
 - `systemPrompt` (string, optional): Steering guidance for search ranking and synthesis.
 - `limit` (number, optional): Maximum results (1 to 20, default: 5).
-- `freshness` (string, optional): Recency filter (`day`, `week`, `month`, `year`).
 
 ### `fetch_content`
 
@@ -61,6 +73,22 @@ Parameters:
 ## Commands
 
 - `/websearch <query>`: Executes a web search directly from the interactive session.
+
+## UI Badge Reference
+
+Tool headers in the TUI transcript use compact key-prefixed badges for readability:
+
+| Prefix      | Description             | Example Values                                        |
+| :---------- | :---------------------- | :---------------------------------------------------- |
+| `[s:...]`   | Research Scope          | `[s:academic]`, `[s:general]`                         |
+| `[e:...]`   | Research Effort / Depth | `[e:fast]`, `[e:deep]`, `[e:exhaustive]`              |
+| `[p:...]`   | Provider Backend        | `[p:firecrawl]`, `[p:exa]`, `[p:tavily]`              |
+| `[m:...]`   | Search Mode             | `[m:search]`, `[m:answer]`                            |
+| `[c:...]`   | Category / arXiv Filter | `[c:developer]`, `[c:cs.LG,cs.CV]`, `[c:publication]` |
+| `[f:...]`   | Freshness Window        | `[f:day]`, `[f:week]`, `[f:month]`, `[f:year]`        |
+| `[a:...]`   | Author Filter           | `[a:Vaswani]`                                         |
+| `[q:...]`   | Search Path Filter      | `[q:docs/api]`                                        |
+| `[limit:N]` | Result Limit            | `[limit:10]`                                          |
 
 ## Configuration
 

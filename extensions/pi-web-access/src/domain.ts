@@ -104,13 +104,110 @@ export interface SearchProviderDefinition {
 
 export type ResearchDepth = "fast" | "deep" | "exhaustive";
 
+export type ResearchScope = "general" | "academic";
+
 export type ResearchProviderId = "llm" | "exa";
+
+export interface ResearchIdMap {
+   readonly [namespace: string]: ReadonlyArray<string> | undefined;
+}
+
+export interface ResearchPaperSignals {
+   readonly structural?: number;
+   readonly semantic?: number;
+   readonly articleRank?: number;
+   readonly seedOverlap?: number;
+}
+
+export interface ResearchPaperResult {
+   readonly paperId: string;
+   readonly primaryId: string;
+   readonly ids?: ResearchIdMap;
+   readonly title: string;
+   readonly abstract: string;
+   readonly score: number;
+   readonly signals?: ResearchPaperSignals;
+   readonly authors?: string;
+   readonly categories?: ReadonlyArray<string>;
+   readonly createdDate?: string;
+   readonly updateDate?: string;
+}
+
+export interface ResearchPaperMetadata {
+   readonly paperId: string;
+   readonly title: string;
+   readonly abstract: string;
+   readonly ids?: ResearchIdMap;
+   readonly authors?: string;
+   readonly categories?: ReadonlyArray<string>;
+   readonly createdDate?: string;
+   readonly updateDate?: string;
+}
+
+export interface ResearchPassage {
+   readonly text: string;
+   readonly score: number;
+}
+
+export interface ResearchSearchPapersOptions {
+   readonly query: string;
+   readonly k?: number;
+   readonly authors?: string;
+   readonly categories?: string | ReadonlyArray<string>;
+   readonly from?: string;
+   readonly to?: string;
+   readonly signal?: AbortSignal;
+}
+
+export interface ResearchSearchPapersResponse {
+   readonly success: boolean;
+   readonly results: ReadonlyArray<ResearchPaperResult>;
+   readonly error?: string;
+}
+
+export interface ResearchReadPaperOptions {
+   readonly query?: string;
+   readonly k?: number;
+   readonly signal?: AbortSignal;
+}
+
+export interface ResearchReadPaperResponse {
+   readonly success: boolean;
+   readonly paper?: ResearchPaperMetadata;
+   readonly paperId?: string;
+   readonly query?: string;
+   readonly passages?: ReadonlyArray<ResearchPassage>;
+   readonly error?: string;
+}
+
+export interface ResearchSimilarPapersOptions {
+   readonly intent: string;
+   readonly mode?: "similar" | "citers" | "references";
+   readonly k?: number;
+   readonly rerank?: boolean;
+   readonly anchor?: string | ReadonlyArray<string>;
+   readonly signal?: AbortSignal;
+}
+
+export interface ResearchSimilarPapersResponse {
+   readonly success: boolean;
+   readonly results: ReadonlyArray<ResearchPaperResult>;
+   readonly poolSize?: number;
+   readonly truncated?: boolean;
+   readonly note?: string | null;
+   readonly error?: string;
+}
 
 export interface ResearchSource {
    readonly title: string;
    readonly url: string;
    readonly snippet?: string;
    readonly quality?: string;
+   readonly paperId?: string;
+   readonly primaryId?: string;
+   readonly authors?: string;
+   readonly score?: number;
+   readonly passages?: ReadonlyArray<string>;
 }
 
 export interface ResearchActivity {
@@ -137,7 +234,10 @@ export interface ResearchOptions {
    readonly query?: string;
    readonly queries?: ReadonlyArray<string>;
    readonly provider?: ResearchProviderId;
+   readonly scope?: ResearchScope;
    readonly depth?: ResearchDepth;
+   readonly authors?: string;
+   readonly categories?: ReadonlyArray<string>;
    readonly includeDomains?: ReadonlyArray<string>;
    readonly excludeDomains?: ReadonlyArray<string>;
    readonly userLocation?: string;

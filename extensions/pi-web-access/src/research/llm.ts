@@ -30,13 +30,13 @@ function findModelInRegistry(registry: ExtensionContext["modelRegistry"], spec: 
    return available.find((m) => m.id === trimmed || `${m.provider}/${m.id}` === trimmed);
 }
 
-interface AuthenticatedModelCandidate {
+export interface AuthenticatedModelCandidate {
    model: Model<Api>;
    apiKey?: string;
    headers?: Record<string, string | null>;
 }
 
-async function resolveCandidateModels(ctx: ExtensionContext): Promise<AuthenticatedModelCandidate[]> {
+export async function resolveCandidateModels(ctx: ExtensionContext): Promise<AuthenticatedModelCandidate[]> {
    const config = getWebAccessConfig();
    const registry = ctx.modelRegistry;
    if (!registry) return [];

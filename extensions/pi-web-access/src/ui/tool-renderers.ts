@@ -30,20 +30,22 @@ export function renderSearchCall(args: unknown, theme: Theme): Component {
       mode?: string;
       limit?: number;
       category?: string;
+      freshness?: string;
    };
    const queryText = params.query
       ? `"${params.query}"`
       : params.queries && params.queries.length > 0
         ? `[${params.queries.length} queries: "${params.queries[0]}", ...]`
         : "";
-   const providerText = params.provider && params.provider !== "auto" ? ` [${params.provider}]` : "";
-   const modeText = params.mode && params.mode !== "auto" ? ` [${params.mode}]` : "";
-   const categoryText = params.category ? ` (${params.category})` : "";
-   const limitText = params.limit ? ` (limit: ${params.limit})` : "";
+   const providerText = params.provider && params.provider !== "auto" ? ` [p:${params.provider}]` : "";
+   const modeText = params.mode && params.mode !== "auto" ? ` [m:${params.mode}]` : "";
+   const categoryText = params.category ? ` [c:${params.category}]` : "";
+   const freshnessText = params.freshness ? ` [f:${params.freshness}]` : "";
+   const limitText = params.limit ? ` [limit:${params.limit}]` : "";
 
    return new Text(
       theme.fg("toolTitle", theme.bold("web_search ")) +
-         theme.fg("muted", `${queryText}${providerText}${modeText}${categoryText}${limitText}`),
+         theme.fg("muted", `${queryText}${providerText}${modeText}${categoryText}${freshnessText}${limitText}`),
       0,
       0
    );
@@ -240,17 +242,30 @@ export function renderFetchResult(result: ToolResultLike, options: RenderOptions
 }
 
 export function renderResearchCall(args: unknown, theme: Theme): Component {
-   const params = (args ?? {}) as { query?: string; queries?: string[]; depth?: string; provider?: string };
+   const params = (args ?? {}) as {
+      query?: string;
+      queries?: string[];
+      scope?: string;
+      depth?: string;
+      provider?: string;
+      authors?: string;
+      categories?: string[];
+   };
    const queryText = params.query
       ? `"${params.query}"`
       : params.queries && params.queries.length > 0
         ? `[${params.queries.length} angles: "${params.queries[0]}", ...]`
         : "";
-   const depthText = params.depth ? ` [${params.depth}]` : " [deep]";
-   const providerText = params.provider && params.provider !== "auto" ? ` (${params.provider})` : "";
+   const scopeText = params.scope ? ` [s:${params.scope}]` : " [s:general]";
+   const depthText = params.depth ? ` [e:${params.depth}]` : " [e:deep]";
+   const providerText = params.provider && params.provider !== "auto" ? ` [p:${params.provider}]` : "";
+   const authorsText = params.authors ? ` [a:${params.authors}]` : "";
+   const categoriesText =
+      params.categories && params.categories.length > 0 ? ` [c:${params.categories.join(",")}]` : "";
 
    return new Text(
-      theme.fg("toolTitle", theme.bold("web_research ")) + theme.fg("muted", `${queryText}${depthText}${providerText}`),
+      theme.fg("toolTitle", theme.bold("web_research ")) +
+         theme.fg("muted", `${queryText}${scopeText}${depthText}${providerText}${authorsText}${categoriesText}`),
       0,
       0
    );
@@ -286,10 +301,12 @@ export function renderResearchResult(result: ToolResultLike, options: RenderOpti
       const recentActivities = activities.slice(-4);
       for (const act of recentActivities) {
          let icon = "▸";
-         if (act.type === "decompose") icon = "◆";
+         if (act.type === "decompose" || act.type === "plan") icon = "◆";
          else if (act.type === "search") icon = "🔍";
          else if (act.type === "fetch") icon = "📄";
-         else if (act.type === "synthesis") icon = "⚡";
+         else if (act.type === "expand") icon = "🧬";
+         else if (act.type === "passages") icon = "📖";
+         else if (act.type === "synthesis" || act.type === "synthesize") icon = "⚡";
 
          lines.push(`  ${theme.fg("accent", icon)} ${theme.fg("toolOutput", act.message)}`);
       }
@@ -363,8 +380,8 @@ export function renderResearchResult(result: ToolResultLike, options: RenderOpti
 export function renderOutlineCall(args: unknown, theme: Theme): Component {
    const params = (args ?? {}) as { url?: string; search?: string; limit?: number };
    const targetText = params.url ? formatUrlSummary(params.url, 60) : "";
-   const searchText = params.search ? ` (search: "${params.search}")` : "";
-   const limitText = params.limit ? ` (limit: ${params.limit})` : "";
+   const searchText = params.search ? ` [q:${params.search}]` : "";
+   const limitText = params.limit ? ` [limit:${params.limit}]` : "";
 
    return new Text(
       theme.fg("toolTitle", theme.bold("outline_site ")) + theme.fg("muted", `${targetText}${searchText}${limitText}`),

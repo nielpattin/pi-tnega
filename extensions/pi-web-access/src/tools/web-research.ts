@@ -16,10 +16,26 @@ export const WebResearchToolParamsSchema = Type.Object(
             description: "Optional list of 2-4 varied query angles searched in parallel for multi-perspective research."
          })
       ),
+      scope: Type.Optional(
+         Type.Union([Type.Literal("general"), Type.Literal("academic")], {
+            description:
+               "Research scope: 'general' (default open-web intelligence) or 'academic' (scientific paper index covering arXiv, PubMed, bioRxiv, and DOI citations via Firecrawl Research)."
+         })
+      ),
       depth: Type.Optional(
          Type.Union([Type.Literal("fast"), Type.Literal("deep"), Type.Literal("exhaustive")], {
             description:
                "Research depth and rigor: 'fast' (quick synthesis), 'deep' (standard multi-angle research), 'exhaustive' (broad comprehensive investigation). Defaults to 'deep'."
+         })
+      ),
+      authors: Type.Optional(
+         Type.String({
+            description: "Author substring filter for academic paper search (e.g. 'Vaswani', 'Dhariwal')."
+         })
+      ),
+      categories: Type.Optional(
+         Type.Array(Type.String(), {
+            description: "Academic paper category filters (e.g. ['cs.LG', 'cs.CV', 'stat.ML'])."
          })
       ),
       includeDomains: Type.Optional(
@@ -46,7 +62,7 @@ export const WebResearchToolParamsSchema = Type.Object(
    },
    {
       description:
-         "Conduct in-depth web research on a topic using multi-query search decomposition, page scraping, and LLM synthesized analysis with source citations."
+         "Conduct in-depth web or academic literature research using multi-query search decomposition, scientific paper indexing (~43M papers via Firecrawl Research Index), page scraping, and LLM synthesized analysis with verified citations. Returns a complete, authoritative, and fully cited final research synthesis. Do NOT perform follow-up web_search or fetch_content calls to verify or re-fetch these findings; use this synthesis directly to answer the user."
    }
 );
 
@@ -69,8 +85,10 @@ export function formatResearchTextResponse(response: ResearchResponse): string {
       parts.push("\n### Referenced Sources\n");
       response.sources.forEach((src, idx) => {
          const title = src.title || src.url;
+         const authorText = src.authors ? ` *(${src.authors})*` : "";
+         const idText = src.primaryId ? ` \`${src.primaryId}\`` : "";
          const snippet = src.snippet ? `\n> ${src.snippet.slice(0, 200)}...` : "";
-         parts.push(`- **[${idx + 1}] [${title}](${src.url})**${snippet}`);
+         parts.push(`- **[${idx + 1}] [${title}](${src.url})**${authorText}${idText}${snippet}`);
       });
    }
 
@@ -97,7 +115,10 @@ export async function handleWebResearch(
       {
          query: params.query,
          queries: params.queries,
+         scope: params.scope,
          depth: params.depth,
+         authors: params.authors,
+         categories: params.categories,
          includeDomains: params.includeDomains,
          excludeDomains: params.excludeDomains,
          userLocation: params.userLocation,

@@ -1,6 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getWebAccessConfig } from "../config.ts";
 import type { ResearchOptions, ResearchProviderId, ResearchResponse } from "../domain.ts";
+import { researchAcademic } from "./academic.ts";
 import { researchExa } from "./exa.ts";
 import { researchLLM } from "./llm.ts";
 
@@ -26,6 +27,16 @@ export async function executeResearch(
    onProgress?: ResearchProgressCallback
 ): Promise<ResearchResponse> {
    const startTime = Date.now();
+
+   // If academic scope is explicitly requested, route to academic literature pipeline
+   if (options.scope === "academic") {
+      const academicResult = await researchAcademic(options, ctx, onProgress);
+      return {
+         ...academicResult,
+         durationMs: Date.now() - startTime
+      };
+   }
+
    const provider = resolveResearchProvider(options.provider);
 
    let result: ResearchResponse;
@@ -58,3 +69,4 @@ export async function executeResearch(
 
 export { researchLLM } from "./llm.ts";
 export { researchExa } from "./exa.ts";
+export { researchAcademic } from "./academic.ts";
