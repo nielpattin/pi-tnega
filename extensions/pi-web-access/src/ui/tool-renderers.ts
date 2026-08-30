@@ -61,6 +61,7 @@ export function renderSearchResult(result: ToolResultLike, options: RenderOption
    const countLabel = count === 1 ? "1 result" : `${count} results`;
    const hint = formatExpandHint();
    const durationText = details?.durationMs !== undefined ? ` · ${formatDuration(details.durationMs)}` : "";
+   const costText = details?.cost ? ` · Cost: ${details.cost}` : "";
    const modeLabel = details?.mode ? ` [${details.mode}]` : "";
 
    // Collapsed View (Default in transcript)
@@ -70,7 +71,7 @@ export function renderSearchResult(result: ToolResultLike, options: RenderOption
       }
 
       const lines: string[] = [
-         `${theme.fg("success", "✓")} ${theme.fg("accent", `Found ${countLabel} via ${provider}${modeLabel}`)}${durationText} ${theme.fg("muted", `(${hint})`)}`
+         `${theme.fg("success", "✓")} ${theme.fg("accent", `Found ${countLabel} via ${provider}${modeLabel}`)}${durationText}${costText} ${theme.fg("muted", `(${hint})`)}`
       ];
 
       if (details?.answer) {
@@ -178,6 +179,7 @@ export function renderFetchResult(result: ToolResultLike, options: RenderOptions
          : formatBytes(details.byteLength)
       : "";
    const durationText = details?.durationMs !== undefined ? formatDuration(details.durationMs) : "";
+   const costText = details?.cost ? `· Cost: ${details.cost}` : "";
    const statusBadge = details?.statusCode ? formatStatusBadge(details.statusCode, theme) : "";
    const truncatedBadge = details?.truncated ? theme.fg("warning", "[truncated]") : "";
    const hint = formatExpandHint();
@@ -190,6 +192,7 @@ export function renderFetchResult(result: ToolResultLike, options: RenderOptions
          sizeText ? `· ${sizeText}` : "",
          linesText,
          durationText ? `· ${durationText}` : "",
+         costText,
          truncatedBadge,
          theme.fg("muted", `(${hint})`)
       ].filter(Boolean);

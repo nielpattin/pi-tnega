@@ -84,8 +84,7 @@ export async function searchExa(options: SearchOptions): Promise<SearchResponse>
          ? options.excludeDomains
          : undefined;
 
-   const isAnswerMode =
-      options.mode === "answer" && !isRestrictedCategory && !startPublishedDate && !includeDomains && !excludeDomains;
+   const isAnswerMode = options.mode === "answer";
 
    try {
       if (isAnswerMode) {

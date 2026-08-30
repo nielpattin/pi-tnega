@@ -166,6 +166,39 @@ test("fetchWithFirecrawl returns error when FIRECRAWL_API_KEY is not configured"
    }
 });
 
+test("fetchWithFirecrawl reads creditsUsed from scrape metadata", async () => {
+   const originalKey = process.env.FIRECRAWL_API_KEY;
+   const originalFetch = globalThis.fetch;
+   process.env.FIRECRAWL_API_KEY = "test-firecrawl-key";
+   globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+         success: true,
+         id: "scrape-id",
+         data: {
+            markdown: "# Firecrawl",
+            metadata: {
+               title: "Firecrawl",
+               statusCode: 200,
+               contentType: "text/markdown",
+               creditsUsed: 3
+            }
+         }
+      })
+   });
+
+   try {
+      const result = await firecrawlFetch.fetchWithFirecrawl("https://example.com", {});
+      assert.equal(result.cost, "3 credits");
+      assert.equal(result.requestId, "scrape-id");
+   } finally {
+      globalThis.fetch = originalFetch;
+      if (originalKey === undefined) delete process.env.FIRECRAWL_API_KEY;
+      else process.env.FIRECRAWL_API_KEY = originalKey;
+   }
+});
+
 test("parseLocalFileWithFirecrawl returns error when FIRECRAWL_API_KEY is missing", async () => {
    const originalKey = process.env.FIRECRAWL_API_KEY;
    delete process.env.FIRECRAWL_API_KEY;

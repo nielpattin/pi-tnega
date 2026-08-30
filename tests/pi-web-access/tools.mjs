@@ -12,6 +12,10 @@ const testTheme = {
    bold: (text) => `**${text}**`
 };
 
+function renderText(component) {
+   return component.render(200).join("\n");
+}
+
 test("webSearchTool conforms to tool definition contract", () => {
    assert.equal(webSearch.webSearchTool.name, "web_search");
    assert.equal(typeof webSearch.webSearchTool.description, "string");
@@ -80,6 +84,7 @@ test("renderSearchCall and renderSearchResult produce informative TUI displays",
          details: {
             query: "TypeScript 5.8",
             provider: "exa",
+            cost: "$0.002",
             results: [
                { title: "TypeScript 5.8 Announcement", url: "https://devblogs.microsoft.com/ts58", snippet: "Release details" }
             ]
@@ -88,7 +93,7 @@ test("renderSearchCall and renderSearchResult produce informative TUI displays",
       { expanded: false },
       testTheme
    );
-   assert.ok(collapsedComp);
+   assert.match(renderText(collapsedComp), /Cost: \$0\.002/);
 
    // Expanded search result
    const expandedComp = toolRenderers.renderSearchResult(
@@ -97,6 +102,7 @@ test("renderSearchCall and renderSearchResult produce informative TUI displays",
          details: {
             query: "TypeScript 5.8",
             provider: "exa",
+            cost: "$0.002",
             results: [
                { title: "TypeScript 5.8 Announcement", url: "https://devblogs.microsoft.com/ts58", snippet: "Release details" }
             ]
@@ -105,7 +111,7 @@ test("renderSearchCall and renderSearchResult produce informative TUI displays",
       { expanded: true },
       testTheme
    );
-   assert.ok(expandedComp);
+   assert.match(renderText(expandedComp), /Cost: \$0\.002/);
 });
 
 test("renderFetchCall and renderFetchResult produce informative TUI displays", () => {
@@ -122,6 +128,7 @@ test("renderFetchCall and renderFetchResult produce informative TUI displays", (
             content: "Page Content",
             contentType: "text/html",
             statusCode: 200,
+            cost: "1 credit",
             truncated: false,
             byteLength: 1200
          }
@@ -129,7 +136,7 @@ test("renderFetchCall and renderFetchResult produce informative TUI displays", (
       { expanded: false },
       testTheme
    );
-   assert.ok(collapsedComp);
+   assert.match(renderText(collapsedComp), /Cost: 1 credit/);
 
    // Expanded fetch result
    const expandedComp = toolRenderers.renderFetchResult(
@@ -141,6 +148,7 @@ test("renderFetchCall and renderFetchResult produce informative TUI displays", (
             content: "Page Content",
             contentType: "text/html",
             statusCode: 200,
+            cost: "1 credit",
             truncated: false,
             byteLength: 1200
          }
@@ -148,7 +156,7 @@ test("renderFetchCall and renderFetchResult produce informative TUI displays", (
       { expanded: true },
       testTheme
    );
-   assert.ok(expandedComp);
+   assert.match(renderText(expandedComp), /Cost: 1 credit/);
 });
 
 test("renderResearchCall and renderResearchResult produce informative TUI displays", () => {

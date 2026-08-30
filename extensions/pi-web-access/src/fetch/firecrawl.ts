@@ -21,9 +21,16 @@ interface FirecrawlScrapeResponse {
          sourceURL?: string;
          url?: string;
          contentType?: string;
+         creditsUsed?: number;
       };
    };
    error?: string;
+}
+
+function formatCreditsUsed(response: FirecrawlScrapeResponse): string | undefined {
+   const creditsUsed = response.data?.metadata?.creditsUsed ?? response.creditsUsed;
+   if (creditsUsed === undefined) return undefined;
+   return `${creditsUsed} credit${creditsUsed === 1 ? "" : "s"}`;
 }
 
 export async function fetchWithFirecrawl(url: string, options: FetchOptions): Promise<FetchResult> {
@@ -96,8 +103,7 @@ export async function fetchWithFirecrawl(url: string, options: FetchOptions): Pr
 
       const truncation = applyTruncation(rawContent, maxBytes, url);
 
-      const cost =
-         data.creditsUsed !== undefined ? `${data.creditsUsed} credit${data.creditsUsed === 1 ? "" : "s"}` : undefined;
+      const cost = formatCreditsUsed(data);
 
       return {
          url,
@@ -203,8 +209,7 @@ export async function parseLocalFileWithFirecrawl(
 
       const truncation = applyTruncation(rawMarkdown, maxBytes, filePath);
 
-      const cost =
-         data.creditsUsed !== undefined ? `${data.creditsUsed} credit${data.creditsUsed === 1 ? "" : "s"}` : undefined;
+      const cost = formatCreditsUsed(data);
 
       return {
          url: filePath,

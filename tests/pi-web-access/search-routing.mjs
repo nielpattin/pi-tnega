@@ -101,3 +101,73 @@ test("resolveProvider prioritizes answer-capable engines for mode='answer'", () 
       else delete process.env.PI_WEB_SEARCH_DEFAULT_PROVIDER;
    }
 });
+
+test("searchExa answer mode uses /answer even when a category is provided", async () => {
+   const originalExa = process.env.EXA_API_KEY;
+   const originalFetch = globalThis.fetch;
+   const requests = [];
+   process.env.EXA_API_KEY = "test-exa-key";
+   globalThis.fetch = async (url) => {
+      requests.push(String(url));
+      return {
+         ok: true,
+         status: 200,
+         json: async () => ({
+            answer: "Direct answer",
+            citations: [],
+            requestId: "answer-request"
+         })
+      };
+   };
+
+   try {
+      const result = await exa.searchExa({
+         query: "What is HTTP?",
+         mode: "answer",
+         category: "company"
+      });
+
+      assert.deepEqual(requests, ["https://api.exa.ai/answer"]);
+      assert.equal(result.mode, "answer");
+      assert.equal(result.answer, "Direct answer");
+   } finally {
+      globalThis.fetch = originalFetch;
+      if (originalExa) process.env.EXA_API_KEY = originalExa;
+      else delete process.env.EXA_API_KEY;
+   }
+});
+
+test("searchExa answer mode falls back to /search only after a non-2xx answer response", async () => {
+   const originalExa = process.env.EXA_API_KEY;
+   const originalFetch = globalThis.fetch;
+   const requests = [];
+   let callCount = 0;
+   process.env.EXA_API_KEY = "test-exa-key";
+   globalThis.fetch = async (url) => {
+      requests.push(String(url));
+      callCount += 1;
+      if (callCount === 1) {
+         return { ok: false, status: 503 };
+      }
+      return {
+         ok: true,
+         status: 200,
+         json: async () => ({
+            requestId: "search-request",
+            results: [{ title: "HTTP", url: "https://example.com", text: "HTTP result" }]
+         })
+      };
+   };
+
+   try {
+      const result = await exa.searchExa({ query: "What is HTTP?", mode: "answer" });
+
+      assert.deepEqual(requests, ["https://api.exa.ai/answer", "https://api.exa.ai/search"]);
+      assert.equal(result.mode, "search");
+      assert.equal(result.results.length, 1);
+   } finally {
+      globalThis.fetch = originalFetch;
+      if (originalExa) process.env.EXA_API_KEY = originalExa;
+      else delete process.env.EXA_API_KEY;
+   }
+});
