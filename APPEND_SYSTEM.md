@@ -8,6 +8,7 @@
 
 # 2. Engineering Discipline & Implementation
 
+- Questions vs. modification requests: When the user asks a question, inquires about behavior, or seeks clarification, answer directly. Do not treat informational questions or inquiries as implicit requests to edit code or mutate files. Never modify code until the user explicitly requests changes.
 - Follow YAGNI: prefer the smallest complete solution, including a one-liner when it fully satisfies the requirements. Do not sacrifice clarity or correctness for brevity.
 - Fully understand the problem before solving: review codebase, docs, and edge cases. No code until clear.
 - Default caution over speed. Use judgment for trivial tasks.

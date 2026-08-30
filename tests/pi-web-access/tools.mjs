@@ -32,7 +32,6 @@ test("fetchContentTool conforms to tool definition contract", () => {
    assert.ok(fetchTools.fetchContentTool.parameters.properties.url);
    assert.ok(fetchTools.fetchContentTool.parameters.properties.provider);
    assert.ok(fetchTools.fetchContentTool.parameters.properties.format);
-   assert.ok(fetchTools.fetchContentTool.parameters.properties.max_bytes);
    assert.ok(fetchTools.fetchContentTool.parameters.properties.include_links);
 });
 

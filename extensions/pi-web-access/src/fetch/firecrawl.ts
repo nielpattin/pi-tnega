@@ -1,7 +1,7 @@
 import { basename } from "node:path";
 import { getWebAccessConfig } from "../config.ts";
 import type { FetchOptions, FetchResult } from "../domain.ts";
-import { formatBytes, truncateText } from "../utils/text.ts";
+import { applyTruncation } from "../utils/temp.ts";
 import { fetchWithTimeout } from "./client.ts";
 
 interface FirecrawlScrapeResponse {
@@ -94,12 +94,7 @@ export async function fetchWithFirecrawl(url: string, options: FetchOptions): Pr
       const pageTitle = Array.isArray(rawTitle) ? rawTitle[0] : rawTitle || undefined;
       const statusCode = metadata?.statusCode || 200;
 
-      const truncation = truncateText(rawContent, maxBytes);
-      let content = truncation.text;
-
-      if (truncation.truncated) {
-         content += `\n\n---\n*[Output truncated: showing ${formatBytes(maxBytes)} of ${formatBytes(truncation.byteLength)}]*`;
-      }
+      const truncation = applyTruncation(rawContent, maxBytes, url);
 
       const cost =
          data.creditsUsed !== undefined ? `${data.creditsUsed} credit${data.creditsUsed === 1 ? "" : "s"}` : undefined;
@@ -107,11 +102,15 @@ export async function fetchWithFirecrawl(url: string, options: FetchOptions): Pr
       return {
          url,
          title: pageTitle,
-         content,
+         content: truncation.content,
          contentType: metadata?.contentType || (format === "html" ? "text/html" : "text/markdown"),
          statusCode,
          truncated: truncation.truncated,
          byteLength: truncation.byteLength,
+         fullByteLength: truncation.fullByteLength,
+         lines: truncation.lines,
+         totalLines: truncation.totalLines,
+         tempFilePath: truncation.tempFilePath,
          provider: "firecrawl",
          cost,
          requestId: data.id,
@@ -202,12 +201,7 @@ export async function parseLocalFileWithFirecrawl(
       const pageTitle = Array.isArray(rawTitle) ? rawTitle[0] : rawTitle || fileName;
       const statusCode = metadata?.statusCode || 200;
 
-      const truncation = truncateText(rawMarkdown, maxBytes);
-      let content = truncation.text;
-
-      if (truncation.truncated) {
-         content += `\n\n---\n*[Output truncated: showing ${formatBytes(maxBytes)} of ${formatBytes(truncation.byteLength)}]*`;
-      }
+      const truncation = applyTruncation(rawMarkdown, maxBytes, filePath);
 
       const cost =
          data.creditsUsed !== undefined ? `${data.creditsUsed} credit${data.creditsUsed === 1 ? "" : "s"}` : undefined;
@@ -215,11 +209,15 @@ export async function parseLocalFileWithFirecrawl(
       return {
          url: filePath,
          title: pageTitle,
-         content,
+         content: truncation.content,
          contentType: metadata?.contentType || "text/markdown",
          statusCode,
          truncated: truncation.truncated,
          byteLength: truncation.byteLength,
+         fullByteLength: truncation.fullByteLength,
+         lines: truncation.lines,
+         totalLines: truncation.totalLines,
+         tempFilePath: truncation.tempFilePath,
          provider: "firecrawl",
          cost,
          requestId: data.id,

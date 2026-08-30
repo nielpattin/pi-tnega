@@ -164,9 +164,19 @@ export function renderFetchResult(result: ToolResultLike, options: RenderOptions
       .map((c) => c.text!)
       .join("\n");
 
-   const lines = text.split("\n");
-   const lineWord = lines.length === 1 ? "line" : "lines";
-   const sizeText = details?.byteLength ? formatBytes(details.byteLength) : "";
+   const contentLineCount = text.split("\n").length;
+   const visibleLines = details?.lines ?? contentLineCount;
+   const totalLines = details?.totalLines ?? contentLineCount;
+   const linesText =
+      details?.truncated && totalLines > visibleLines
+         ? `· ${visibleLines} / ${totalLines} lines`
+         : `· ${visibleLines} ${visibleLines === 1 ? "line" : "lines"}`;
+
+   const sizeText = details?.byteLength
+      ? details.truncated && details.fullByteLength && details.fullByteLength > details.byteLength
+         ? `${formatBytes(details.byteLength)} / ${formatBytes(details.fullByteLength)}`
+         : formatBytes(details.byteLength)
+      : "";
    const durationText = details?.durationMs !== undefined ? formatDuration(details.durationMs) : "";
    const statusBadge = details?.statusCode ? formatStatusBadge(details.statusCode, theme) : "";
    const truncatedBadge = details?.truncated ? theme.fg("warning", "[truncated]") : "";
@@ -178,7 +188,7 @@ export function renderFetchResult(result: ToolResultLike, options: RenderOptions
          theme.fg("success", "✓"),
          statusBadge,
          sizeText ? `· ${sizeText}` : "",
-         `· ${lines.length} ${lineWord}`,
+         linesText,
          durationText ? `· ${durationText}` : "",
          truncatedBadge,
          theme.fg("muted", `(${hint})`)
@@ -189,7 +199,7 @@ export function renderFetchResult(result: ToolResultLike, options: RenderOptions
 
    // Expanded View (Full details when expanded with Ctrl+O)
    const headerLines: string[] = [
-      `${theme.fg("success", "✓")} ${statusBadge} ${sizeText ? `· ${sizeText}` : ""} ${durationText ? `· ${durationText}` : ""} ${truncatedBadge}`,
+      `${theme.fg("success", "✓")} ${statusBadge} ${sizeText ? `· ${sizeText}` : ""} ${linesText ? `${linesText} ` : ""}${durationText ? `· ${durationText}` : ""} ${truncatedBadge}`.trim(),
       theme.fg("accent", details?.url ?? ""),
       details?.title ? theme.fg("toolTitle", theme.bold(details.title)) : ""
    ].filter(Boolean);
@@ -209,6 +219,10 @@ export function renderFetchResult(result: ToolResultLike, options: RenderOptions
    }
    if (metaItems.length > 0) {
       headerLines.push(theme.fg("dim", metaItems.join(" · ")));
+   }
+
+   if (details?.tempFilePath) {
+      headerLines.push(theme.fg("warning", `Full content saved to: ${details.tempFilePath}`));
    }
 
    headerLines.push("---");

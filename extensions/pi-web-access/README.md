@@ -57,7 +57,6 @@ Parameters:
 - `url` (string, required): Web page, documentation, local/remote PDF path, or GitHub URL.
 - `provider` (string, optional): Scraping provider (`auto`, `local`, `firecrawl`, `exa`). Defaults to `auto` (fast local with automatic headless fallback on blocked/SPA pages).
 - `format` (string, optional): Output format (`markdown`, `text`, `html`, default: `markdown`).
-- `max_bytes` (number, optional): Maximum byte limit before truncation (default: 50,000).
 - `include_links` (boolean, optional): Appends external page links to the result.
 
 ## Commands

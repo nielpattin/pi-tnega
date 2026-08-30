@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { loadExtension } from "../_bootstrap.mjs";
 
 const extractor = await loadExtension("extensions/pi-web-access/src/fetch/extractor.ts");
@@ -7,6 +8,7 @@ const github = await loadExtension("extensions/pi-web-access/src/fetch/github.ts
 const pdfExtractor = await loadExtension("extensions/pi-web-access/src/fetch/pdf.ts");
 const fetchService = await loadExtension("extensions/pi-web-access/src/fetch/service.ts");
 const textUtils = await loadExtension("extensions/pi-web-access/src/utils/text.ts");
+const tempUtils = await loadExtension("extensions/pi-web-access/src/utils/temp.ts");
 const firecrawlFetch = await loadExtension("extensions/pi-web-access/src/fetch/firecrawl.ts");
 const exaFetch = await loadExtension("extensions/pi-web-access/src/fetch/exa.ts");
 
@@ -112,6 +114,37 @@ test("truncateText truncates cleanly at byte boundaries", () => {
    assert.equal(result.truncated, true);
    assert.equal(result.text, "Hello, wor");
    assert.equal(result.byteLength, sample.length);
+});
+
+test("applyTruncation saves full content to temp file and appends hint when truncated", () => {
+   const fullText = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore.";
+   const result = tempUtils.applyTruncation(fullText, 25, "https://example.com/long-article");
+
+   assert.equal(result.truncated, true);
+   assert.equal(result.fullByteLength, fullText.length);
+   assert.ok(result.tempFilePath);
+   assert.ok(existsSync(result.tempFilePath));
+   assert.ok(result.content.includes("Full content saved to:"));
+   assert.ok(result.content.includes(result.tempFilePath));
+
+   const savedOnDisk = readFileSync(result.tempFilePath, "utf8");
+   assert.equal(savedOnDisk, fullText);
+
+   // Clean up test file
+   try {
+      unlinkSync(result.tempFilePath);
+   } catch {
+      // Ignored
+   }
+});
+
+test("applyTruncation leaves untruncated content untouched without creating temp file", () => {
+   const shortText = "Short text under max budget";
+   const result = tempUtils.applyTruncation(shortText, 500, "https://example.com/short");
+
+   assert.equal(result.truncated, false);
+   assert.equal(result.content, shortText);
+   assert.equal(result.tempFilePath, undefined);
 });
 
 test("formatBytes formats byte sizes accurately", () => {

@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 import { getWebAccessConfig } from "../config.ts";
 import type { FetchOptions, FetchResult } from "../domain.ts";
 import { MemoryCache } from "../utils/cache.ts";
-import { formatBytes, normalizeUrl, truncateText } from "../utils/text.ts";
+import { applyTruncation } from "../utils/temp.ts";
+import { normalizeUrl } from "../utils/text.ts";
 import { fetchWithTimeout } from "./client.ts";
 import { fetchWithExa } from "./exa.ts";
 import { extractHtmlContent } from "./extractor.ts";
@@ -106,21 +107,20 @@ async function handleLocalFileFetch(inputPath: string, options: FetchOptions): P
       if (isPdf) {
          const buffer = await readFile(localPath);
          const extracted = await extractPdfContent(buffer);
-         const truncation = truncateText(extracted.content, maxBytes);
-         let content = truncation.text;
-
-         if (truncation.truncated) {
-            content += `\n\n---\n*[Output truncated: showing ${formatBytes(maxBytes)} of ${formatBytes(truncation.byteLength)}]*`;
-         }
+         const truncation = applyTruncation(extracted.content, maxBytes, localPath);
 
          return {
             url: localPath,
             title: extracted.title,
-            content,
+            content: truncation.content,
             contentType: "application/pdf",
             statusCode: 200,
             truncated: truncation.truncated,
             byteLength: truncation.byteLength,
+            fullByteLength: truncation.fullByteLength,
+            lines: truncation.lines,
+            totalLines: truncation.totalLines,
+            tempFilePath: truncation.tempFilePath,
             provider: "local"
          };
       }
@@ -132,41 +132,39 @@ async function handleLocalFileFetch(inputPath: string, options: FetchOptions): P
             baseUrl: `file://${localPath}`,
             includeLinks: options.includeLinks
          });
-         const truncation = truncateText(extracted.content, maxBytes);
-         let content = truncation.text;
-
-         if (truncation.truncated) {
-            content += `\n\n---\n*[Output truncated: showing ${formatBytes(maxBytes)} of ${formatBytes(truncation.byteLength)}]*`;
-         }
+         const truncation = applyTruncation(extracted.content, maxBytes, localPath);
 
          return {
             url: localPath,
             title: extracted.title,
-            content,
+            content: truncation.content,
             contentType: "text/html",
             statusCode: 200,
             truncated: truncation.truncated,
             byteLength: truncation.byteLength,
+            fullByteLength: truncation.fullByteLength,
+            lines: truncation.lines,
+            totalLines: truncation.totalLines,
+            tempFilePath: truncation.tempFilePath,
             links: extracted.links,
             provider: "local"
          };
       }
 
-      const truncation = truncateText(rawText, maxBytes);
-      let content = truncation.text;
-
-      if (truncation.truncated) {
-         content += `\n\n---\n*[Output truncated: showing ${formatBytes(maxBytes)} of ${formatBytes(truncation.byteLength)}]*`;
-      }
+      const truncation = applyTruncation(rawText, maxBytes, localPath);
 
       return {
          url: localPath,
          title: undefined,
-         content,
+         content: truncation.content,
          contentType: isHtml ? "text/html" : "text/plain",
          statusCode: 200,
          truncated: truncation.truncated,
          byteLength: truncation.byteLength,
+         fullByteLength: truncation.fullByteLength,
+         lines: truncation.lines,
+         totalLines: truncation.totalLines,
+         tempFilePath: truncation.tempFilePath,
          provider: "local"
       };
    } catch (error) {
@@ -220,21 +218,20 @@ async function executeRemoteHttpFetch(normalizedUrl: string, options: FetchOptio
       if (isPdf) {
          const buffer = await response.arrayBuffer();
          const extracted = await extractPdfContent(buffer);
-         const truncation = truncateText(extracted.content, maxBytes);
-         let content = truncation.text;
-
-         if (truncation.truncated) {
-            content += `\n\n---\n*[Output truncated: showing ${formatBytes(maxBytes)} of ${formatBytes(truncation.byteLength)}]*`;
-         }
+         const truncation = applyTruncation(extracted.content, maxBytes, normalizedUrl);
 
          return {
             url: normalizedUrl,
             title: extracted.title,
-            content,
+            content: truncation.content,
             contentType: "application/pdf",
             statusCode: response.status,
             truncated: truncation.truncated,
             byteLength: truncation.byteLength,
+            fullByteLength: truncation.fullByteLength,
+            lines: truncation.lines,
+            totalLines: truncation.totalLines,
+            tempFilePath: truncation.tempFilePath,
             provider: "local"
          };
       }
@@ -243,19 +240,19 @@ async function executeRemoteHttpFetch(normalizedUrl: string, options: FetchOptio
       const format = options.format ?? "markdown";
 
       if (format === "html") {
-         const truncation = truncateText(bodyText, maxBytes);
-         let content = truncation.text;
-         if (truncation.truncated) {
-            content += `\n\n---\n*[Output truncated: showing ${formatBytes(maxBytes)} of ${formatBytes(truncation.byteLength)}]*`;
-         }
+         const truncation = applyTruncation(bodyText, maxBytes, normalizedUrl);
          return {
             url: normalizedUrl,
             title: undefined,
-            content,
+            content: truncation.content,
             contentType,
             statusCode: response.status,
             truncated: truncation.truncated,
             byteLength: truncation.byteLength,
+            fullByteLength: truncation.fullByteLength,
+            lines: truncation.lines,
+            totalLines: truncation.totalLines,
+            tempFilePath: truncation.tempFilePath,
             provider: "local"
          };
       }
@@ -263,19 +260,19 @@ async function executeRemoteHttpFetch(normalizedUrl: string, options: FetchOptio
       const isHtml = contentType.includes("text/html") || contentType.includes("application/xhtml+xml");
 
       if (!isHtml) {
-         const truncation = truncateText(bodyText, maxBytes);
-         let content = truncation.text;
-         if (truncation.truncated) {
-            content += `\n\n---\n*[Output truncated: showing ${formatBytes(maxBytes)} of ${formatBytes(truncation.byteLength)}]*`;
-         }
+         const truncation = applyTruncation(bodyText, maxBytes, normalizedUrl);
          return {
             url: normalizedUrl,
             title: undefined,
-            content,
+            content: truncation.content,
             contentType,
             statusCode: response.status,
             truncated: truncation.truncated,
             byteLength: truncation.byteLength,
+            fullByteLength: truncation.fullByteLength,
+            lines: truncation.lines,
+            totalLines: truncation.totalLines,
+            tempFilePath: truncation.tempFilePath,
             provider: "local"
          };
       }
@@ -285,21 +282,20 @@ async function executeRemoteHttpFetch(normalizedUrl: string, options: FetchOptio
          includeLinks: options.includeLinks
       });
 
-      const truncation = truncateText(extracted.content, maxBytes);
-      let content = truncation.text;
-
-      if (truncation.truncated) {
-         content += `\n\n---\n*[Output truncated: showing ${formatBytes(maxBytes)} of ${formatBytes(truncation.byteLength)}]*`;
-      }
+      const truncation = applyTruncation(extracted.content, maxBytes, normalizedUrl);
 
       return {
          url: normalizedUrl,
          title: extracted.title,
-         content,
+         content: truncation.content,
          contentType,
          statusCode: response.status,
          truncated: truncation.truncated,
          byteLength: truncation.byteLength,
+         fullByteLength: truncation.fullByteLength,
+         lines: truncation.lines,
+         totalLines: truncation.totalLines,
+         tempFilePath: truncation.tempFilePath,
          links: extracted.links,
          provider: "local"
       };

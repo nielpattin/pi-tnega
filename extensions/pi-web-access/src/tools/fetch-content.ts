@@ -22,13 +22,6 @@ export const FetchContentToolParamsSchema = Type.Object(
             description: "Format of the returned content ('markdown', 'text', or 'html'). Defaults to 'markdown'."
          })
       ),
-      max_bytes: Type.Optional(
-         Type.Integer({
-            minimum: 1000,
-            maximum: 500000,
-            description: "Maximum content byte limit before truncation. Defaults to 50,000."
-         })
-      ),
       include_links: Type.Optional(
          Type.Boolean({
             description: "Whether to extract and append external links found on the page."
@@ -54,7 +47,6 @@ export async function handleFetchContent(
       url: params.url,
       provider: params.provider,
       format: params.format,
-      maxBytes: params.max_bytes,
       includeLinks: params.include_links,
       signal
    });

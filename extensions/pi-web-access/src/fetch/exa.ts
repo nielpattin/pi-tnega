@@ -1,6 +1,7 @@
 import { getWebAccessConfig } from "../config.ts";
 import type { FetchOptions, FetchResult } from "../domain.ts";
-import { formatBytes, formatCost, truncateText } from "../utils/text.ts";
+import { applyTruncation } from "../utils/temp.ts";
+import { formatCost } from "../utils/text.ts";
 import { fetchWithTimeout } from "./client.ts";
 
 interface ExaContentsItem {
@@ -135,23 +136,22 @@ export async function fetchWithExa(url: string, options: FetchOptions): Promise<
       const pageTitle = item.title || undefined;
       const rawText = item.text || item.summary || "";
 
-      const truncation = truncateText(rawText, maxBytes);
-      let content = truncation.text;
-
-      if (truncation.truncated) {
-         content += `\n\n---\n*[Output truncated: showing ${formatBytes(maxBytes)} of ${formatBytes(truncation.byteLength)}]*`;
-      }
+      const truncation = applyTruncation(rawText, maxBytes, url);
 
       return {
          url,
          title: pageTitle,
          author: item.author || undefined,
          publishedDate: item.publishedDate || undefined,
-         content,
+         content: truncation.content,
          contentType: "text/plain",
          statusCode: 200,
          truncated: truncation.truncated,
          byteLength: truncation.byteLength,
+         fullByteLength: truncation.fullByteLength,
+         lines: truncation.lines,
+         totalLines: truncation.totalLines,
+         tempFilePath: truncation.tempFilePath,
          provider: "exa",
          requestId: data.requestId,
          serverTimeMs: data.searchTime,

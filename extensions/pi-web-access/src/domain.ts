@@ -81,6 +81,10 @@ export interface FetchResult {
    readonly statusCode: number;
    readonly truncated: boolean;
    readonly byteLength: number;
+   readonly fullByteLength?: number;
+   readonly lines?: number;
+   readonly totalLines?: number;
+   readonly tempFilePath?: string;
    readonly provider?: string;
    readonly durationMs?: number;
    readonly serverTimeMs?: number;
