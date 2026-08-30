@@ -1,4 +1,4 @@
-export type SearchProviderId = "duckduckgo" | "exa" | "brave" | "tavily" | "firecrawl" | "gemini";
+export type SearchProviderId = "firecrawl" | "exa" | "tavily";
 
 export interface SearchItem {
    readonly title: string;
@@ -37,6 +37,7 @@ export type SearchCategory =
 
 export interface SearchOptions {
    readonly query: string;
+   readonly queries?: ReadonlyArray<string>;
    readonly provider?: SearchProviderId | "auto";
    readonly mode?: SearchMode;
    readonly limit?: number;
@@ -103,7 +104,7 @@ export interface SearchProviderDefinition {
 
 export type ResearchDepth = "fast" | "deep" | "exhaustive";
 
-export type ResearchProviderId = "firecrawl" | "exa";
+export type ResearchProviderId = "llm" | "exa";
 
 export interface ResearchSource {
    readonly title: string;
@@ -133,8 +134,9 @@ export interface ResearchResponse {
 }
 
 export interface ResearchOptions {
-   readonly query: string;
-   readonly provider?: ResearchProviderId | "auto";
+   readonly query?: string;
+   readonly queries?: ReadonlyArray<string>;
+   readonly provider?: ResearchProviderId;
    readonly depth?: ResearchDepth;
    readonly includeDomains?: ReadonlyArray<string>;
    readonly excludeDomains?: ReadonlyArray<string>;

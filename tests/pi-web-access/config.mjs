@@ -26,4 +26,15 @@ test("getWebAccessConfig provides default config values and reads from .ext-conf
    assert.equal(typeof config.timeoutMs, "number");
    assert.ok(config.timeoutMs > 0);
    assert.ok(config.userAgent.includes("PiWebAccess"));
+
+   // Test namespaced objects
+   assert.ok(config.search && typeof config.search === "object");
+   assert.ok(config.research && typeof config.research === "object");
+   assert.ok(config.fetch && typeof config.fetch === "object");
+   assert.ok(config.keys && typeof config.keys === "object");
+   assert.equal(config.research.provider, "llm");
+   assert.equal(config.fetch.maxBytes, config.maxBytes);
+   assert.equal(config.fetch.timeoutMs, config.timeoutMs);
+   assert.ok(config.research.searchProvider === undefined || typeof config.research.searchProvider === "string");
+   assert.ok(config.research.fetchProvider === undefined || typeof config.research.fetchProvider === "string");
 });

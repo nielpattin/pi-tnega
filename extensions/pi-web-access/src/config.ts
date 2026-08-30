@@ -2,32 +2,96 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { SearchProviderId } from "./domain.ts";
+import type { FetchProviderId, ResearchDepth, SearchProviderId } from "./domain.ts";
+
+export interface SearchConfig {
+   readonly defaultProvider?: SearchProviderId;
+   readonly userLocation?: string;
+   readonly limit?: number;
+}
+
+export interface ResearchConfig {
+   readonly provider?: "llm" | "exa";
+   readonly model?: string;
+   readonly modelFallbacks?: ReadonlyArray<string>;
+   readonly depth?: ResearchDepth;
+   readonly searchProvider?: SearchProviderId | "auto";
+   readonly fetchProvider?: FetchProviderId;
+}
+
+export interface FetchConfig {
+   readonly provider?: FetchProviderId;
+   readonly maxBytes?: number;
+   readonly timeoutMs?: number;
+   readonly userAgent?: string;
+}
+
+export interface KeysConfig {
+   readonly firecrawl?: string;
+   readonly exa?: string;
+   readonly tavily?: string;
+}
 
 export interface WebAccessConfigFile {
+   // Namespaced object sections
+   search?: {
+      defaultProvider?: SearchProviderId;
+      userLocation?: string;
+      limit?: number;
+   };
+   research?: {
+      provider?: "llm" | "exa";
+      model?: string;
+      modelFallbacks?: string[];
+      depth?: ResearchDepth;
+      searchProvider?: SearchProviderId | "auto";
+      fetchProvider?: FetchProviderId;
+   };
+   fetch?: {
+      provider?: FetchProviderId;
+      maxBytes?: number;
+      timeoutMs?: number;
+      userAgent?: string;
+   };
+   keys?: {
+      firecrawl?: string;
+      exa?: string;
+      tavily?: string;
+   };
+
+   // Backwards-compatible legacy flat properties
    defaultProvider?: SearchProviderId;
+   researchProvider?: "llm" | "exa";
+   researchModel?: string;
+   researchModelFallbacks?: string[];
    maxBytes?: number;
    timeoutMs?: number;
    userAgent?: string;
    userLocation?: string;
-   exaApiKey?: string;
-   braveApiKey?: string;
-   tavilyApiKey?: string;
-   geminiApiKey?: string;
    firecrawlApiKey?: string;
+   exaApiKey?: string;
+   tavilyApiKey?: string;
 }
 
 export interface WebAccessConfig {
+   // Namespaced sections
+   readonly search: SearchConfig;
+   readonly research: ResearchConfig;
+   readonly fetch: FetchConfig;
+   readonly keys: KeysConfig;
+
+   // Flat getters for convenience & backwards compatibility
    readonly defaultProvider?: SearchProviderId;
+   readonly researchProvider?: "llm" | "exa";
+   readonly researchModel?: string;
+   readonly researchModelFallbacks?: ReadonlyArray<string>;
    readonly maxBytes: number;
    readonly timeoutMs: number;
    readonly userAgent: string;
    readonly userLocation?: string;
-   readonly exaApiKey?: string;
-   readonly braveApiKey?: string;
-   readonly tavilyApiKey?: string;
-   readonly geminiApiKey?: string;
    readonly firecrawlApiKey?: string;
+   readonly exaApiKey?: string;
+   readonly tavilyApiKey?: string;
 }
 
 export const DEFAULT_MAX_BYTES = 50_000;
@@ -105,37 +169,95 @@ export function getWebAccessConfig(): WebAccessConfig {
    const fileConfig = readWebAccessConfigFile();
    const authData = readAuthJson();
 
-   const parsedMaxBytes = Number.parseInt(env.PI_WEB_ACCESS_DEFAULT_MAX_BYTES ?? String(fileConfig.maxBytes ?? ""), 10);
-   const parsedTimeout = Number.parseInt(env.PI_WEB_ACCESS_TIMEOUT_MS ?? String(fileConfig.timeoutMs ?? ""), 10);
+   const parsedMaxBytes = Number.parseInt(
+      env.PI_WEB_ACCESS_DEFAULT_MAX_BYTES ?? String(fileConfig.fetch?.maxBytes ?? fileConfig.maxBytes ?? ""),
+      10
+   );
+   const parsedTimeout = Number.parseInt(
+      env.PI_WEB_ACCESS_TIMEOUT_MS ?? String(fileConfig.fetch?.timeoutMs ?? fileConfig.timeoutMs ?? ""),
+      10
+   );
 
-   const geminiKey =
-      env.GEMINI_API_KEY ||
-      env.GOOGLE_API_KEY ||
-      env.GOOGLE_GENERATIVE_AI_API_KEY ||
-      fileConfig.geminiApiKey ||
-      extractApiKey(authData, "google") ||
-      extractApiKey(authData, "gemini");
+   const firecrawlKey =
+      env.FIRECRAWL_API_KEY ||
+      fileConfig.keys?.firecrawl ||
+      fileConfig.firecrawlApiKey ||
+      extractApiKey(authData, "firecrawl");
 
-   const exaKey = env.EXA_API_KEY || fileConfig.exaApiKey || extractApiKey(authData, "exa");
+   const exaKey = env.EXA_API_KEY || fileConfig.keys?.exa || fileConfig.exaApiKey || extractApiKey(authData, "exa");
 
-   const braveKey = env.BRAVE_API_KEY || fileConfig.braveApiKey || extractApiKey(authData, "brave");
+   const tavilyKey =
+      env.TAVILY_API_KEY || fileConfig.keys?.tavily || fileConfig.tavilyApiKey || extractApiKey(authData, "tavily");
 
-   const tavilyKey = env.TAVILY_API_KEY || fileConfig.tavilyApiKey || extractApiKey(authData, "tavily");
+   const defaultSearchProvider = (env.PI_WEB_SEARCH_DEFAULT_PROVIDER ||
+      fileConfig.search?.defaultProvider ||
+      fileConfig.defaultProvider ||
+      "firecrawl") as SearchProviderId | undefined;
 
-   const firecrawlKey = env.FIRECRAWL_API_KEY || fileConfig.firecrawlApiKey || extractApiKey(authData, "firecrawl");
+   const userLocation = env.PI_WEB_ACCESS_USER_LOCATION || fileConfig.search?.userLocation || fileConfig.userLocation;
+
+   const researchProvider =
+      (env.PI_WEB_RESEARCH_PROVIDER as "llm" | "exa" | undefined) ||
+      fileConfig.research?.provider ||
+      fileConfig.researchProvider ||
+      "llm";
+
+   const researchModel = env.PI_WEB_RESEARCH_MODEL || fileConfig.research?.model || fileConfig.researchModel;
+   const researchModelFallbacks = fileConfig.research?.modelFallbacks || fileConfig.researchModelFallbacks;
+   const researchDepth = fileConfig.research?.depth;
+   const researchSearchProvider = fileConfig.research?.searchProvider;
+   const researchFetchProvider = fileConfig.research?.fetchProvider;
+
+   const fetchProvider = fileConfig.fetch?.provider;
+   const maxBytes = Number.isFinite(parsedMaxBytes) && parsedMaxBytes > 0 ? parsedMaxBytes : DEFAULT_MAX_BYTES;
+   const timeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : DEFAULT_TIMEOUT_MS;
+   const userAgent =
+      env.PI_WEB_ACCESS_USER_AGENT || fileConfig.fetch?.userAgent || fileConfig.userAgent || DEFAULT_USER_AGENT;
+
+   const search: SearchConfig = {
+      defaultProvider: defaultSearchProvider,
+      userLocation,
+      limit: fileConfig.search?.limit
+   };
+
+   const research: ResearchConfig = {
+      provider: researchProvider,
+      model: researchModel,
+      modelFallbacks: researchModelFallbacks,
+      depth: researchDepth,
+      searchProvider: researchSearchProvider,
+      fetchProvider: researchFetchProvider
+   };
+
+   const fetch: FetchConfig = {
+      provider: fetchProvider,
+      maxBytes,
+      timeoutMs,
+      userAgent
+   };
+
+   const keys: KeysConfig = {
+      firecrawl: firecrawlKey,
+      exa: exaKey,
+      tavily: tavilyKey
+   };
 
    return {
-      defaultProvider: (env.PI_WEB_SEARCH_DEFAULT_PROVIDER || fileConfig.defaultProvider) as
-         | SearchProviderId
-         | undefined,
-      maxBytes: Number.isFinite(parsedMaxBytes) && parsedMaxBytes > 0 ? parsedMaxBytes : DEFAULT_MAX_BYTES,
-      timeoutMs: Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : DEFAULT_TIMEOUT_MS,
-      userAgent: env.PI_WEB_ACCESS_USER_AGENT || fileConfig.userAgent || DEFAULT_USER_AGENT,
-      userLocation: env.PI_WEB_ACCESS_USER_LOCATION || fileConfig.userLocation,
+      search,
+      research,
+      fetch,
+      keys,
+
+      defaultProvider: defaultSearchProvider,
+      researchProvider,
+      researchModel,
+      researchModelFallbacks,
+      maxBytes,
+      timeoutMs,
+      userAgent,
+      userLocation,
+      firecrawlApiKey: firecrawlKey,
       exaApiKey: exaKey,
-      braveApiKey: braveKey,
-      tavilyApiKey: tavilyKey,
-      geminiApiKey: geminiKey,
-      firecrawlApiKey: firecrawlKey
+      tavilyApiKey: tavilyKey
    };
 }

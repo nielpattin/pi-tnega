@@ -1,66 +1,53 @@
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getWebAccessConfig } from "../config.ts";
 import type { ResearchOptions, ResearchProviderId, ResearchResponse } from "../domain.ts";
 import { researchExa } from "./exa.ts";
-import { researchFirecrawl } from "./firecrawl.ts";
+import { researchLLM } from "./llm.ts";
 
-export function resolveResearchProvider(requested?: ResearchProviderId | "auto"): ResearchProviderId | undefined {
-   if (requested && requested !== "auto") {
+export type ResearchProgressCallback = (partial: Partial<ResearchResponse>) => void;
+
+export function resolveResearchProvider(requested?: ResearchProviderId): ResearchProviderId {
+   if (requested) {
       return requested;
    }
 
    const config = getWebAccessConfig();
 
-   if (config.defaultProvider === "firecrawl" && config.firecrawlApiKey) {
-      return "firecrawl";
-   }
-   if (config.defaultProvider === "exa" && config.exaApiKey) {
+   if (config.researchProvider === "exa" && config.exaApiKey) {
       return "exa";
    }
 
-   if (config.firecrawlApiKey) {
-      return "firecrawl";
-   }
-   if (config.exaApiKey) {
-      return "exa";
-   }
-
-   return undefined;
+   return "llm";
 }
 
-export async function executeResearch(options: ResearchOptions): Promise<ResearchResponse> {
+export async function executeResearch(
+   options: ResearchOptions,
+   ctx?: ExtensionContext,
+   onProgress?: ResearchProgressCallback
+): Promise<ResearchResponse> {
    const startTime = Date.now();
-   const query = options.query.trim();
    const provider = resolveResearchProvider(options.provider);
-
-   if (!provider) {
-      return {
-         query,
-         provider: "research",
-         synthesis: "",
-         sources: [],
-         durationMs: Date.now() - startTime,
-         error: "No research provider configured. Please configure FIRECRAWL_API_KEY or EXA_API_KEY."
-      };
-   }
 
    let result: ResearchResponse;
 
    switch (provider) {
-      case "firecrawl":
-         result = await researchFirecrawl(options);
-         break;
       case "exa":
          result = await researchExa(options);
          break;
-      default:
-         result = {
-            query,
-            provider: "research",
-            synthesis: "",
-            sources: [],
-            error: `Unsupported research provider: "${String(provider)}"`
-         };
+
+      case "llm":
+      default: {
+         result = await researchLLM(options, ctx, onProgress);
+
+         // If in-harness search produced no results and Exa is configured, fallback to Exa Agent
+         if ((result.error || result.sources.length === 0) && getWebAccessConfig().exaApiKey) {
+            const exaResult = await researchExa(options);
+            if (!exaResult.error && exaResult.sources.length > 0) {
+               result = exaResult;
+            }
+         }
          break;
+      }
    }
 
    return {
@@ -68,3 +55,6 @@ export async function executeResearch(options: ResearchOptions): Promise<Researc
       durationMs: Date.now() - startTime
    };
 }
+
+export { researchLLM } from "./llm.ts";
+export { researchExa } from "./exa.ts";

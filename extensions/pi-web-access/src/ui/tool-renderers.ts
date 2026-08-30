@@ -25,12 +25,17 @@ function formatExpandHint(): string {
 export function renderSearchCall(args: unknown, theme: Theme): Component {
    const params = (args ?? {}) as {
       query?: string;
+      queries?: string[];
       provider?: string;
       mode?: string;
       limit?: number;
       category?: string;
    };
-   const queryText = params.query ? `"${params.query}"` : "";
+   const queryText = params.query
+      ? `"${params.query}"`
+      : params.queries && params.queries.length > 0
+        ? `[${params.queries.length} queries: "${params.queries[0]}", ...]`
+        : "";
    const providerText = params.provider && params.provider !== "auto" ? ` [${params.provider}]` : "";
    const modeText = params.mode && params.mode !== "auto" ? ` [${params.mode}]` : "";
    const categoryText = params.category ? ` (${params.category})` : "";
@@ -235,8 +240,12 @@ export function renderFetchResult(result: ToolResultLike, options: RenderOptions
 }
 
 export function renderResearchCall(args: unknown, theme: Theme): Component {
-   const params = (args ?? {}) as { query?: string; depth?: string; provider?: string };
-   const queryText = params.query ? `"${params.query}"` : "";
+   const params = (args ?? {}) as { query?: string; queries?: string[]; depth?: string; provider?: string };
+   const queryText = params.query
+      ? `"${params.query}"`
+      : params.queries && params.queries.length > 0
+        ? `[${params.queries.length} angles: "${params.queries[0]}", ...]`
+        : "";
    const depthText = params.depth ? ` [${params.depth}]` : " [deep]";
    const providerText = params.provider && params.provider !== "auto" ? ` (${params.provider})` : "";
 
@@ -247,13 +256,51 @@ export function renderResearchCall(args: unknown, theme: Theme): Component {
    );
 }
 
-export function renderResearchResult(result: ToolResultLike, options: RenderOptions, theme: Theme): Component {
-   if (options.isPartial) {
-      return new Text(theme.fg("warning", "Conducting deep web research..."), 0, 0);
-   }
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+export function renderResearchResult(result: ToolResultLike, options: RenderOptions, theme: Theme): Component {
    const details = result.details as ResearchResponse | undefined;
    const provider = details?.provider ?? "research";
+
+   if (options.isPartial) {
+      const activities = details?.activities ?? [];
+      const sources = details?.sources ?? [];
+      const durationMs = details?.durationMs ?? 0;
+      const durationText = ` (${formatDuration(durationMs)})`;
+      const spinnerIndex = Math.floor(durationMs / 100) % SPINNER_FRAMES.length;
+      const spinner = SPINNER_FRAMES[spinnerIndex] ?? "⟳";
+
+      if (activities.length === 0) {
+         return new Text(
+            theme.fg("warning", `${spinner} Initializing deep web research...`) + theme.fg("dim", durationText),
+            0,
+            0
+         );
+      }
+
+      const lines: string[] = [
+         theme.fg("warning", `${spinner} Deep Web Research in progress...`) + theme.fg("dim", durationText)
+      ];
+
+      // Show recent activity trace (up to 4 items)
+      const recentActivities = activities.slice(-4);
+      for (const act of recentActivities) {
+         let icon = "▸";
+         if (act.type === "decompose") icon = "◆";
+         else if (act.type === "search") icon = "🔍";
+         else if (act.type === "fetch") icon = "📄";
+         else if (act.type === "synthesis") icon = "⚡";
+
+         lines.push(`  ${theme.fg("accent", icon)} ${theme.fg("toolOutput", act.message)}`);
+      }
+
+      if (sources.length > 0) {
+         const countLabel = sources.length === 1 ? "1 source" : `${sources.length} sources`;
+         lines.push(`  ${theme.fg("dim", `Discovered ${countLabel} so far`)}`);
+      }
+
+      return new Text(lines.join("\n"), 0, 0);
+   }
 
    if (details?.error) {
       return new Text(theme.fg("error", `✗ Research failed (${provider}): ${details.error}`), 0, 0);

@@ -20,7 +20,8 @@ test("webSearchTool conforms to tool definition contract", () => {
    assert.equal(webSearch.webSearchTool.name, "web_search");
    assert.equal(typeof webSearch.webSearchTool.description, "string");
    assert.ok(webSearch.webSearchTool.parameters.properties.query);
-   assert.ok(webSearch.webSearchTool.parameters.properties.provider);
+   assert.ok(webSearch.webSearchTool.parameters.properties.queries);
+   assert.equal(webSearch.webSearchTool.parameters.properties.provider, undefined);
    assert.ok(webSearch.webSearchTool.parameters.properties.mode);
    assert.ok(webSearch.webSearchTool.parameters.properties.category);
    assert.ok(webSearch.webSearchTool.parameters.properties.includeDomains);
@@ -43,8 +44,9 @@ test("webResearchTool conforms to tool definition contract", () => {
    assert.equal(researchTools.webResearchTool.name, "web_research");
    assert.equal(typeof researchTools.webResearchTool.description, "string");
    assert.ok(researchTools.webResearchTool.parameters.properties.query);
+   assert.ok(researchTools.webResearchTool.parameters.properties.queries);
    assert.ok(researchTools.webResearchTool.parameters.properties.depth);
-   assert.ok(researchTools.webResearchTool.parameters.properties.provider);
+   assert.equal(researchTools.webResearchTool.parameters.properties.provider, undefined);
    assert.ok(researchTools.webResearchTool.parameters.properties.includeDomains);
    assert.ok(researchTools.webResearchTool.parameters.properties.excludeDomains);
    assert.ok(researchTools.webResearchTool.parameters.properties.systemPrompt);

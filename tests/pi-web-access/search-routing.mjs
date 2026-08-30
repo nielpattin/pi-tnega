@@ -6,20 +6,8 @@ const providers = await loadExtension("extensions/pi-web-access/src/providers/in
 const firecrawl = await loadExtension("extensions/pi-web-access/src/providers/firecrawl.ts");
 const exa = await loadExtension("extensions/pi-web-access/src/providers/exa.ts");
 
-test("DuckDuckGo provider is always available without credentials", () => {
-   assert.equal(providers.isProviderAvailable("duckduckgo"), true);
-   const available = providers.getAvailableProviders();
-   assert.ok(available.includes("duckduckgo"));
-});
-
-test("resolveProvider falls back to duckduckgo when no keys are configured", () => {
-   const resolved = providers.resolveProvider("auto");
-   assert.ok(typeof resolved === "string" && resolved.length > 0);
-});
-
 test("resolveProvider respects explicit provider request", () => {
-   assert.equal(providers.resolveProvider("duckduckgo"), "duckduckgo");
-   assert.equal(providers.resolveProvider("brave"), "brave");
+   assert.equal(providers.resolveProvider("tavily"), "tavily");
    assert.equal(providers.resolveProvider("exa"), "exa");
    assert.equal(providers.resolveProvider("firecrawl"), "firecrawl");
 });
@@ -43,15 +31,9 @@ test("resolveProvider prioritizes defaultProvider when configured and available"
    }
 });
 
-test("PROVIDERS registry contains all supported search engines", () => {
-   const expected = [
-      "duckduckgo",
-      "exa",
-      "brave",
-      "tavily",
-      "firecrawl",
-      "gemini"
-   ];
+test("PROVIDERS registry contains only firecrawl, exa, and tavily", () => {
+   const expected = ["firecrawl", "exa", "tavily"];
+   assert.equal(Object.keys(providers.PROVIDERS).length, 3);
    for (const name of expected) {
       assert.ok(providers.PROVIDERS[name], `Missing provider: ${name}`);
       assert.equal(providers.PROVIDERS[name].id, name);
@@ -169,5 +151,44 @@ test("searchExa answer mode falls back to /search only after a non-2xx answer re
       globalThis.fetch = originalFetch;
       if (originalExa) process.env.EXA_API_KEY = originalExa;
       else delete process.env.EXA_API_KEY;
+   }
+});
+
+test("executeSearch falls back sequentially to next available provider on error", async () => {
+   const originalFirecrawl = process.env.FIRECRAWL_API_KEY;
+   const originalTavily = process.env.TAVILY_API_KEY;
+   const originalFetch = globalThis.fetch;
+   const attemptedUrls = [];
+
+   process.env.FIRECRAWL_API_KEY = "test-firecrawl-key";
+   process.env.TAVILY_API_KEY = "test-tavily-key";
+
+   globalThis.fetch = async (url) => {
+      attemptedUrls.push(String(url));
+      if (String(url).includes("firecrawl.dev") || String(url).includes("api.exa.ai")) {
+         return { ok: false, status: 500, text: async () => "Internal server error" };
+      }
+      return {
+         ok: true,
+         status: 200,
+         json: async () => ({
+            results: [{ title: "Tavily Fallback", url: "https://fallback.com", content: "Fallback text" }]
+         })
+      };
+   };
+
+   try {
+      const result = await providers.executeSearch({ query: "test fallback query", provider: "firecrawl" });
+      assert.ok(attemptedUrls.length >= 2);
+      assert.ok(attemptedUrls.some((u) => u.includes("firecrawl.dev")));
+      assert.ok(attemptedUrls.some((u) => u.includes("tavily.com")));
+      assert.equal(result.provider, "tavily");
+      assert.equal(result.results.length, 1);
+   } finally {
+      globalThis.fetch = originalFetch;
+      if (originalFirecrawl) process.env.FIRECRAWL_API_KEY = originalFirecrawl;
+      else delete process.env.FIRECRAWL_API_KEY;
+      if (originalTavily) process.env.TAVILY_API_KEY = originalTavily;
+      else delete process.env.TAVILY_API_KEY;
    }
 });

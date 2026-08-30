@@ -6,19 +6,20 @@ import { renderResearchCall, renderResearchResult } from "../ui/tool-renderers.t
 
 export const WebResearchToolParamsSchema = Type.Object(
    {
-      query: Type.String({
-         minLength: 1,
-         description: "Topic, question, or assertion to perform deep web research on."
-      }),
+      query: Type.Optional(
+         Type.String({
+            description: "Main topic, question, or assertion to perform deep web research on."
+         })
+      ),
+      queries: Type.Optional(
+         Type.Array(Type.String(), {
+            description: "Optional list of 2-4 varied query angles searched in parallel for multi-perspective research."
+         })
+      ),
       depth: Type.Optional(
          Type.Union([Type.Literal("fast"), Type.Literal("deep"), Type.Literal("exhaustive")], {
             description:
-               "Research depth and rigor: 'fast' (quick synthesis), 'deep' (standard multi-step research), 'exhaustive' (broad comprehensive investigation). Defaults to 'deep'."
-         })
-      ),
-      provider: Type.Optional(
-         Type.Union([Type.Literal("auto"), Type.Literal("firecrawl"), Type.Literal("exa")], {
-            description: "Research provider to use ('firecrawl', 'exa'). Defaults to 'auto'."
+               "Research depth and rigor: 'fast' (quick synthesis), 'deep' (standard multi-angle research), 'exhaustive' (broad comprehensive investigation). Defaults to 'deep'."
          })
       ),
       includeDomains: Type.Optional(
@@ -39,20 +40,20 @@ export const WebResearchToolParamsSchema = Type.Object(
       systemPrompt: Type.Optional(
          Type.String({
             description:
-               "Custom steering instructions or persona guidance for the research agent (e.g. 'Focus on official SDK migration guides and breaking changes')."
+               "Custom steering instructions or persona guidance for the research synthesis (e.g. 'Focus on official SDK migration guides and breaking changes')."
          })
       )
    },
    {
       description:
-         "Conduct in-depth web research on a topic using Firecrawl Deep Research or Exa Deep Reasoning, combining multi-step crawling, deep scraping, and synthesized analysis with source citations."
+         "Conduct in-depth web research on a topic using multi-query search decomposition, page scraping, and LLM synthesized analysis with source citations."
    }
 );
 
 export type WebResearchToolParams = Static<typeof WebResearchToolParamsSchema>;
 
 export function formatResearchTextResponse(response: ResearchResponse): string {
-   if (response.error) {
+   if (response.error && response.sources.length === 0) {
       return `Research failed with provider "${response.provider}": ${response.error}`;
    }
 
@@ -80,19 +81,32 @@ export async function handleWebResearch(
    _toolCallId: string,
    params: WebResearchToolParams,
    signal?: AbortSignal,
-   _onUpdate?: unknown,
-   _ctx?: ExtensionContext
+   onUpdate?: (partial: AgentToolResult<ResearchResponse>) => void,
+   ctx?: ExtensionContext
 ): Promise<AgentToolResult<ResearchResponse>> {
-   const response = await executeResearch({
-      query: params.query,
-      depth: params.depth,
-      provider: params.provider,
-      includeDomains: params.includeDomains,
-      excludeDomains: params.excludeDomains,
-      userLocation: params.userLocation,
-      systemPrompt: params.systemPrompt,
-      signal
-   });
+   const onProgress = onUpdate
+      ? (partial: Partial<ResearchResponse>) => {
+           onUpdate({
+              content: [{ type: "text", text: partial.synthesis || "" }],
+              details: partial as ResearchResponse
+           });
+        }
+      : undefined;
+
+   const response = await executeResearch(
+      {
+         query: params.query,
+         queries: params.queries,
+         depth: params.depth,
+         includeDomains: params.includeDomains,
+         excludeDomains: params.excludeDomains,
+         userLocation: params.userLocation,
+         systemPrompt: params.systemPrompt,
+         signal
+      },
+      ctx,
+      onProgress
+   );
 
    const formattedText = formatResearchTextResponse(response);
 
@@ -106,7 +120,9 @@ export const webResearchTool: ToolDefinition<typeof WebResearchToolParamsSchema,
    name: "web_research",
    label: "Web Research",
    description:
-      "Conduct in-depth web research on a topic, combining multi-query search, page scraping, and synthesized analysis with source citations.",
+      "Conduct in-depth web research on a topic, combining multi-query search decomposition, page scraping, and synthesized analysis with source citations. Self-contained and complete.",
+   promptSnippet:
+      "Use for complex questions or research topics. Returns a complete, fully cited research synthesis. Use this result directly to answer the user without performing redundant follow-up searches or manual fetches.",
    parameters: WebResearchToolParamsSchema,
    execute: handleWebResearch,
    renderCall: renderResearchCall,

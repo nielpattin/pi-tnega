@@ -51,7 +51,7 @@ function mapDepthToEffort(depth: "fast" | "deep" | "exhaustive" | undefined): st
 export async function researchExa(options: ResearchOptions): Promise<ResearchResponse> {
    const config = getWebAccessConfig();
    const apiKey = config.exaApiKey;
-   const query = options.query.trim();
+   const query = (options.query || (options.queries && options.queries[0]) || "").trim();
 
    if (!apiKey) {
       return {

@@ -6,7 +6,7 @@ const researchService = await loadExtension("extensions/pi-web-access/src/resear
 const researchTools = await loadExtension("extensions/pi-web-access/src/tools/web-research.ts");
 
 test("resolveResearchProvider respects explicit provider", () => {
-   assert.equal(researchService.resolveResearchProvider("firecrawl"), "firecrawl");
+   assert.equal(researchService.resolveResearchProvider("llm"), "llm");
    assert.equal(researchService.resolveResearchProvider("exa"), "exa");
 });
 
@@ -14,8 +14,9 @@ test("webResearchTool has valid parameters and schema", () => {
    assert.equal(researchTools.webResearchTool.name, "web_research");
    assert.equal(researchTools.webResearchTool.label, "Web Research");
    assert.ok(researchTools.webResearchTool.parameters.properties.query);
+   assert.ok(researchTools.webResearchTool.parameters.properties.queries);
    assert.ok(researchTools.webResearchTool.parameters.properties.depth);
-   assert.ok(researchTools.webResearchTool.parameters.properties.provider);
+   assert.equal(researchTools.webResearchTool.parameters.properties.provider, undefined);
    assert.ok(researchTools.webResearchTool.parameters.properties.includeDomains);
    assert.ok(researchTools.webResearchTool.parameters.properties.excludeDomains);
    assert.ok(researchTools.webResearchTool.parameters.properties.systemPrompt);
@@ -24,7 +25,7 @@ test("webResearchTool has valid parameters and schema", () => {
 test("formatResearchTextResponse formats synthesis and sources", () => {
    const formatted = researchTools.formatResearchTextResponse({
       query: "test topic",
-      provider: "firecrawl",
+      provider: "llm (google/gemini-3.6-flash)",
       synthesis: "Comprehensive summary of findings.",
       sources: [
          { title: "Docs", url: "https://docs.example.com", snippet: "Useful snippet text" }
