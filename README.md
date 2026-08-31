@@ -50,6 +50,7 @@ Package status below reflects the manifests in this checkout. A workspace packag
 | [btw](./extensions/btw/README.md)                                   | Independent side chat with explicit handoff to the parent session.                         | `@nielpattin/btw` `0.1.0`                                                                                                                       |
 | [copy-all](./extensions/copy-all/README.md)                         | Copy the active post-compaction conversation to the clipboard.                             | Private package, no version                                                                                                                     |
 | [notification](./extensions/notification/README.md)                 | Audio alerts when an agent turn completes.                                                 | Local extension, no `package.json`                                                                                                              |
+| [tps](./extensions/tps/README.md)                                   | Live token speed, TTFT, and agent-loop usage metrics.                                      | Local extension, no `package.json`                                                                                                              |
 | [pi-acks](./extensions/pi-acks/README.md)                           | Named OpenAI Codex subscription OAuth account management.                                  | Private package, `0.1.0`                                                                                                                        |
 | [pi-code-block-picker](./extensions/pi-code-block-picker/README.md) | Search and copy code blocks from session history.                                          | Local extension, no `package.json`                                                                                                              |
 | [pi-codex-usage](./extensions/pi-codex-usage/README.md)             | OpenAI Codex usage monitoring and response settings.                                       | Local extension, no `package.json`                                                                                                              |
@@ -78,7 +79,6 @@ These files live directly under `extensions/` and do not have package manifests:
 | [`files.ts`](./extensions/files.ts)                                         | Provides `/files` to list session files and open a selected file in VS Code. |
 | [`startup-timer.ts`](./extensions/startup-timer.ts)                         | Provides `/startup-time` to measure extension startup overhead.              |
 | [`stats.ts`](./extensions/stats.ts)                                         | Provides `/stats` for daily token usage across Pi sessions.                  |
-| [`tps.ts`](./extensions/tps.ts)                                             | Reports turn timing, token counts, and measured tokens per second.           |
 
 ## Common entrypoints
 
