@@ -77,19 +77,16 @@ const TOOL_MARKER_PALETTE: readonly TranscriptColor[] = [
 
 const RESULT_COUNT_TOOLS = new Set([
    "find",
-   "fffind",
    "glob",
    "grep",
-   "ffgrep",
-   "rtkfind",
-   "rtkgrep",
-   "web_search_exa",
-   "deep_search_exa",
+   "web_search",
+   "web_research",
+   "outline_site",
    "cortex_search",
    "cortex_list"
 ]);
 
-const LINE_COUNT_TOOLS = new Set(["read", "write", "edit", "ls", "bash", "powershell", "web_fetch_exa", "web_reader"]);
+const LINE_COUNT_TOOLS = new Set(["read", "write", "edit", "ls", "bash", "powershell", "fetch_content"]);
 
 export function toolMarkerColor(toolName: string | undefined): TranscriptColor {
    const known = toolName ? TOOL_MARKER_COLORS[toolName] : undefined;
@@ -222,13 +219,9 @@ export function toolArgumentSummary(toolName: string, args: unknown): string {
    const values = (() => {
       switch (toolName) {
          case "find":
-         case "fffind":
          case "glob":
-         case "rtkfind":
             return [textArgument(args, "path"), textArgument(args, "pattern")];
          case "grep":
-         case "ffgrep":
-         case "rtkgrep":
             return [textArgument(args, "pattern"), textArgument(args, "path")];
          case "read":
          case "write":
@@ -243,14 +236,14 @@ export function toolArgumentSummary(toolName: string, args: unknown): string {
             return [textArgument(args, "name"), textArgument(args, "command"), textArgument(args, "agent")];
          case "worker_cancel":
             return [textArgument(args, "id")];
-         case "web_search_exa":
-         case "deep_search_exa":
+         case "web_search":
+         case "web_research":
          case "cortex_search":
             return [textArgument(args, "query")];
-         case "web_fetch_exa":
-            return [...textArguments(args, "urls"), textArgument(args, "url")];
-         case "web_reader":
+         case "fetch_content":
             return [textArgument(args, "url")];
+         case "outline_site":
+            return [textArgument(args, "url"), textArgument(args, "search")];
          case "describe_image":
             return [textArgument(args, "filePath")];
          case "read_session":

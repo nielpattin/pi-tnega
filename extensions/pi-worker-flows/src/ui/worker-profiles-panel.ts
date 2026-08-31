@@ -78,8 +78,15 @@ export interface AgentsPanelOptions {
 
 /** Structured completion is supplied by the workflow runner when a schema is requested. */
 export const PROFILE_LOCKED_TOOLS = new Set(["structured_output"]);
-/** Workflow children must not recursively orchestrate or ask the parent questions. */
-export const DISABLED_NESTED_TOOLS = new Set(["workflow", "ask_user"]);
+/** Workflow and worker children must not recursively orchestrate or spawn nested workers. */
+export const DISABLED_NESTED_TOOLS = new Set([
+   "workflow",
+   "ask_user",
+   "worker_spawn",
+   "worker_list",
+   "worker_recover",
+   "worker_cancel"
+]);
 
 export interface AgentsPanelViewModel {
    agents: AgentDefinition[];
@@ -803,24 +810,51 @@ export class FullScreenAgentsManager implements Component, Focusable {
             promptSnippet: "Interactive question"
          },
          {
+            name: "worker_spawn",
+            description: "Spawn child workers. Disabled inside child workers.",
+            promptSnippet: "Worker delegation"
+         },
+         {
+            name: "worker_list",
+            description: "List child workers. Disabled inside child workers.",
+            promptSnippet: "List workers"
+         },
+         {
+            name: "worker_recover",
+            description: "Recover child workers. Disabled inside child workers.",
+            promptSnippet: "Recover workers"
+         },
+         {
+            name: "worker_cancel",
+            description: "Cancel child workers. Disabled inside child workers.",
+            promptSnippet: "Cancel workers"
+         },
+         {
             name: "structured_output",
             description: "Return the final structured workflow result when a schema is supplied.",
             promptSnippet: "Return structured workflow result"
          },
          {
-            name: "web_search_exa",
-            description: "Search the web using Exa AI search.",
-            promptSnippet: "Web search engine"
+            name: "web_search",
+            description: "Search the web using multi-engine routing with domain, freshness, and category targeting.",
+            promptSnippet: "Multi-engine web search"
          },
          {
-            name: "web_fetch_exa",
-            description: "Fetch text content from web URLs.",
-            promptSnippet: "Fetch web URL content"
+            name: "fetch_content",
+            description:
+               "Fetch and extract readable Markdown from web pages, local/remote PDFs, HTML, or raw GitHub files.",
+            promptSnippet: "Content scraping & PDF parsing"
          },
          {
-            name: "deep_search_exa",
-            description: "Deep web search for complex questions requiring in-depth multi-source research.",
-            promptSnippet: "Deep web research"
+            name: "web_research",
+            description:
+               "Deep web and academic literature research (~43M papers via Firecrawl Research Index) with source citations.",
+            promptSnippet: "Deep web & academic research"
+         },
+         {
+            name: "outline_site",
+            description: "Map sitemaps, doc links, and subpages for a domain.",
+            promptSnippet: "Site & documentation outline"
          }
       ];
       for (const toolDef of BASELINE_TOOLS) {

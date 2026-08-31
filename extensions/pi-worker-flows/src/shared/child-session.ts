@@ -14,17 +14,21 @@ import { deriveChildSessionDirectory } from "./child-session-dir.ts";
 const CHILD_SHUTDOWN_TIMEOUT_MS = 5_000;
 
 /** Tools that headless children must not receive. */
-export const CHILD_EXCLUDED_TOOL_NAMES = ["workflow", "ask_user"] as const;
-export const EXA_TOOL_NAMES = new Set([
-   "web_search_exa",
-   "web_search_advanced_exa",
-   "web_fetch_exa",
-   "deep_search_exa"
-]);
+export const CHILD_EXCLUDED_TOOL_NAMES = [
+   "workflow",
+   "ask_user",
+   "worker_spawn",
+   "worker_list",
+   "worker_recover",
+   "worker_cancel"
+] as const;
+export const WEB_ACCESS_TOOL_NAMES = new Set(["web_search", "fetch_content", "web_research", "outline_site"]);
 
 /** Filter worker-only tools out of the parent session active tool list. */
 export function filterParentSessionTools(activeTools: readonly string[]): string[] {
-   return activeTools.filter((name) => !EXA_TOOL_NAMES.has(name));
+   return activeTools.filter(
+      (name) => !CHILD_EXCLUDED_TOOL_NAMES.includes(name as (typeof CHILD_EXCLUDED_TOOL_NAMES)[number])
+   );
 }
 
 /** Deactivate worker-only tools in the parent session if currently active. */
@@ -43,11 +47,14 @@ export function deactivateWorkerOnlyToolsFromParent(pi: {
    }
 }
 
-/** Resolve explicitly requested web tools to the bundled Exa extension. */
+/** Resolve explicitly requested web tools to the bundled web-access extension. */
 export function getChildExtensionPathsForTools(tools: readonly string[], agentDir = getAgentDir()): string[] {
-   if (!tools.some((tool) => EXA_TOOL_NAMES.has(tool))) return [];
-   const exaExtensionPath = path.join(agentDir, "extensions", "pi-exa", "index.ts");
-   return existsSync(exaExtensionPath) ? [exaExtensionPath] : [];
+   if (!tools.some((tool) => WEB_ACCESS_TOOL_NAMES.has(tool))) return [];
+   const webAccessDirExtension = path.join(agentDir, "extensions", "pi-web-access", "index.ts");
+   if (existsSync(webAccessDirExtension)) return [webAccessDirExtension];
+   const webAccessSingleExtension = path.join(agentDir, "extensions", "pi-web-access.ts");
+   if (existsSync(webAccessSingleExtension)) return [webAccessSingleExtension];
+   return [];
 }
 
 /** Build the denylist for headless children. */

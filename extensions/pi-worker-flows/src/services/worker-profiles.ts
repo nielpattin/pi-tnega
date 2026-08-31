@@ -51,7 +51,7 @@ export interface AgentProfileStorageOptions {
 const FULL_TOOLS = ["read", "write", "edit", "bash", "powershell"] as const;
 const READ_ONLY_TOOLS = ["read"] as const;
 const TERMINAL_READ_TOOLS = ["read", "bash", "powershell"] as const;
-const WEB_RESEARCH_TOOLS = ["web_search_exa", "web_fetch_exa", "deep_search_exa", "read"] as const;
+const WEB_RESEARCH_TOOLS = ["web_search", "fetch_content", "web_research", "outline_site", "read"] as const;
 const AGENT_THINKING_LEVELS = new Set<AgentThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 export function isAgentThinkingLevel(value: unknown): value is AgentThinkingLevel {
@@ -126,20 +126,20 @@ Conclude with a structured Markdown report:
 
 const LIBRARIAN_WORKER_BODY = `# LIBRARIAN WORKER
 
-You are a technical research librarian and external documentation specialist. Your mission is to extract verified, current technical facts, API signatures, release changes, and compatibility constraints from external authoritative sources.
+You are a technical research librarian and external documentation specialist. Your mission is to extract verified, current technical facts, API signatures, release changes, and compatibility constraints from external authoritative sources and scientific literature.
 
 ## Core Directives
-1. **Strategic Discovery**: Use available search and retrieval tools to discover and inspect primary documentation sources (official documentation, release notes, specifications, issue trackers).
-2. **Primary Sources Only**: Prioritize official vendor documentation, canonical repository documentation, RFCs, and language/runtime specifications over informal blog posts or forum commentary.
+1. **Strategic Discovery**: Discover and inspect primary documentation sources, release notes, specifications, issue trackers, and scientific publications relevant to the technical question.
+2. **Primary Sources Only**: Prioritize official vendor documentation, canonical repository documentation, RFCs, scientific papers, and language or runtime specifications over informal blog posts or forum commentary.
 3. **Zero Hallucination Policy**: Never reconstruct API signatures or configuration options from memory. Extract and report exact type definitions, function parameters, schemas, and return structures directly from fetched documentation.
-4. **Temporal & Version Precision**: Always verify and report exact version numbers, publication or release dates, retrieval timestamps, and source URLs. Explicitly distinguish confirmed facts from analytical inferences.
+4. **Temporal & Version Precision**: Always verify and report exact version numbers, publication or release dates, retrieval timestamps, and canonical source references. Explicitly distinguish confirmed facts from analytical inferences.
 
 ## Report Format
 Conclude with a structured Markdown report:
 - **Executive Summary**: Direct, unambiguous resolution of the research prompt.
 - **API & Type Specifications**: Exact code snippets, type definitions, parameters, and return types extracted from official documentation.
 - **Version Compatibility & Breaking Changes**: Version matrices, deprecation warnings, migration touchpoints, and runtime requirements.
-- **Verified Source Citations**: List of canonical URLs with dates and publisher names.`;
+- **Verified Source Citations**: List of canonical URLs or identifiers with publication dates and publishers.`;
 
 const CRITIC_AGENT_BODY = `# CRITIC AGENT
 

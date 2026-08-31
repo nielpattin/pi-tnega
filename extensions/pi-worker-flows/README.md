@@ -7,7 +7,7 @@
 - Sandboxed inline JavaScript orchestration with `phase()`, `agent()`, `parallel()`, and `args`.
 - Bounded parallel execution with a maximum of four active agents and 32 total calls per run: up to 31 work agents plus the mandatory Summary.
 - Profile-based work agents. Workflow scripts select `worker`, `planner`, `explorer`, `critic`, `gatekeeper`, or `librarian` instead of selecting models, providers, or thinking effort directly for work.
-- The read-only `librarian` profile uses the Exa web tools to gather current documentation, release, API, version, and compatibility information with source URLs.
+- The read-only `librarian` profile uses `pi-web-access` tools (`web_search`, `fetch_content`, `web_research`, `outline_site`, and `read`) to gather current documentation, scientific literature, release notes, API signatures, and version compatibility information with verified citations.
 - Profile settings control work-agent tools, instructions, model selection, and thinking level.
 - Schema-driven `structured_output` results with a hardened final-action prompt contract and the existing `{ ok, output, structured, error }` result contract.
 - Automatic final Summary agent with its own system prompt and no tools. Its waiting record appears when the run starts, then receives the immediately preceding phase's structured results, and its final assistant text is the workflow result.
