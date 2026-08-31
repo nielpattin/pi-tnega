@@ -1,10 +1,6 @@
 # Repository Instructions
 
-## Non-negotiable rules
-
-- **Always use `rg` and `fd`:** Use `rg` for search and `fd` for finding files. Never use slow PowerShell search cmdlets (`Get-ChildItem`, `Select-String`).
-- **No unprompted releases or Git mutations:** Do not run `git commit`, `git push`, or release/publish flows unless the user explicitly requests it.
-- **Use surgical edits:** Touch only what the assignment requires. Preserve existing comments and structure unless changing them is necessary.
+Core rules for investigation, engineering discipline, and repository safety live in [APPEND_SYSTEM.md](./APPEND_SYSTEM.md) sections 1, 2, and 5.
 
 ## Context and Architecture
 

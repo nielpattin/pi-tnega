@@ -109,6 +109,30 @@ test("shows live default TPS status without registering a command", async () => 
    assert.ok(harness.statuses.some(({ text }) => /tok\/s/.test(text) && !/TPS: --/.test(text)));
 });
 
+test("uses cumulative provider usage for live TPS when available", () => {
+   withClock((setNow) => {
+      const harness = createHarness();
+      const { handlers, statuses, ctx } = harness;
+      const message = assistant(10);
+
+      setNow(1000);
+      handlers.get("agent_start")({ type: "agent_start" });
+      handlers.get("message_start")({ message });
+      setNow(1200);
+      handlers.get("message_update")({
+         message,
+         assistantMessageEvent: { type: "text_start", contentIndex: 0, partial: message }
+      }, ctx);
+      setNow(1300);
+      handlers.get("message_update")({
+         message,
+         assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "token", partial: message }
+      }, ctx);
+
+      assert.match(statuses.at(-1).text, /100\.0 tok\/s/);
+   });
+});
+
 test("reports the whole agent loop and interim stats while the loop continues", () => {
    withClock((setNow) => {
       const harness = createHarness();

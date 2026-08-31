@@ -6,7 +6,7 @@
 
 - Shows live `TPS` in the status bar using a one-second sliding window.
 - Tracks time to first token (`TTFT`).
-- Counts text, thinking, and `edit` or `write` tool-call deltas using the default direct strategy.
+- Counts text, thinking, and `edit` or `write` tool-call deltas, using provider-reported cumulative output usage when available.
 - Uses the same active-stream timer for live and final TPS, excluding prompt-processing tool waits.
 - Uses fixed default speed tiers with color-coded status-bar output.
 - Reports input, output, cache, total tokens, complete loop time, and the duration of the last assistant message.

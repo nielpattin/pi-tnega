@@ -34,6 +34,7 @@ type StreamUpdate = {
    contentIndex?: number;
    partial?: {
       content?: Array<{ type?: unknown; name?: unknown }>;
+      usage?: { output?: number };
    };
    toolCall?: { name?: unknown };
 };
@@ -297,6 +298,7 @@ class LiveTokenTracker {
    private streaming = false;
    private paused = false;
    private tokenCount = 0;
+   private countedUsageOutput = 0;
    private startTime: number | null = null;
    private endTime: number | null = null;
    private pauseStart: number | null = null;
@@ -313,12 +315,17 @@ class LiveTokenTracker {
       return this.elapsedMs;
    }
 
+   resetMessageUsage(): void {
+      this.countedUsageOutput = 0;
+   }
+
    start(): void {
       if (this.streaming) return;
 
       this.streaming = true;
       this.paused = false;
       this.tokenCount = 0;
+      this.countedUsageOutput = 0;
       this.startTime = nowMs();
       this.endTime = null;
       this.pauseStart = null;
@@ -327,9 +334,21 @@ class LiveTokenTracker {
       this.slidingWindow.reset();
    }
 
-   recordDelta(): void {
+   recordDelta(usageOutput?: number): void {
       if (!this.streaming) return;
       if (this.paused) this.resume();
+
+      if (typeof usageOutput === "number" && Number.isFinite(usageOutput) && usageOutput > 0) {
+         if (usageOutput <= this.countedUsageOutput) return;
+
+         const tokens = usageOutput - this.countedUsageOutput;
+         this.countedUsageOutput = usageOutput;
+         this.tokenCount += tokens;
+         const time = nowMs();
+         this.slidingWindow.record(tokens, time);
+         this.tpsValue = this.slidingWindow.getTps(time);
+         return;
+      }
 
       this.tokenCount++;
       const time = nowMs();
@@ -491,6 +510,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (!current || !isAssistantRole(message)) return;
+      current.tracker.resetMessageUsage();
       const time = nowMs();
       current.currentMessageStartMs = time;
       current.lastUpdateMs = time;
@@ -516,7 +536,7 @@ export default function (pi: ExtensionAPI) {
 
       if (streamEvent.type === "text_delta" || streamEvent.type === "thinking_delta") {
          current.tracker.start();
-         current.tracker.recordDelta();
+         current.tracker.recordDelta(streamEvent.partial?.usage?.output);
          renderStatus(ctx, current.tracker.tps);
          return;
       }
@@ -524,7 +544,7 @@ export default function (pi: ExtensionAPI) {
       if (streamEvent.type === "toolcall_delta") {
          if (TOKEN_GENERATION_TOOLS.has(getToolName(streamEvent) ?? "")) {
             current.tracker.start();
-            current.tracker.recordDelta();
+            current.tracker.recordDelta(streamEvent.partial?.usage?.output);
             renderStatus(ctx, current.tracker.tps);
          }
          return;
