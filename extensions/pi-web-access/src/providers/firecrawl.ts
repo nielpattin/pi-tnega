@@ -66,13 +66,10 @@ export async function searchFirecrawl(options: SearchOptions): Promise<SearchRes
    const limit = options.limit ?? 5;
    const searchUrl = "https://api.firecrawl.dev/v2/search";
 
+   // Return search metadata only. Full page content is fetched separately through fetch_content.
    const requestBody: Record<string, unknown> = {
       query,
-      limit,
-      scrapeOptions: {
-         formats: [{ type: "markdown" }],
-         onlyMainContent: true
-      }
+      limit
    };
 
    // Time-based search

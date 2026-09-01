@@ -57,6 +57,35 @@ test("searchFirecrawl returns descriptive error when FIRECRAWL_API_KEY is missin
    }
 });
 
+test("searchFirecrawl requests search metadata without scraping result pages", async () => {
+   const originalKey = process.env.FIRECRAWL_API_KEY;
+   const originalFetch = globalThis.fetch;
+   let requestBody;
+   process.env.FIRECRAWL_API_KEY = "test-firecrawl-key";
+   globalThis.fetch = async (_url, init) => {
+      requestBody = JSON.parse(init.body);
+      return {
+         ok: true,
+         status: 200,
+         json: async () => ({
+            data: [{ title: "Result", url: "https://example.com", description: "Description" }],
+            creditsUsed: 2
+         })
+      };
+   };
+
+   try {
+      const result = await firecrawl.searchFirecrawl({ query: "test query", limit: 5 });
+      assert.equal(requestBody.limit, 5);
+      assert.equal(requestBody.scrapeOptions, undefined);
+      assert.equal(result.cost, "2 credits");
+   } finally {
+      globalThis.fetch = originalFetch;
+      if (originalKey) process.env.FIRECRAWL_API_KEY = originalKey;
+      else delete process.env.FIRECRAWL_API_KEY;
+   }
+});
+
 test("resolveProvider prioritizes answer-capable engines for mode='answer'", () => {
    const originalExa = process.env.EXA_API_KEY;
    const originalFirecrawl = process.env.FIRECRAWL_API_KEY;
