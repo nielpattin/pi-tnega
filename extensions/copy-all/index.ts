@@ -1,5 +1,5 @@
 import { spawn, execSync } from "node:child_process";
-import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Cause, Data, Effect, Exit } from "effect";
 
 export class ClipboardError extends Data.TaggedError("ClipboardError")<{
@@ -180,23 +180,38 @@ async function runClipboardCopy(text: string, signal: AbortSignal | undefined) {
    throw new Error(first?.message ?? Cause.pretty(exit.cause));
 }
 
+type CopyAllContext = Pick<ExtensionCommandContext, "waitForIdle" | "sessionManager" | "ui" | "signal">;
+type ClipboardCopy = (text: string, signal: AbortSignal | undefined) => Promise<void>;
+
+export async function copyAllFromContext(
+   ctx: CopyAllContext,
+   copyClipboard: ClipboardCopy = runClipboardCopy
+): Promise<void> {
+   await ctx.waitForIdle();
+
+   // buildContextEntries drops pre-compaction history; getBranch() does not.
+   const sections = formatCopySections(ctx.sessionManager.buildContextEntries());
+
+   if (sections.length === 0) {
+      ctx.ui.notify("No user or assistant messages to copy", "info");
+      return;
+   }
+
+   const text = sections.join("\n\n---\n\n");
+   const signal = ctx.signal;
+
+   // The command context can become stale while the clipboard process runs.
+   // Notify before the await so no session-bound context is used afterward.
+   ctx.ui.notify(`Copying ${sections.length} sections to clipboard`, "info");
+   await copyClipboard(text, signal);
+}
+
 export default function (pi: ExtensionAPI) {
    pi.registerCommand("copy-all", {
       description:
          "Copy the compaction summary and user/assistant messages from the last compaction to the active leaf",
       handler: async (_args, ctx) => {
-         await ctx.waitForIdle();
-
-         // buildContextEntries drops pre-compaction history; getBranch() does not.
-         const sections = formatCopySections(ctx.sessionManager.buildContextEntries());
-
-         if (sections.length === 0) {
-            ctx.ui.notify("No user or assistant messages to copy", "info");
-            return;
-         }
-
-         await runClipboardCopy(sections.join("\n\n---\n\n"), ctx.signal);
-         ctx.ui.notify(`Copied ${sections.length} sections to clipboard`, "info");
+         await copyAllFromContext(ctx);
       }
    });
 }
