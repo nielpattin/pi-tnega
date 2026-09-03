@@ -57,9 +57,14 @@ function assistant(output, model = "test-model") {
 
 function withClock(run) {
    const performanceObject = globalThis.performance;
-   const originalNow = performanceObject.now;
+   const originalPerformanceNow = performanceObject.now;
+   const originalDateNow = Date.now;
    let now = 0;
    Object.defineProperty(performanceObject, "now", {
+      configurable: true,
+      value: () => now
+   });
+   Object.defineProperty(Date, "now", {
       configurable: true,
       value: () => now
    });
@@ -71,7 +76,11 @@ function withClock(run) {
    } finally {
       Object.defineProperty(performanceObject, "now", {
          configurable: true,
-         value: originalNow
+         value: originalPerformanceNow
+      });
+      Object.defineProperty(Date, "now", {
+         configurable: true,
+         value: originalDateNow
       });
    }
 }
@@ -185,5 +194,40 @@ test("reports the whole agent loop and interim stats while the loop continues", 
       assert.match(notifications[1].text, /loop 3\.0s/);
       assert.match(notifications[1].text, /last message 0\.5s/);
       assert.match(statuses.at(-1).text, /5\.9 tok\/s/);
+   });
+});
+
+test("reports local prompt and loop end times", () => {
+   withClock((setNow) => {
+      const harness = createHarness();
+      const { handlers, notifications, ctx } = harness;
+      const prompt = { role: "user", content: "test prompt", timestamp: 1000 };
+      const message = assistant(4);
+
+      setNow(1000);
+      handlers.get("agent_start")({ type: "agent_start" });
+      handlers.get("message_start")({ message: prompt });
+      setNow(1100);
+      handlers.get("message_start")({ message });
+      setNow(1200);
+      handlers.get("message_update")({
+         message,
+         assistantMessageEvent: { type: "text_start", contentIndex: 0, partial: message }
+      }, ctx);
+      for (const time of [1300, 1400, 1500]) {
+         setNow(time);
+         handlers.get("message_update")({
+            message,
+            assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "token", partial: message }
+         }, ctx);
+      }
+      setNow(1600);
+      handlers.get("message_end")({ message }, ctx);
+      setNow(2000);
+      handlers.get("agent_end")({ messages: [message] }, ctx);
+
+      assert.equal(notifications.length, 1);
+      assert.ok(notifications[0].text.includes(`prompt ${new Date(prompt.timestamp).toLocaleTimeString()}`));
+      assert.ok(notifications[0].text.includes(`end ${new Date(2000).toLocaleTimeString()}`));
    });
 });

@@ -10,6 +10,7 @@
 - Uses the same active-stream timer for live and final TPS, excluding prompt-processing tool waits.
 - Uses fixed default speed tiers with color-coded status-bar output.
 - Reports input, output, cache, total tokens, complete loop time, and the duration of the last assistant message.
+- Includes the local prompt time and loop end time in the final summary.
 - Reports an intermediate summary after a message when the agent continues with more work.
 - Does not register commands or read and write extension configuration.
 

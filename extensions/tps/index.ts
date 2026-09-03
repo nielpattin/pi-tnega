@@ -201,6 +201,13 @@ function isUserMessage(message: unknown): boolean {
    return message !== null && typeof message === "object" && (message as { role?: unknown }).role === "user";
 }
 
+function getMessageTimestamp(message: unknown): number | null {
+   if (message === null || typeof message !== "object") return null;
+
+   const timestamp = (message as { timestamp?: unknown }).timestamp;
+   return typeof timestamp === "number" && Number.isFinite(timestamp) ? timestamp : null;
+}
+
 function getToolName(event: StreamUpdate): string | undefined {
    if (typeof event.toolCall?.name === "string") return event.toolCall.name;
 
@@ -239,13 +246,24 @@ function renderStatus(ctx: ExtensionContext, tps: number | null): void {
    ctx.ui.setStatus(STATUS_KEY, `${theme.fg("dim", "⚡ TPS:")} ${coloredMeasurement}`);
 }
 
-function composeMessage(result: TpsComputation): string {
+function formatLocalTime(timestampMs: number | null): string {
+   return timestampMs === null ? "--" : new Date(timestampMs).toLocaleTimeString();
+}
+
+function composeMessage(
+   result: TpsComputation,
+   times?: { promptTimeMs: number | null; loopEndTimeMs: number }
+): string {
    const tps = result.tps !== null ? `${result.tps.toFixed(1)} tok/s` : "-- tok/s";
    const ttft = result.ttftMs === null ? "--" : `${Math.round(result.ttftMs)} ms`;
    const elapsedSeconds = result.totalMs / 1000;
    const lastMessage = result.lastMessageMs === null ? "--" : `${(result.lastMessageMs / 1000).toFixed(1)}s`;
+   const localTimes =
+      times === undefined
+         ? ""
+         : `, prompt ${formatLocalTime(times.promptTimeMs)}, end ${formatLocalTime(times.loopEndTimeMs)}`;
 
-   return `TPS ${tps}. TTFT ${ttft}. out ${result.tokens.output.toLocaleString()}, in ${result.tokens.input.toLocaleString()}, cache r/w ${result.tokens.cacheRead.toLocaleString()}/${result.tokens.cacheWrite.toLocaleString()}, total ${result.tokens.total.toLocaleString()}, loop ${elapsedSeconds.toFixed(1)}s, last message ${lastMessage}`;
+   return `TPS ${tps}. TTFT ${ttft}. out ${result.tokens.output.toLocaleString()}, in ${result.tokens.input.toLocaleString()}, cache r/w ${result.tokens.cacheRead.toLocaleString()}/${result.tokens.cacheWrite.toLocaleString()}, total ${result.tokens.total.toLocaleString()}, loop ${elapsedSeconds.toFixed(1)}s, last message ${lastMessage}${localTimes}`;
 }
 
 class SlidingWindow {
@@ -397,6 +415,7 @@ class LiveTokenTracker {
 
 interface LoopState {
    timing: TurnTiming;
+   promptTimeMs: number | null;
    tracker: LiveTokenTracker;
    currentMessageStartMs: number | null;
    lastUpdateMs: number;
@@ -422,6 +441,7 @@ function createLoopState(startMs: number, ttftStartMs?: number): LoopState {
          stallCount: 0,
          assistantMessages: []
       },
+      promptTimeMs: null,
       tracker: new LiveTokenTracker(),
       currentMessageStartMs: null,
       lastUpdateMs: 0,
@@ -469,12 +489,16 @@ function shouldReportIntermediate(state: LoopState, event: { toolResults: unknow
 export default function (pi: ExtensionAPI) {
    let current: LoopState | null = null;
    let pendingUserPromptStartMs: number | null = null;
+   let pendingUserPromptTimeMs: number | null = null;
+   let lastUserPromptTimeMs: number | null = null;
    const tpsCaps = new Map<string, number>();
 
    pi.on("session_start", (_event, ctx) => {
       current?.tracker.stop();
       current = null;
       pendingUserPromptStartMs = null;
+      pendingUserPromptTimeMs = null;
+      lastUserPromptTimeMs = null;
       renderStatus(ctx, null);
    });
 
@@ -482,13 +506,22 @@ export default function (pi: ExtensionAPI) {
       current?.tracker.stop();
       current = null;
       pendingUserPromptStartMs = null;
+      pendingUserPromptTimeMs = null;
+      lastUserPromptTimeMs = null;
       if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, undefined);
+   });
+
+   pi.on("before_agent_start", () => {
+      if (current) return;
+      pendingUserPromptTimeMs = Date.now();
    });
 
    pi.on("agent_start", () => {
       const startMs = nowMs();
+      if (pendingUserPromptTimeMs !== null) lastUserPromptTimeMs = pendingUserPromptTimeMs;
       current = createLoopState(startMs, pendingUserPromptStartMs ?? undefined);
       pendingUserPromptStartMs = null;
+      pendingUserPromptTimeMs = null;
    });
 
    pi.on("turn_start", () => {
@@ -501,10 +534,18 @@ export default function (pi: ExtensionAPI) {
       const message = event.message;
       if (isUserMessage(message)) {
          const promptStartMs = nowMs();
+         const promptTimeMs = getMessageTimestamp(message) ?? Date.now();
          if (!current) {
             pendingUserPromptStartMs = promptStartMs;
-         } else if (current.timing.firstTokenMs === null && current.timing.ttftStartMs === undefined) {
-            current.timing.ttftStartMs = promptStartMs;
+            pendingUserPromptTimeMs = promptTimeMs;
+         } else {
+            if (current.promptTimeMs === null) {
+               current.promptTimeMs = promptTimeMs;
+               lastUserPromptTimeMs = promptTimeMs;
+            }
+            if (current.timing.firstTokenMs === null && current.timing.ttftStartMs === undefined) {
+               current.timing.ttftStartMs = promptStartMs;
+            }
          }
          return;
       }
@@ -618,6 +659,7 @@ export default function (pi: ExtensionAPI) {
       const state = current;
       current = null;
       pendingUserPromptStartMs = null;
+      pendingUserPromptTimeMs = null;
 
       const finalAssistantMessages = event.messages.filter(isAssistantMessage);
       if (finalAssistantMessages.length > 0) {
@@ -638,6 +680,7 @@ export default function (pi: ExtensionAPI) {
       state.tracker.reconcileTotal(outputTokens);
 
       const loopEndMs = nowMs();
+      const loopEndTimeMs = Date.now();
       const tpsCap = state.modelKey ? tpsCaps.get(state.modelKey) : undefined;
       const result = computeTps(state.timing, loopEndMs, {
          isToolCall: state.isToolCall,
@@ -654,6 +697,11 @@ export default function (pi: ExtensionAPI) {
 
       if (!ctx.hasUI) return;
       renderStatus(ctx, state.tracker.tps);
-      if (result) ctx.ui.notify(composeMessage(result), "info");
+      if (result) {
+         ctx.ui.notify(
+            composeMessage(result, { promptTimeMs: state.promptTimeMs ?? lastUserPromptTimeMs, loopEndTimeMs }),
+            "info"
+         );
+      }
    });
 }
