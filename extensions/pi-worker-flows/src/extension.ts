@@ -97,6 +97,7 @@ import {
    capWorkflowModelToParentContext,
    createWorkflowResources,
    resolveModelById,
+   resolveWorkflowAgentModel,
    runAgent,
    runWorkflowSummary,
    type AgentOutcome
@@ -1197,16 +1198,17 @@ export default function workflows(pi: ExtensionAPI) {
                typeof opts.label === "string" && opts.label.trim() ? opts.label.trim().slice(0, 160) : `agent-${index}`;
             const profile = resolveAgentProfile(opts.agent ?? opts.profile, ctx.cwd);
 
+            const initialModel = profile ? resolveWorkflowAgentModel(ctx.modelRegistry, profile, ctx.model) : ctx.model;
             const record: AgentRecord = {
                index,
                label,
                phase: typeof opts.phase === "string" ? opts.phase.slice(0, 160) : details.currentPhase,
                state: "running",
                profile: profile?.name,
-               provider: ctx.model?.provider,
-               model: ctx.model?.id,
+               provider: initialModel?.provider ?? ctx.model?.provider,
+               model: initialModel?.id ?? ctx.model?.id,
                cwd: ctx.cwd,
-               contextWindow: ctx.model?.contextWindow,
+               contextWindow: initialModel?.contextWindow ?? ctx.model?.contextWindow,
                startedAt: Date.now(),
                preview: "",
                usage: emptyUsage(),
@@ -1254,9 +1256,10 @@ export default function workflows(pi: ExtensionAPI) {
                   // Profiles own model, tool, and thinking-level selection.
                   const thinkingLevel = profile.thinking ?? pi.getThinkingLevel();
                   record.profile = profile.name;
-                  record.provider = ctx.model?.provider;
-                  record.model = ctx.model?.id;
-                  record.contextWindow = ctx.model?.contextWindow;
+                  const targetModel = resolveWorkflowAgentModel(ctx.modelRegistry, profile, ctx.model);
+                  record.provider = targetModel?.provider ?? ctx.model?.provider;
+                  record.model = targetModel?.id ?? ctx.model?.id;
+                  record.contextWindow = targetModel?.contextWindow ?? ctx.model?.contextWindow;
                   emit();
 
                   const resources = await getResources(profile);

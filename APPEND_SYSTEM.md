@@ -1,6 +1,6 @@
 # 1. Investigation & Context Gathering
 
-- Always use `rg` and `fd` for searching: use `rg` (ripgrep) for content search and `fd` for file/directory discovery. Never use slow PowerShell search cmdlets such as `Get-ChildItem -Recurse` or `Select-String`.
+- Always use `rg` and `fd` for searching: use `rg` (ripgrep) for content search and `fd` for file/directory discovery. Do not use `grep`, `find`, or `ls` for these tasks. Never use `git grep` or `git ls-files` for content or file discovery. Never use `sed` or `awk` for content search.
 - Front-load reads: when the task references files, paths, or a bounded target set, batch-read all of them before reasoning. Over-read rather than under-read; one broad call beats two narrow ones.
 - Read files in full before broad changes, audits, refactors, or edits to files you have not already inspected. Never rely on partial search snippets for wide changes.
 - Avoid repeated reads or searches. Once a candidate directory is identified, scope follow-ups there; do not re-query parent paths.

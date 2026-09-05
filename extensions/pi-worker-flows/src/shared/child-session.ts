@@ -24,29 +24,6 @@ export const CHILD_EXCLUDED_TOOL_NAMES = [
 ] as const;
 export const WEB_ACCESS_TOOL_NAMES = new Set(["web_search", "fetch_content", "web_research", "outline_site"]);
 
-/** Filter worker-only tools out of the parent session active tool list. */
-export function filterParentSessionTools(activeTools: readonly string[]): string[] {
-   return activeTools.filter(
-      (name) => !CHILD_EXCLUDED_TOOL_NAMES.includes(name as (typeof CHILD_EXCLUDED_TOOL_NAMES)[number])
-   );
-}
-
-/** Deactivate worker-only tools in the parent session if currently active. */
-export function deactivateWorkerOnlyToolsFromParent(pi: {
-   getActiveTools(): string[];
-   setActiveTools(names: string[]): void;
-}): void {
-   try {
-      const active = pi.getActiveTools();
-      const filtered = filterParentSessionTools(active);
-      if (filtered.length !== active.length) {
-         pi.setActiveTools(filtered);
-      }
-   } catch {
-      // ignore
-   }
-}
-
 /** Resolve explicitly requested web tools to the bundled web-access extension. */
 export function getChildExtensionPathsForTools(tools: readonly string[], agentDir = getAgentDir()): string[] {
    if (!tools.some((tool) => WEB_ACCESS_TOOL_NAMES.has(tool))) return [];

@@ -22,7 +22,6 @@ import {
    flushPendingWrites
 } from "./services/workers-task-recovery.js";
 import { listWorkerProfiles } from "../services/worker-profiles.ts";
-import { deactivateWorkerOnlyToolsFromParent } from "../shared/child-session.ts";
 import {
    handleWorkerSpawn,
    handleWorkerList,
@@ -656,13 +655,6 @@ export function registerWorkersExtension(pi: ExtensionAPI, options?: WorkersExte
       // Refresh worker tool metadata with the enabled agents for this cwd before the system prompt is built.
       const workerAugmentation = await resolveWorkerToolAugmentation(runtime, ctx.cwd);
       pi.registerTool(createWorkerToolDefinition(runtime, delivery, workerAugmentation));
-      deactivateWorkerOnlyToolsFromParent(pi);
-   });
-
-   pi.on("before_agent_start", async (_event, ctx) => {
-      if (ctx.hasUI && ctx.mode !== "print") {
-         deactivateWorkerOnlyToolsFromParent(pi);
-      }
    });
 
    pi.on("agent_end", flushDeferredResults);

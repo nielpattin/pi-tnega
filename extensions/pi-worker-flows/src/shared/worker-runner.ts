@@ -576,10 +576,12 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentOutcome> 
       const thinkingLevel = options.thinkingLevel ?? profile.thinking;
       sessionManager = createChildSessionManager(options.cwd, options.parentSessionFile);
       const createSession = options.createSessionFn ?? createAgentSession;
+      const modelRuntime = (options.modelRegistry as any)?.runtime;
       ({ session } = await createSession({
          cwd: options.cwd,
          ...(model ? { model } : {}),
          ...(thinkingLevel ? { thinkingLevel } : {}),
+         ...(modelRuntime ? { modelRuntime } : {}),
          resourceLoader: options.loader,
          settingsManager: options.settingsManager,
          sessionManager,
