@@ -48,7 +48,7 @@ Package status below reflects the manifests in this checkout. A workspace packag
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | [ask-user](./extensions/ask-user/README.md)                         | Structured multiple-choice questions for the user.                                         | Private package, no version                                                                                                                     |
 | [btw](./extensions/btw/README.md)                                   | Independent side chat with explicit handoff to the parent session.                         | `@nielpattin/btw` `0.1.0`                                                                                                                       |
-| [copy-all](./extensions/copy-all/README.md)                         | Copy the active post-compaction conversation to the clipboard.                             | Private package, no version                                                                                                                     |
+| [pi-handoff](./extensions/pi-handoff/README.md)                     | Extract useful context from the active session branch to a private handoff file.           | Private package, no version                                                                                                                     |
 | [notification](./extensions/notification/README.md)                 | Audio alerts when an agent turn completes.                                                 | Local extension, no `package.json`                                                                                                              |
 | [tps](./extensions/tps/README.md)                                   | Live token speed, TTFT, and agent-loop usage metrics.                                      | Local extension, no `package.json`                                                                                                              |
 | [pi-acks](./extensions/pi-acks/README.md)                           | Named OpenAI Codex subscription OAuth account management.                                  | Private package, `0.1.0`                                                                                                                        |
@@ -63,7 +63,7 @@ Package status below reflects the manifests in this checkout. A workspace packag
 | [pi-skill-toggle](./extensions/pi-skill-toggle/README.md)           | Toggle automatic skill invocation between enabled and manual-only modes.                   | Private package, `0.1.0`                                                                                                                        |
 | [pi-station](./extensions/pi-station/README.md)                     | Status bar, fixed editor layout, bash mode, stash, history, undo/redo, and hashline tools. | `@nielpattin/pi-station` `0.9.0`; publish workflow target                                                                                       |
 | [pi-web-access](./extensions/pi-web-access/README.md)               | Multi-engine web search, deep research, site outline discovery, and content extraction.    | `@nielpattin/pi-web-access` `0.1.0`                                                                                                             |
-| [pi-worker-flows](./extensions/pi-worker-flows/README.md)           | Profile-based workflow orchestration and direct worker delegation.                         | `@nielpattin/pi-worker-flows` `0.1.0`                                                                                                           |
+| [pi-subagent](./extensions/pi-subagent/README.md)                   | Direct subagent delegation with profile-selected child Pi sessions in Herdr panes.         | `@nielpattin/pi-subagent` `0.1.0`                                                                                                               |
 | [tool-selector](./extensions/tool-selector/README.md)               | Inspect active and inactive tools in the current session.                                  | Local extension, no `package.json`                                                                                                              |
 | [treepluss](./extensions/treepluss/README.md)                       | Enhanced conversation tree and TUI turn rendering.                                         | Local extension, no `package.json`                                                                                                              |
 
@@ -84,7 +84,7 @@ These files live directly under `extensions/` and do not have package manifests:
 
 Read each extension's documentation for complete commands and configuration. The main entrypoints include:
 
-- `pi-worker-flows`: `/wf`, `/workers`, `/wr`, `/wr-profile`, `workflow`, `worker_spawn`, `worker_list`, `worker_recover`, and `worker_cancel`
+- `pi-subagent`: `/wr`, `/wr.profile`, `agent_spawn`, `agent_list`, `agent_recover`, and `agent_cancel`
 - `pi-station`: `/station`, `/stash-history`, `/bash-mode`, and `/bash-reset`
 - `pi-compact-pro`: `/compaction`
 - `pi-processes`: `/processes`
@@ -93,7 +93,7 @@ Read each extension's documentation for complete commands and configuration. The
 - `pi-cortex`: `/cc-index`, `/cc-status`, `/cc-clean`, `/cc-ast`, `/cc-remember`, `/cc-recall`, and `/cc-forget`
 - `pi-web-access`: `/websearch`, `web_search`, `web_research`, `fetch_content`, and `outline_site`
 - `btw`: `/btw` and `/btw:inject`
-- Local utilities: `/copy-all`, `/codeblocks`, `/codex-usage`, `/toggle-skills`, `/tools`, `/files`, `/stats`, and `/startup-time`
+- Local utilities: `/handoff`, `/codeblocks`, `/codex-usage`, `/toggle-skills`, `/tools`, `/files`, `/stats`, and `/startup-time`
 
 ## Development
 
@@ -112,7 +112,7 @@ Run commands from the repository root:
 For a package-specific check:
 
 ```bash
-pnpm --dir extensions/pi-worker-flows check
+pnpm --dir extensions/pi-subagent check
 ```
 
 Build the optional `pi-cortex` sidecar with:
@@ -127,7 +127,7 @@ pnpm --dir extensions/pi-cortex build:rust
 agent-root/
 ├── extensions/                  # Pi extension directories and standalone .ts files
 │   └── pi-ide-pro/              # Pi extension plus VS Code and Neovim companions
-├── tests/                       # Node test files for extensions (pi-web-access, pi-worker-flows)
+├── tests/                       # Node test files for extensions (pi-web-access, pi-subagent)
 ├── scripts/                     # release, repository sync, and typecheck scripts
 ├── .github/workflows/           # manual npm publishing workflow
 ├── .githooks/                   # versioned Git hooks

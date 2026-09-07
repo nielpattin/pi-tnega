@@ -1,7 +1,5 @@
 # Repository Instructions
 
-Core rules for investigation, engineering discipline, and repository safety live in [APPEND_SYSTEM.md](./APPEND_SYSTEM.md) sections 1, 2, and 5.
-
 ## Context and Architecture
 
 - **Read `CONTEXT.md` first:** Before working on non-trivial features, refactors, or architectural changes, read [`CONTEXT.md`](./CONTEXT.md) for domain models, system architecture, and key design constraints.
@@ -21,7 +19,7 @@ Core rules for investigation, engineering discipline, and repository safety live
     Examples:
 
     ```text
-    pnpm --dir extensions/pi-worker-flows check
+    pnpm --dir extensions/pi-subagent check
     ```
 
 - Run lint for a single extension from the repository root with:
@@ -62,7 +60,7 @@ The contributor monorepo workflow for creating and publishing packages lives in 
 
 - Multi-file extensions live in `extensions/<extension-name>/` with their entry point at `extensions/<extension-name>/index.ts`.
 - Single-file extensions live directly at `extensions/<extension-name>.ts`.
-- Each extension owns its tests in an independent directory under `tests/<extension-name>/` (for example, `tests/pi-worker-flows/orchestrator.mjs`). Never place loose test files directly in the root of `tests/`.
+- Each extension owns its tests in an independent directory under `tests/<extension-name>/` (for example, `tests/pi-subagent/agent-tools-behavior.mjs`). Never place loose test files directly in the root of `tests/`.
 
 ## Testing conventions
 

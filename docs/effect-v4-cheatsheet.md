@@ -13,8 +13,7 @@ Effect is the **async runtime core** for process lifecycle, fiber orchestration,
 | Package / script                  | Key Usage                                                                                                              |
 | :-------------------------------- | :--------------------------------------------------------------------------------------------------------------------- |
 | `extensions/ask-user`             | `Effect.tryPromise` + `Effect.runPromiseExit` for TUI prompts                                                          |
-| `extensions/copy-all`             | `Effect.callback` for clipboard processes, `Data.TaggedError`                                                          |
-| `extensions/pi-worker-flows`      | `Context.Service`, `Layer`, `ManagedRuntime`, `Deferred`, `Effect.callback`, explicit `Scope`, and typed domain errors |
+| `extensions/pi-subagent`          | `Context.Service`, `Layer`, `ManagedRuntime`, `Deferred`, `Effect.callback`, explicit `Scope`, and typed domain errors |
 | `scripts/sync-reference-repos.ts` | Effect CLI, `Schema`, `FileSystem`, `Stream`, and `ChildProcessSpawner`                                                |
 
 ### When NOT to Use Effect
@@ -96,7 +95,7 @@ export class SpawnError extends Schema.TaggedError<SpawnError>()("SpawnError", {
 }) {}
 ```
 
-**Existing repo code uses:** `Data.TaggedError` in `extensions/copy-all`; Workers and the sync script use `Schema.TaggedError`.
+**Existing repo code uses:** The subagent extension and the sync script use `Schema.TaggedError`.
 
 ### 4.4 Schema for domain + validation
 
@@ -109,11 +108,11 @@ const JsonSource = Schema.fromJsonString(Schema.Unknown);
 export const decodeJsonSource = Schema.decodeUnknownEffect(JsonSource);
 ```
 
-**Workers note:** Pi tool _parameter_ schemas stay TypeBox (Pi SDK). Workers _internal_ domain + `outputSchema` validation prefer Effect `Schema` where possible; TypeBox remains for tool JSON Schema surfaces.
+**Subagent note:** Pi tool _parameter_ schemas stay TypeBox (Pi SDK). The extension's _internal_ domain + `outputSchema` validation prefer Effect `Schema` where possible; TypeBox remains for tool JSON Schema surfaces.
 
 ### 4.5 Services: `Context.Service` + static `layer`
 
-Canonical shape for Workers services:
+Canonical shape for subagent services:
 
 ```ts
 import { Context, Effect, Layer } from "effect";
@@ -123,7 +122,7 @@ export interface JobRegistryShape {
     readonly list: Effect.Effect<ReadonlyArray<Job>>;
 }
 
-export class JobRegistry extends Context.Service<JobRegistry, JobRegistryShape>()("workers/JobRegistry") {
+export class JobRegistry extends Context.Service<JobRegistry, JobRegistryShape>()("agents/JobRegistry") {
     static readonly layer = Layer.effect(
         JobRegistry,
         Effect.gen(function* () {
@@ -144,16 +143,16 @@ export type JobRegistryService = JobRegistry["Service"];
 Compose layers:
 
 ```ts
-const WorkersLive = WorkerManager.layer.pipe(Layer.provide(JobRegistry.layer));
+const AgentsLive = AgentManager.layer.pipe(Layer.provide(JobRegistry.layer));
 ```
 
 - `Layer.provide`: hide deps, expose only outer service.
 - `Layer.provideMerge`: expose outer + provided services.
-- Root assembly: `ManagedRuntime.make(WorkersLive)` in `runtime.ts`. Name the layer `WorkersLive` (a `Layer`), not "ManagedRuntime".
+- Root assembly: `ManagedRuntime.make(AgentsLive)` in `runtime.ts`. Name the layer `AgentsLive` (a `Layer`), not "ManagedRuntime".
 
 ### 4.6 Resources: explicit `Scope`
 
-The pi-worker-flows worker feature creates an explicit scope for each external agent process, provides that scope to its polling effects, and closes it when the process settles or is cancelled.
+The pi-subagent delegation feature creates an explicit scope for each external agent process, provides that scope to its polling effects, and closes it when the process settles or is cancelled.
 
 ```ts
 const scope = yield * Scope.make();
@@ -165,7 +164,7 @@ Use `Effect.forkScoped` for work that must follow the lifetime of an enclosing s
 
 ### 4.7 Reservation + interest (concurrency caps)
 
-WorkerManager reserves capacity before spawning work:
+AgentManager reserves capacity before spawning work:
 
 1. Check the current running count plus the incoming count before spawning.
 2. Increment the reservation synchronously.
@@ -186,8 +185,8 @@ const wait = Effect.gen(function* () {
 
 | Primitive           | Current use                                                                |
 | :------------------ | :------------------------------------------------------------------------- |
-| `Effect.forkScoped` | Background decoding work tied to a Workers scope                           |
-| `Deferred`          | Worker job settlement signals                                              |
+| `Effect.forkScoped` | Background decoding work tied to an agent scope                            |
+| `Deferred`          | Agent task settlement signals                                              |
 | `Effect.runFork`    | Completing settlement deferreds from synchronous listener callbacks        |
 | `Stream`            | Concurrently collecting child-process stdout and stderr in the sync script |
 
@@ -206,12 +205,12 @@ Pi tools are plain `async` functions. Bridge once:
 ```ts
 import { Cause, Exit, ManagedRuntime, type Effect } from "effect";
 
-export function makeWorkersRuntime() {
-    return ManagedRuntime.make(WorkersLive);
+export function makeAgentsRuntime() {
+    return ManagedRuntime.make(AgentsLive);
 }
 
 export async function runTool<A, E>(
-    runtime: ReturnType<typeof makeWorkersRuntime>,
+    runtime: ReturnType<typeof makeAgentsRuntime>,
     effect: Effect.Effect<A, E>,
     options: { signal?: AbortSignal; interruptMessage?: string } = {}
 ) {
@@ -227,7 +226,7 @@ export async function runTool<A, E>(
 
 ### 4.11 Child processes
 
-The pi-worker-flows worker feature runs child Pi sessions through the shared agent runner. OS process supervision belongs to `pi-processes`. The repository sync script uses `effect/unstable/process` and `ChildProcessSpawner` for Git subprocesses.
+The pi-subagent delegation feature runs child Pi sessions through the shared agent runner. OS process supervision belongs to `pi-processes`. The repository sync script uses `effect/unstable/process` and `ChildProcessSpawner` for Git subprocesses.
 
 ### 4.12 Logging
 
@@ -237,23 +236,22 @@ Use `Console.log` for CLI output in `scripts/sync-reference-repos.ts`. Keep Effe
 
 ## 5. Current repo conventions
 
-1. Use `Context.Service` with a static `layer` for Workers services.
-2. Use `Schema.TaggedError` for Workers and script domain errors.
-3. Use `Data.TaggedError` only where existing `copy-all` code already uses it.
-4. Prefer `Effect.fn("Name.method")` for named Effect functions.
+1. Use `Context.Service` with a static `layer` for subagent services.
+2. Use `Schema.TaggedError` for subagent and script domain errors.
+3. Prefer `Effect.fn("Name.method")` for named Effect functions.
 
 ---
 
-## 6. Workers-Oriented Checklist
+## 6. Agent-Oriented Checklist
 
-When implementing the worker feature in `extensions/pi-worker-flows`, every service must:
+When implementing the delegation feature in `extensions/pi-subagent`, every service must:
 
-1. Use `Context.Service<Name, Shape>()("workers/Name")` with `static layer`.
+1. Use `Context.Service<Name, Shape>()("agents/Name")` with `static layer`.
 2. Implement methods with `Effect.fn("Name.method")`.
 3. Use `Schema.TaggedError` for domain errors.
 4. Reserve slots sync; release with `Effect.ensuring`.
 5. Use an explicit per-entry `Scope` and close it when the child settles.
-6. Expose one `WorkersLive` layer + `makeWorkersRuntime()` + `runTool`.
+6. Expose one `AgentsLive` layer + `makeAgentsRuntime()` + `runTool`.
 7. Keep TUI code outside Effect fibers (call into runtime only).
 
 ---
@@ -265,7 +263,7 @@ pnpm typecheck
 pnpm lint
 pnpm fmt
 pnpm --dir extensions/ask-user check
-pnpm --dir extensions/copy-all check
-pnpm --dir extensions/pi-worker-flows check
+pnpm --dir extensions/pi-handoff check
+pnpm --dir extensions/pi-subagent check
 pnpm sync:repos --dry-run
 ```
