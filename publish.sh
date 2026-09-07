@@ -10,11 +10,11 @@ Usage:
   ./publish.sh <package> --tag <tag>
 
 Example:
-  ./publish.sh pi-station --tag '@nielpattin/pi-station@0.9.0'
+  ./publish.sh pi-reference --tag '@nielpattin/pi-reference@0.2.1'
 USAGE
 }
 
-packages_dir="$script_dir/packages"
+extensions_dir="$script_dir/extensions"
 package=""
 tag=""
 
@@ -44,7 +44,7 @@ if [ -z "$package" ] || [ -z "$tag" ]; then
   exit 1
 fi
 
-manifest="$packages_dir/$package/package.json"
+manifest="$extensions_dir/$package/package.json"
 if [ ! -f "$manifest" ]; then
   echo "error: package not found: $package" >&2
   exit 1

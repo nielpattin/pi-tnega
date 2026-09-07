@@ -18,24 +18,4 @@ This file summarizes the latest package changelog entries. Package changelogs re
     - **System prompt guidance restored**: `@alias/path` tokens stay as literal text in the message. The system prompt instructs the agent to split on the first `/`, map the alias to its path, and append the rest (may be a file or directory).
     - **`@alias` autocomplete**: Tab on an alias inserts `@alias/` (slash, no space) so the dropdown stays open and lists root contents. Labels show just filenames in cyan. Built-in file suggestions no longer leak after a completed reference token. Alias resolution uses prefix matching so aliases containing `/` work correctly.
 
-### @nielpattin/pi-station
-
-## 0.9.0
-
-### Minor Changes
-
-- 69ce847: Add esbuild build pipeline (dist/) and show edit diff in chat transcript.
-    - pi-station is now a built package: `pnpm build` bundles index.ts and
-      features/hashline/edit-tool.ts to dist/ via esbuild, with Pi/typebox/node
-      builtins marked external. `pi.extensions` points at `./dist/index.js`.
-      dist/ is gitignored and rebuilt locally + in CI (publish.yml gained a
-      "Build package" step). After editing pi-station source, run
-      `/reload` after source edits.
-    - The edit tool's renderCall now computes its diff preview synchronously
-      (new `computeEditPreviewSync`) whenever a renderable edit input is
-      present, so the diff appears in the chat the moment the permission
-      dialog opens. The previous gate on argsComplete/executionStarted never
-      became true on the visible render frames during the permission prompt,
-      so the diff was never shown.
-
 <!-- /package-changelog-summary -->

@@ -25,7 +25,7 @@ const SEMVER_RE = /^\d+\.\d+\.\d+$/;
 
 if (!PKG || !TARGET || (!BUMP_TYPES.has(TARGET) && !SEMVER_RE.test(TARGET))) {
    console.error("Usage: node scripts/release.mjs <package> <major|minor|patch|x.y.z>");
-   console.error("  e.g.  node scripts/release.mjs pi-station patch");
+   console.error("  e.g.  node scripts/release.mjs pi-reference patch");
    process.exit(1);
 }
 

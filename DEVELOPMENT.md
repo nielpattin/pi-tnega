@@ -11,7 +11,6 @@ This document provides the full contributor workflow for developing and publishi
 - **Package Manager**: `pnpm 11` (workspace defined in `pnpm-workspace.yaml`)
 - **Extension Location**: `extensions/*`
     - [`pi-reference`](./extensions/pi-reference): Project reference declaration & resolution with `@alias` autocomplete.
-    - [`pi-station`](./extensions/pi-station): Status bar, layout manager, bash mode, hashline editor with in-chat diff preview.
     - [`pi-subagent`](./extensions/pi-subagent): Profile-configured subagent delegation with persistent child Pi sessions, Herdr panes, live widget, in-place recovery, and the `/wr.profile` editor.
     - [`pi-compact-pro`](./extensions/pi-compact-pro): Configurable auto-compaction, model context caps, summary model fallback chains, and structured summaries through `/compaction`.
     - [`pi-processes`](./extensions/pi-processes): Standalone retained process supervision and the `/processes` dashboard.
@@ -36,7 +35,6 @@ agent-root/
 ├── openspec/                     # change proposals and specs
 ├── extensions/
 │   ├── pi-reference              # project references extension
-│   ├── pi-station                # published npm extension
 │   ├── pi-subagent               # profile-configured subagent delegation
 │   ├── pi-compact-pro            # configurable compaction and summary models
 │   ├── pi-processes              # standalone process supervision
@@ -90,7 +88,6 @@ Run scripts for individual packages from the root using `pnpm --dir`:
 ```bash
 pnpm --dir extensions/pi-subagent check
 pnpm --dir extensions/pi-processes check
-pnpm --dir extensions/pi-station typecheck
 ```
 
 ---
@@ -123,7 +120,7 @@ pnpm --dir extensions/pi-station typecheck
 
 ## 5. Editing an Existing Package
 
-- **Raw TypeScript Extensions** (`pi-reference`, `pi-station`, `pi-subagent`, `pi-compact-pro`, `pi-processes`, `btw`, `pi-constellation`, and others):
+- **Raw TypeScript Extensions** (`pi-reference`, `pi-subagent`, `pi-compact-pro`, `pi-processes`, `btw`, `pi-constellation`, and others):
     - Published directly as raw TypeScript source files (`.ts`).
     - Loaded by Pi harness at runtime via `jiti`. No `dist/` build step is required.
 - Ensure changes pass the applicable root checks (`pnpm lint`, `pnpm typecheck`, and `pnpm fmt`).
@@ -136,7 +133,6 @@ Before publishing, verify the contents of the generated tarball:
 
 ```bash
 pnpm --dir extensions/pi-reference pack --dry-run
-pnpm --dir extensions/pi-station pack --dry-run
 ```
 
 - **Raw TS packages**: Confirm output contains `.ts` source files, `package.json`, and `README.md` (no `dist/`).
@@ -151,14 +147,14 @@ Publishing is **manual, exact, tag-based, and single-package**.
 ### Step 7.1: Git Tag Convention
 
 Publishing uses scoped package tags formatted as `@nielpattin/<pkg-name>@<version>`.
-Example: `@nielpattin/pi-station@0.9.0`
+Example: `@nielpattin/pi-reference@0.2.1`
 
 ### Step 7.2: Trigger Release Workflow
 
 Use the helper script `publish.sh` to trigger GitHub Actions:
 
 ```bash
-./publish.sh pi-station --tag '@nielpattin/pi-station@0.9.0'
+./publish.sh pi-reference --tag '@nielpattin/pi-reference@0.2.1'
 ```
 
 ### Step 7.3: Automated Publish Pipeline (`.github/workflows/publish.yml`)
