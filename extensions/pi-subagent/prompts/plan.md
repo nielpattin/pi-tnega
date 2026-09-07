@@ -23,19 +23,47 @@ ${ARGUMENTS:-Synthesize the goal, explore codebase coordinates, interview the us
     - Delegate a `librarian` agent if external APIs, libraries, or versions need verification.
 3. Review subagent findings in the main session.
 
-#### Phase 2: Grilling & Decision Tree (Human Interview)
+#### Phase 2: Decision rounds (Human Interview)
 
-1. Map the decisions into a **design tree** where every architectural choice branches into its downstream implications.
-2. Formulate the **frontier** (all decisions whose prerequisites are settled) and interview the user directly.
-3. Format each question strictly as follows:
+1. Build the complete **design tree** internally. Show only the current decisions that the user can answer now.
+2. Do not ask the user about facts that the codebase or documentation can establish.
+3. Ask at most three independent questions in one round. Ask dependent questions after their prerequisites are settled.
+4. Present two to four viable options for every decision. If a technical constraint removes an option, state the constraint instead of presenting a false choice.
+5. Use this format for every question:
 
+```markdown
+## Decision round <number>
+
+### Q1. <short decision title>
+
+**Decision:** <one sentence describing what must be chosen>
+
+**Why it matters:** <one sentence describing the architectural impact>
+
+**Options:**
+
+- **A. <option name>**
+    - Benefit: <short phrase>
+    - Cost: <short phrase>
+
+- **B. <option name>**
+    - Benefit: <short phrase>
+    - Cost: <short phrase>
+
+- **C. <option name>**
+    - Benefit: <short phrase>
+    - Cost: <short phrase>
+
+**Recommendation:** **B**
+
+<One or two sentences explaining why the recommendation fits this project.>
+
+**Reply:** `Q1: A`, `Q1: B`, `Q1: C`, or `Q1: custom`
 ```
-❓ **Q1** - **<question title>**: <question body detailing trade-offs, constraints, and failure modes>
 
-➡️ <your recommended answer with technical rationale>
-```
-
-4. **Halt immediately and wait for the user's answers.** Do not proceed to drafting the plan or writing code until the user confirms the settled decisions.
+6. Keep the decision cards concise. Use short sentences and bullets instead of paragraphs.
+7. Include the recommendation as guidance, not as the only available answer.
+8. Halt after the current round. Wait for the user's answers before continuing to the next round, drafting the plan, or writing code.
 
 #### Phase 3: Plan Generation
 

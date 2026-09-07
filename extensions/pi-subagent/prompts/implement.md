@@ -3,72 +3,116 @@ description: Execute approved plan tasks with scored parallel agents and audit t
 argument-hint: "[plans/<feature-slug>.md]"
 ---
 
-You are leading the **Implementation & Verification Pipeline** as the lead orchestrator.
+You lead the **Implementation & Verification Pipeline**.
 
-Your mission is to execute the approved plan from `plans/<feature-slug>.md`, use the smallest safe set of `worker` agents, keep the plan current, and audit the complete diff with a `critic` agent. Do not treat the plan as a single task by default.
+Execute the approved plan from `plans/<feature-slug>.md`. Use the smallest safe set of `worker` agents, keep the plan current, and audit the complete diff with one `critic` agent.
 
-### Plan Target
+### Plan target
 
 ${ARGUMENTS:-Locate the relevant or most recently modified plan in the plans/ directory.}
 
 ---
 
-### Execution Protocol
+### Non-negotiable rules
 
-#### Phase 1: Read and validate the plan
+- Execute only work described by the approved plan.
+- Do not invent architectural decisions. Stop and ask the user when a decision is missing.
+- Each worker owns exactly one TODO.
+- The Parent Session owns plan checkboxes and progress updates.
+- Workers must not edit plan checkboxes, reorder TODOs, commit changes, or claim unrelated TODOs.
+- Record pre-existing workspace changes before dispatching work.
+- Do not overwrite, revert, or claim unrelated user changes.
+- Use foreground agents and wait for their results.
+- Use the literal `worker` profile for implementation and the literal `critic` profile for the final audit.
 
-1. Identify the target plan file `plans/<feature-slug>.md`.
+### Phase 1: Preflight
+
+1. Locate the target plan.
 2. Read the entire plan, especially `Implementation Tasks` and `Execution Strategy`.
-3. Build a task graph from each unchecked TODO, its dependencies, execution mode, scope, and acceptance criteria.
-4. Treat checked TODOs as completed only when the plan and current workspace agree. Do not redo completed work without a concrete reason.
-5. If the plan lacks scores, dependencies, or execution modes, infer them conservatively before dispatching. Use one agent when the safe parallelism is unclear.
-6. Do not invent missing architectural decisions. Stop and ask the user when the plan cannot safely determine the work.
+3. Confirm that the plan contains settled architectural decisions.
+4. Record the current workspace diff so unrelated changes remain separate.
+5. Build a task table with each unchecked TODO, dependencies, execution mode, scope, and acceptance criteria.
+6. Treat a checked TODO as complete only when the plan and workspace agree.
+7. If scores, dependencies, or execution modes are missing, infer them conservatively. Use one agent when safe parallelism is unclear.
+8. Stop if the plan cannot safely determine the work.
 
-#### Phase 2: Calculate dispatch capacity
+### Phase 2: Dispatch capacity
 
-Use the plan level to control parallelism:
+Calculate the effective worker cap:
 
-- Plan level **1** means an easy plan and permits one `worker` agent.
-- Plan levels **2** through **5** permit up to that many agents, capped at four.
-- The effective cap is `min(4, plan level, number of ready independent tasks)`.
-- Never spawn empty agent specifications, exceed four concurrent agents, or use an implicit profile fallback.
-- Use the literal `worker` profile for implementation tasks and the literal `critic` profile for the final audit.
+```text
+min(4, plan level, number of ready independent tasks)
+```
 
-A task is **ready** when it is unchecked and all dependencies are checked. A task is **parallel-safe** only when it has no unresolved dependency, does not share mutable files or generated artifacts with another task in the batch, and does not need another agent's result. A task is **waterfall-only** when it depends on an output, shares a conflict scope, requires ordered migration, or needs a decision from the previous result.
+- Plan level **1** permits one worker.
+- Plan levels **2** through **5** permit up to four workers.
+- Never exceed four concurrent workers.
+- Never spawn an empty agent specification.
 
-#### Phase 3: Dispatch implementation tasks
+A task is **ready** when it is unchecked and all dependencies are checked.
+
+A task is **parallel-safe** when it has no unresolved dependency, does not share mutable files or generated artifacts with another task, and does not need another worker's result.
+
+A task is **waterfall-only** when it depends on an output, shares a conflict scope, requires ordered migration, or needs a decision from a previous result.
+
+### Phase 3: Worker contract
+
+Give every worker the exact TODO id, task text, scope, dependencies, and test-first acceptance criteria.
+
+Require every worker to:
+
+- Write a failing test first for runtime behavior, then implement the smallest change that makes it pass.
+- State why no behavior test applies for documentation, formatting, configuration, or other non-runtime tasks.
+- Run the task's targeted tests and relevant checks.
+- Avoid edits outside the stated scope unless the task requires them.
+- Return this exact information:
+    - `status`
+    - `completedTasks`
+    - `modifiedFiles`
+    - `testsAdded`
+    - `testsRun`
+    - `blockers`
+    - `summary`
+
+### Phase 4: Execution loop
 
 Repeat waves until no executable TODO remains:
 
 1. Re-read the plan TODO section and calculate the current ready set.
-2. Select up to the effective cap of parallel-safe ready tasks. Use one `agent_spawn` call with one agent specification per selected task. Each worker owns **one task**, not the entire plan.
-3. For each parallel batch, use foreground execution and wait for every result before changing the plan or starting dependent work.
-4. For waterfall work, spawn exactly one foreground `worker`, inspect its summary and changed files, then decide which TODO becomes ready next.
-5. Give each worker the exact TODO id, task text, scope, dependencies, and test-first acceptance criteria. Require the worker to:
-    - write a failing test first and verify the expected failure;
-    - implement the smallest change that makes the test pass;
-    - run the task's targeted tests and relevant checks;
-    - avoid edits outside the stated scope unless the task requires them;
-    - return `completedTasks`, `modifiedFiles`, `testsAdded`, `testsRun`, `blockers`, and `summary`.
-6. Workers must not edit plan checkboxes, reorder TODOs, commit changes, or claim unrelated TODOs. The Parent Session owns plan progress.
-7. Do not automatically retry a failed task or dispatch a duplicate prompt. Inspect the failure, record the blocker, and stop dependent tasks until the user decides.
+2. Select up to the effective cap of parallel-safe ready tasks.
+3. Dispatch one foreground `worker` per selected task in one `agent_spawn` call.
+4. Wait for every worker in the batch before changing the plan or starting dependent work.
+5. For waterfall work, dispatch exactly one foreground worker and inspect its result before selecting the next task.
+6. Inspect each worker result and the workspace diff.
+7. Update the plan before dispatching another wave.
 
-#### Phase 4: Parent-owned progress updates
+### Phase 5: Progress updates and failures
 
-After every batch or waterfall result, the Parent Session must update the plan's TODO section before dispatching another wave:
+After every batch or waterfall result, the Parent Session must update the plan:
 
-1. Inspect each result, the workspace diff, and the reported tests.
-2. Mark a TODO `[x]` only when its observable acceptance criteria pass and the result identifies the corresponding files and tests.
-3. If a task fails or is incomplete, leave it unchecked and add a short blocker note below that TODO.
-4. Preserve task ids, dependencies, scores, execution modes, and acceptance criteria.
-5. Recalculate the ready set after each update. Never dispatch a task whose dependency remains unchecked.
-6. When all implementation tasks settle, run the plan's complete verification commands in the Parent Session and record the outcome in the plan.
+- Mark a TODO `[x]` only when its acceptance criteria pass and the result identifies its files and tests.
+- Leave a failed or incomplete TODO unchecked.
+- Add a short blocker note below a failed or incomplete TODO.
+- Preserve task ids, dependencies, scores, execution modes, scopes, and acceptance criteria.
+- Recalculate the ready set after every update.
+- Never dispatch a task whose dependency remains unchecked.
+- When all tasks settle, run the plan's complete verification commands in the Parent Session and record the outcome in the plan.
 
-This update is mandatory. A worker summary alone does not update the plan, and the Parent Session must not leave completed TODOs unchecked.
+Do not automatically retry a failed task or dispatch a duplicate prompt.
 
-#### Phase 5: Critic audit
+Continue independent tasks only when they have no shared risk. Stop dependent tasks until the blocker is resolved.
 
-After all executable implementation waves finish and the Parent Session updates the plan, run one sequential foreground `agent_spawn` call:
+Stop the pipeline and ask the user when any of these conditions occurs:
+
+- An architectural decision is missing.
+- A worker violates its scope.
+- The workspace contains an unexpected conflict.
+- A required check fails and the cause is unclear.
+- The work creates a data-loss or security risk.
+
+### Phase 6: Critic audit
+
+After all executable waves finish and the Parent Session updates the plan, run one sequential foreground `agent_spawn` call:
 
 ```json
 {
@@ -76,24 +120,25 @@ After all executable implementation waves finish and the Parent Session updates 
         {
             "profile": "critic",
             "name": "audit",
-            "task": "Read plans/<feature-slug>.md and the complete workspace diff. Audit every checked TODO against its acceptance criteria, tests, dependency order, concurrency assumptions, security boundaries, data-loss risks, and regressions. Do not edit application code or plan checkboxes. Return verdict (READY TO COMMIT or REVISION REQUIRED), planProgress (array of strings), changesSummary (array of strings), criticSafetyNotes (array of strings), and suggestedCommit (string)."
+            "task": "Read plans/<feature-slug>.md and the complete workspace diff. Separate pre-existing changes from implementation changes. Audit every checked TODO against its acceptance criteria, tests, dependency order, concurrency assumptions, security boundaries, data-loss risks, and regressions. Do not edit application code or plan checkboxes. Return verdict (READY TO COMMIT or REVISION REQUIRED), planProgress (array of strings), changesSummary (array of strings), criticSafetyNotes (array of strings), and suggestedCommit (string)."
         }
     ]
 }
 ```
 
-If the critic returns `REVISION REQUIRED`, report the exact TODOs and safety notes. Do not mark those TODOs complete until the Parent Session resolves them and runs the required checks again.
+If the critic returns `REVISION REQUIRED`, report the exact TODOs and safety notes. Do not claim completion until the Parent Session resolves them and runs the required checks again.
 
-#### Phase 6: Final report
+### Phase 7: Final report
 
-When implementation and audit finish, render the complete **Execution & Verification Report** in the Parent Session:
+When implementation and audit finish, render the complete **Execution & Verification Report**:
 
-- target plan path and plan level;
-- each parallel wave and waterfall step;
-- completed TODOs and their worker summaries;
-- modified files and tests added or run;
-- remaining blockers and unchecked TODOs;
-- verification command results;
-- critic verdict, safety notes, and suggested commit.
+- Target plan path and plan level
+- Each parallel wave and waterfall step
+- Completed TODOs and worker summaries
+- Modified files and tests added or run
+- Remaining blockers and unchecked TODOs
+- Verification command results
+- Critic verdict and safety notes
+- Suggested commit message
 
-Then halt and await user confirmation to commit.
+Then halt and await user confirmation before any commit.
