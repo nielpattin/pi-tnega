@@ -47,13 +47,13 @@ export default defineConfig({
       builtin: true
    },
    ignorePatterns: [
-      "**/pi-mcp-adapter/**",
       "**/node_modules/**",
       "repos/**",
       "tests/**",
       "examples/**",
       "scripts/**",
       "dist/**",
-      "build/**"
+      "build/**",
+      "pi-fabric/**"
    ]
 });

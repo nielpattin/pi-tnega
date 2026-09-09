@@ -2,13 +2,13 @@
 
 Direct subagent delegation for Pi. Spawn one to four child Pi subagent sessions in parallel,
 watch them live above the editor, and get one bounded result per agent when each
-finishes. No orchestration layer, no phases, no dashboards — the parent decomposes
-the work, agents execute, the parent integrates.
+finishes. A multi-agent batch arrives as one consolidated result block. No orchestration layer, no phases, no
+dashboards — the parent decomposes the work, agents execute, the parent integrates.
 
 ## Features
 
-- **Parallel delegation** — `agent_spawn` runs 1 to 4 agents at once, foreground
-  wait by default, `background: true` for immediate return with automatic delivery.
+- **Parallel delegation** — `agent_spawn` runs 1 to 4 agents at once in the background,
+  returning immediately with automatic delivery of results to the parent session.
 - **Real child sessions** — every agent is a real Pi process with its own session
   file, so it can be inspected and audited after the run.
 - **Herdr panes** — a single agent splits your current pane; a batch of 2 or more
@@ -76,18 +76,18 @@ finish:
 ✓ session-schema · explorer · $0.008 · 9 calls · 21k ctx (18 lines)
 ```
 
-For fire-and-forget work, add `"background": true`. The call returns immediately
-and each batch's results are delivered into the session as `agents-result`
-messages.
+The call returns immediately with a spawn acknowledgement while agents run in the background.
+The acknowledgement ends the current model turn, so the parent does not repeat the spawn while waiting.
+Each batch's results are delivered as one consolidated `agents-result` message, not one message per agent.
 
 ## How it works
 
 ```
-1. Parent calls agent_spawn()      → children launch (panes or headless)
+1. Parent calls agent_spawn()      → children launch in background (panes or headless)
 2. Agents run as child Pi sessions  → widget shows live profile, activity, pane
-3. Parent keeps working              → foreground waits; background returns now
+3. Parent keeps working              → agents run independently in background
 4. Child writes its exit sidecar     → parent settles that agent from the sidecar
-5. All agents settle                → one result block, one line per agent
+5. Results delivered                → parent receives agents-result messages automatically
 ```
 
 An `agent_spawn` call creates one child Pi session per agent. Each child runs to
@@ -99,6 +99,8 @@ tokens from the child's own session usage.
 Children stay open after finishing. Nothing auto-closes panes or tabs and the
 child Pi process does not quit, so the full transcript remains readable. Only
 `agent_cancel` closes its agent's pane.
+A parent session shutdown or reload stops unfinished child agents and records them as recoverable stopped work. Use `/wr.resume` to resume them explicitly.
+Tasks that were running before the restart receive a continuation prompt. Tasks that had already failed reopen in their exact persisted session without an automatic prompt.
 
 ### Completion sidecars
 
@@ -175,17 +177,15 @@ For a parent session file `P = /D/N.jsonl`, a child session uses a UUIDv7 filena
             "name": "implement",
             "task": "Read plans/auth-fix.md. Implement all uncompleted tasks with test-driven development. Update checkboxes to [x]."
         }
-    ],
-    "background": false
+    ]
 }
 ```
 
 ### Tool parameters
 
-| Parameter    | Type    | Default  | Description                                                                                                                                             |
-| ------------ | ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agents`     | array   | required | 1 to 4 agent specs (schema enforces `maxItems: 4`).                                                                                                     |
-| `background` | boolean | `false`  | `true` returns after launch and delivers results automatically; `false` waits for every agent to settle. `background` is true only when exactly `true`. |
+| Parameter | Type  | Default  | Description                                         |
+| --------- | ----- | -------- | --------------------------------------------------- |
+| `agents`  | array | required | 1 to 4 agent specs (schema enforces `maxItems: 4`). |
 
 ### Agent spec fields
 
@@ -240,13 +240,15 @@ output. Statuses render `✓` completed and `✗` failed. The word `completed` n
 
 ### Background delivery
 
-Background batches return immediately. When a batch's members all settle, each
-result arrives as one `agents-result` message (only the last triggers a turn):
+Background batches return immediately. When all members settle, one consolidated
+`agents-result` message contains every non-cancelled member:
 
 ```text
 customType: agents-result
-details: { id, name, profile, status, duration, result }
+details: { batchId, tasks: [{ id, name, profile, status, duration, result }] }
 ```
+
+Batch delivery uses one session message and does not enqueue a follow-up turn.
 
 Delivery flushes when the parent is idle, on `agent_end`, or on `agent_settled`.
 Foreground tasks and cancelled tasks are never delivered. Verify a delivery
@@ -276,8 +278,8 @@ The widget above the editor tracks every agent spawned by the current Pi process
 - Collapsed by default: at most 3 running and 4 settled rows, then a
   `+N more (/wr to expand)` line. Run `/wr` to expand the widget to
   every row (`/wr to collapse` appears in the header); run `/wr` again to
-  collapse. Restored history from the session file never enters the widget;
-  `agent_list` is the history view.
+  collapse. Stopped unfinished work with no delivered result reappears in the widget when the
+  parent session reloads. Tasks whose results reached the parent stay out of the widget.
 
 ## Herdr layout
 
@@ -292,10 +294,11 @@ Without Herdr, every agent runs headless and the same results, widget rows
 
 ## Listing and cancelling
 
-| Tool           | Parameters      | Contract                                                                                                                                                                   |
-| -------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent_list`   | none            | Every tracked task with id, name, profile, status, session file, and usage. The history view.                                                                              |
-| `agent_cancel` | `id` (required) | Aborts a live agent (`Agent was aborted.`), closes its pane, and marks it `cancelled`. Cancelling a finished task leaves it untouched. Unknown ids return `... not found.` |
+| Tool           | Parameters      | Contract                                                                                                                                                                      |
+| -------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent_list`   | none            | Every tracked task with id, name, profile, status, session file, and usage. The history view.                                                                                 |
+| `agent_cancel` | `id` (required) | Aborts a live agent (`Agent was aborted.`), closes its pane, and marks it `cancelled`. Cancelling a finished task leaves it untouched. Unknown ids return `... not found.`    |
+| `/wr.resume`   | none            | Explicitly resumes tasks interrupted by `/reload`. A live session receives a continuation prompt. A stopped session reopens its exact session in a new pane without a prompt. |
 
 ## Agent profiles
 
@@ -338,9 +341,9 @@ Execution & Verification Report and halts for commit confirmation.
 ## Session history
 
 Agent tasks persist per parent session in `agents-tasks.json` next to the
-parent session file. Reloading restores history into `agent_list`. Interrupted
-runs from a previous process become failed instead of resurrecting as running.
-The widget only ever shows agents from the live process.
+parent session file. Reloading restores history into `agent_list`. Unfinished runs from a
+previous process become failed, retain a stopped-work marker, and reappear in the widget until
+their result reaches the parent. Completed or delivered tasks do not reappear in the widget.
 
 ## Troubleshooting
 

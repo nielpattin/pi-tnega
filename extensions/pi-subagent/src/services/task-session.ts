@@ -139,23 +139,19 @@ export const activateParentSession = Effect.fn("activateParentSession")(function
 
          yield* gate.markBusy(parentSessionFile);
 
+         // Stop active child agents while the previous registry and writer still belong to that parent.
+         yield* agentManager.cancelActiveSessions;
          // 1. Disable/unsubscribe previous persistence listener.
          const previousUnsubscribe = yield* persistence.takeChangeListener();
          if (previousUnsubscribe) {
             yield* Effect.sync(() => previousUnsubscribe());
          }
-
-         // 2. Flush any pending writes for the previous parent.
+         // 2. Flush cancellation updates for the previous parent.
          const previousWriter = yield* persistence.takeChangeWriter();
          if (previousWriter) {
             yield* Effect.promise(() => previousWriter.flush());
          }
          yield* flushPendingWrites();
-
-         // Stop agent sessions and live-output state owned by the previous
-         // parent before replacing the registry. Late callbacks must not update
-         // the new or ephemeral parent registry.
-         yield* agentManager.cancelActiveSessions;
 
          // 3. Configure the new persistence target (explicitly clears when undefined).
          yield* persistence.configure(parentSessionFile);
@@ -169,9 +165,9 @@ export const activateParentSession = Effect.fn("activateParentSession")(function
             const isTerminal =
                stored.status === "completed" || stored.status === "failed" || stored.status === "cancelled";
 
-            const task: Task = isTerminal ? stored : markInterruptedTaskFailed(stored);
-
-            restored.push(task);
+            const interrupted = isTerminal ? stored : markInterruptedTaskFailed(stored);
+            const runtimeOwned = !isTerminal && interrupted.recoveryPending === true;
+            restored.push(runtimeOwned ? { ...interrupted, runtimeOwned: true } : interrupted);
          }
 
          // 6. Atomic replace: no per-Task onChange notifications, no partial persistence.

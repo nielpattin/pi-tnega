@@ -349,6 +349,8 @@ export function normalizePersistedTask(task: Task): NormalizedTaskResult {
       settledAt: task.settledAt,
       resultData: normalizedResultData,
       errorText: normalizedErrorText,
+      recoveryPending: task.recoveryPending,
+      resumeWithPrompt: task.resumeWithPrompt,
       transcript: normalizedTranscript,
       usage: sanitizeUsageStats(task.usage),
       sessionFile: task.sessionFile === undefined ? undefined : boundString(task.sessionFile, state),
@@ -868,6 +870,8 @@ export function parsePersistedTaskEntry(raw: unknown): Task | undefined {
       "settledAt",
       "resultData",
       "errorText",
+      "recoveryPending",
+      "resumeWithPrompt",
       // rawText remains accepted for manifests written before semantic trace persistence.
       "rawText",
       "transcript",
@@ -934,6 +938,8 @@ export function parsePersistedTaskEntry(raw: unknown): Task | undefined {
       return undefined;
    if (record.errorText !== undefined && !isPersistedString(record.errorText)) return undefined;
    if (record.systemPrompt !== undefined && !isPersistedString(record.systemPrompt)) return undefined;
+   if (record.recoveryPending !== undefined && typeof record.recoveryPending !== "boolean") return undefined;
+   if (record.resumeWithPrompt !== undefined && typeof record.resumeWithPrompt !== "boolean") return undefined;
    if (record.sessionFile !== undefined && !isPersistedString(record.sessionFile)) return undefined;
    if (record.paneId !== undefined && !isPersistedString(record.paneId)) return undefined;
    if (record.sessionId !== undefined && !isPersistedString(record.sessionId)) return undefined;
@@ -968,6 +974,8 @@ export function parsePersistedTaskEntry(raw: unknown): Task | undefined {
       settledAt,
       resultData,
       errorText: parseOptionalString(record.errorText),
+      recoveryPending: record.recoveryPending === true ? true : undefined,
+      resumeWithPrompt: record.resumeWithPrompt === true ? true : undefined,
       transcript,
       usage,
       sessionFile: parseOptionalString(record.sessionFile),

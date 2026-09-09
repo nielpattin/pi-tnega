@@ -101,7 +101,6 @@ export interface Task {
    readonly batchId?: string;
    readonly batchSize?: number;
    readonly promptOrCommand: string;
-   readonly background?: boolean;
    systemPrompt?: string;
    status: TaskStatus;
    readonly createdAt: number;
@@ -109,6 +108,10 @@ export interface Task {
    settledAt?: number;
    resultData?: unknown;
    errorText?: string;
+   /** The parent stopped this unfinished Task before it received a result. */
+   recoveryPending?: boolean;
+   /** Resume automatically after an explicit `/wr.resume` because the task was running before parent restart. */
+   resumeWithPrompt?: boolean;
    transcript?: ReadonlyArray<TaskTranscriptEntry>;
    sessionFile?: string;
    paneId?: string;

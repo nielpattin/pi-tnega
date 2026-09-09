@@ -109,6 +109,7 @@ test("standalone registration exposes only agent tools and commands", () => {
    assert.equal(pi.registered.has("agent_recover"), false);
    assert.ok(pi.commands.has("wr"), "/wr widget toggle is registered");
    assert.ok(pi.commands.has("wr.profile"), "/wr.profile config command is registered");
+   assert.ok(pi.commands.has("wr.resume"), "/wr.resume command is registered");
 });
 
 test("default export is the plain extension installer", () => {

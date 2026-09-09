@@ -79,6 +79,7 @@ export default function agentChildExtension(pi: any): void {
       return { systemPrompt: `${event.systemPrompt}\n\n${childPrompt}` };
    });
    pi.on("agent_start", () => {
+      completionFinalized = false;
       recorder.agentStart();
    });
    pi.on("agent_end", (event: any) => {
@@ -98,14 +99,16 @@ export default function agentChildExtension(pi: any): void {
       }
       if (!shouldAutoExitAgent(messages)) return;
       completionFinalized = true;
+      const completion = buildAgentCompletionSidecar(messages);
       if (exitFile) {
          try {
-            writeAgentCompletionSidecar(exitFile, buildAgentCompletionSidecar(messages));
+            writeAgentCompletionSidecar(exitFile, completion);
          } catch {
             // The parent still has the process sentinel as a fallback.
          }
       }
-      recorder.agentEndDone();
+      if (completion.type === "error") recorder.agentEndWaiting();
+      else recorder.agentEndDone();
       // Stay open at the final answer so the run can be read in the pane.
       // The parent detects completion through the exit sidecar above.
    });

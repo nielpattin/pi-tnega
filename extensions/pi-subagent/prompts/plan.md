@@ -67,8 +67,8 @@ ${ARGUMENTS:-Synthesize the goal, explore codebase coordinates, interview the us
 
 #### Phase 3: Plan Generation
 
-1. Once the user answers and confirms the decisions, delegate a `planner` agent via `agent_spawn` to generate the complete implementation specification.
-2. Ensure the `plans/` directory exists, and save the plan to `plans/<feature-slug>.md`.
+1. Once the user answers and confirms the decisions, delegate a `planner` agent via `agent_spawn` to write the complete implementation specification directly to `plans/<feature-slug>.md`.
+2. Compute the destination path `plans/<feature-slug>.md`, ensure the `plans/` directory exists, and pass that exact path to the planner in its task prompt. The planner writes the file; do not re-emit the plan in the parent session.
 3. Split the implementation into atomic TODO items. Do not use one TODO for unrelated files, behaviors, or independent deliverables.
 4. Identify dependencies and file conflicts before choosing the execution mode for each TODO.
 5. Assign every TODO a complexity score from 1 to 5 using this rubric:

@@ -99,7 +99,12 @@ test("agent_list returns every spawned agent with status, session file, and usag
       );
       assert.equal(spawned.ok, true);
       assert.equal(spawned.count, 2);
-      for (const summary of spawned.tasks) assert.match(summary.result, /done output/);
+      for (const summary of spawned.tasks) assert.equal(summary.status, "spawned");
+      assert.match(spawned.message, /spawned in background/);
+      for (const summary of spawned.tasks) {
+         const settled = await waitForStatus(runtime, summary.id, "completed");
+         assert.equal(settled?.status, "completed");
+      }
 
       const listed = await runtimeModule.runTool(runtime, agentTools.handleAgentList({}));
       assert.equal(listed.ok, true);
@@ -124,7 +129,7 @@ test("agent_cancel stops a running agent and reports unknown ids", async () => {
       const spawned = await runtimeModule.runTool(
          runtime,
          agentTools.handleAgentSpawn(
-            { agents: [{ profile: "worker", name: "doomed", task: "Hang" }], background: true },
+            { agents: [{ profile: "worker", name: "doomed", task: "Hang" }] },
             { ownerSessionId: "parent-cancel-test", parentSessionFile: join(scratch, "parent.jsonl"), cwd: scratch }
          )
       );
@@ -160,6 +165,7 @@ test("agent_cancel stops a running agent and reports unknown ids", async () => {
          )
       );
       const finishedId = quick.tasks[0].id;
+      await waitForStatus(runtime, finishedId, "completed");
       assert.equal((await getTask(runtime, finishedId))?.status, "completed");
       const afterCancel = await runtimeModule.runTool(
          runtime,
@@ -167,6 +173,28 @@ test("agent_cancel stops a running agent and reports unknown ids", async () => {
       );
       assert.equal(afterCancel.ok, true);
       assert.equal((await getTask(runtime, finishedId))?.status, "completed");
+   } finally {
+      restoreEnv();
+      await runtime.dispose();
+   }
+});
+test("session shutdown stops active agents as recoverable tasks", async () => {
+   useDirectSpawn("hang");
+   const runtime = runtimeModule.makeAgentsRuntime();
+   try {
+      const [spawned] = await runtimeModule.runTool(
+         runtime,
+         managerModule.AgentManager.use((manager) =>
+            manager.spawnBatch(
+               [{ profile: "worker", name: "stopped", task: "Hang" }],
+               { ownerSessionId: "shutdown-test", parentSessionFile: join(scratch, "parent.jsonl"), useHerdr: false }
+            )
+         )
+      );
+      await runtimeModule.runTool(runtime, managerModule.AgentManager.use((manager) => manager.cancelActiveSessions));
+      const stopped = await getTask(runtime, spawned.id);
+      assert.equal(stopped?.status, "failed");
+      assert.equal(stopped?.recoveryPending, true);
    } finally {
       restoreEnv();
       await runtime.dispose();
@@ -198,7 +226,6 @@ test("manager cancel closes the agent pane", async () => {
             manager.spawnBatch([{ profile: "worker", name: "pane-victim", task: "Hang" }], {
                ownerSessionId: "parent-pane-test",
                parentSessionFile: join(scratch, "parent.jsonl"),
-               background: true,
                useHerdr: true,
                herdrOps
             })
@@ -259,7 +286,6 @@ test("manager prune keeps closed settled entries until result delivery", async (
                {
                   ownerSessionId: "parent-prune-test",
                   parentSessionFile: join(scratch, "parent.jsonl"),
-                  background: false,
                   useHerdr: true,
                   herdrOps,
                   batchId: "batch-prune",
@@ -275,6 +301,8 @@ test("manager prune keeps closed settled entries until result delivery", async (
       );
       assert.equal(pruned, 1);
       assert.ok(inspected.includes("prune-pane-1"));
+      await waitForStatus(runtime, spawned[0].id, "completed");
+      await waitForStatus(runtime, spawned[1].id, "completed");
       const kept = await getTask(runtime, spawned[0].id);
       const dropped = await getTask(runtime, spawned[1].id);
       assert.equal(kept?.status, "completed");
@@ -340,7 +368,6 @@ test("manager prune keeps panes when herdr is unavailable", async () => {
             manager.spawnBatch([{ profile: "worker", name: "offline", task: "Hang" }], {
                ownerSessionId: "parent-offline-test",
                parentSessionFile: join(scratch, "parent.jsonl"),
-               background: true,
                useHerdr: true,
                herdrOps
             })

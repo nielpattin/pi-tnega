@@ -159,6 +159,57 @@ test("extension lifecycle, fake Pi API, widget, messages, and delivery", async (
    await p.emit("session_shutdown", parent); await r.runtime.dispose();
  });
 
+test("parent reload keeps restored interrupted results in the widget without delivering a message", async () => {
+   const p = piFake();
+   const r = ext.registerAgentsExtension(p);
+   const firstFile = join(scratch, "reload-delivery-parent.jsonl");
+   const secondFile = join(scratch, "reload-delivery-other.jsonl");
+   const first = context({
+      isIdle: () => true,
+      sessionManager: { getSessionFile: () => firstFile, getSessionId: () => "reload-parent" }
+   });
+   const second = context({
+      isIdle: () => true,
+      sessionManager: { getSessionFile: () => secondFile, getSessionId: () => "other-parent" }
+   });
+   try {
+      await p.emit("session_start", first);
+      const task = await runtimeMod.runTool(
+         r.runtime,
+         registryMod.TaskRegistry.use((registry) =>
+            registry.register({
+               id: "reload-task",
+               ownerSessionId: "reload-parent",
+               name: "reload",
+               profile: "worker",
+               cwd: scratch,
+               promptOrCommand: "work",
+               runtimeOwned: true
+            })
+         )
+      );
+      await runtimeMod.runTool(
+         r.runtime,
+         registryMod.TaskRegistry.use((registry) => registry.updateStatus(task.id, "running"))
+      );
+      await runtimeMod.runTool(
+         r.runtime,
+         registryMod.TaskRegistry.use((registry) =>
+            registry.updateStatus(task.id, "failed", { errorText: "interrupted", recoveryPending: true })
+         )
+      );
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      p.messages.length = 0;
+      await p.emit("session_start", second);
+      await p.emit("session_start", first);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      assert.equal(p.messages.filter(({ m }) => m.customType === "agents-result").length, 0);
+   } finally {
+      await p.emit("session_shutdown", first);
+      await r.runtime.dispose();
+   }
+});
+
 test("background result delivery marks a settled task after its message is sent", async () => {
    const p = piFake();
    const r = ext.registerAgentsExtension(p);
@@ -260,12 +311,13 @@ test("background spawn acknowledgements do not acknowledge a fast-settled task",
       await p.emit("session_start", parent);
       const result = await p.registered.get("agent_spawn").execute(
          "call-fast-background",
-         { agents: [{ profile: "worker", name: "fast", task: "Return immediately" }], background: true },
+         { agents: [{ profile: "worker", name: "fast", task: "Return immediately" }] },
          undefined,
          undefined,
          parent
       );
       assert.equal(result.details.ok, true);
+      assert.equal(result.terminate, true);
       assert.equal(result.details.tasks[0].status, "completed");
       const registered = await runtimeMod.runTool(
          testRuntime,
@@ -332,7 +384,9 @@ test("background batches deliver completed members when another member is cancel
       await p.emit("agent_settled", parent);
       await new Promise((resolve) => setTimeout(resolve, 20));
       const resultMessages = p.messages.filter(({ m }) => m.customType === "agents-result");
-      assert.deepEqual(resultMessages.map(({ m }) => m.details?.id), [completed.id]);
+      assert.equal(resultMessages.length, 1);
+      assert.equal(resultMessages[0].m.details?.batchId, "cancelled-batch");
+      assert.deepEqual(resultMessages[0].m.details?.tasks.map(({ id }) => id), [completed.id]);
       assert.equal((await get(cancelled.id))?.resultDelivered, undefined);
       await p.emit("agent_end", parent);
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -343,7 +397,56 @@ test("background batches deliver completed members when another member is cancel
    }
 });
 
-test("background batch delivery retries only the unsent member after a partial send failure", async () => {
+test("background batch waits when a failed pane starts again before delivery", async () => {
+   const p = piFake();
+   const r = ext.registerAgentsExtension(p);
+   let idle = false;
+   const parent = context({ isIdle: () => idle });
+   const add = (id) => runtimeMod.runTool(
+      r.runtime,
+      registryMod.TaskRegistry.use((registry) =>
+         registry.register({
+            id,
+            ownerSessionId: "parent",
+            name: id,
+            profile: "worker",
+            batchId: "recovered-batch",
+            batchSize: 2,
+            cwd: scratch,
+            promptOrCommand: id,
+            runtimeOwned: true
+         })
+      )
+   );
+   const update = (id, status, patch) => runtimeMod.runTool(
+      r.runtime,
+      registryMod.TaskRegistry.use((registry) => registry.updateStatus(id, status, patch))
+   );
+   try {
+      await p.emit("session_start", parent);
+      const failed = await add("recovered-failed");
+      const other = await add("recovered-other");
+      await update(failed.id, "failed", { errorText: "first attempt failed" });
+      await update(other.id, "completed", { resultData: "other result" });
+      await update(failed.id, "running", { errorText: undefined, resultData: undefined });
+      idle = true;
+      await p.emit("agent_settled", parent);
+      assert.equal(p.messages.filter(({ m }) => m.customType === "agents-result").length, 0);
+      await update(failed.id, "completed", { resultData: "recovered result" });
+      await p.emit("agent_settled", parent);
+      const batchMessages = p.messages.filter(({ m }) => m.customType === "agents-result");
+      assert.equal(batchMessages.length, 1);
+      assert.equal(batchMessages[0].m.details?.batchId, "recovered-batch");
+      assert.deepEqual(batchMessages[0].m.details?.tasks.map(({ id }) => id), [failed.id, other.id]);
+      assert.equal(batchMessages[0].o?.deliverAs, "followUp");
+      assert.equal(batchMessages[0].o?.triggerTurn, true);
+   } finally {
+      await p.emit("session_shutdown", parent);
+      await r.runtime.dispose();
+   }
+});
+
+test("background batch delivery retries one consolidated message after a send failure", async () => {
    const p = piFake();
    const r = ext.registerAgentsExtension(p);
    let idle = false;
@@ -373,31 +476,28 @@ test("background batch delivery retries only the unsent member after a partial s
       await p.emit("session_start", parent);
       const first = await add("send-first");
       const second = await add("send-second");
-      p.failSendIds = new Set([second.id]);
+      p.failSend = true;
       for (const task of [first, second]) {
          await runtimeMod.runTool(
             r.runtime,
-            registryMod.TaskRegistry.use((registry) =>
-               registry.updateStatus(task.id, "completed", { resultData: task.id })
-            )
+            registryMod.TaskRegistry.use((registry) => registry.updateStatus(task.id, "completed", { resultData: task.id }))
          );
       }
       idle = true;
       await p.emit("agent_settled", parent);
       await new Promise((resolve) => setTimeout(resolve, 20));
-      assert.deepEqual(
-         p.messages.filter(({ m }) => m.customType === "agents-result").map(({ m }) => m.details?.id),
-         [first.id]
-      );
-      assert.equal((await get(first.id))?.resultDelivered, true);
+      assert.equal(p.messages.filter(({ m }) => m.customType === "agents-result").length, 0);
+      assert.equal((await get(first.id))?.resultDelivered, undefined);
       assert.equal((await get(second.id))?.resultDelivered, undefined);
-      p.failSendIds.clear();
+      p.failSend = false;
       await p.emit("agent_end", parent);
       await new Promise((resolve) => setTimeout(resolve, 20));
-      assert.deepEqual(
-         p.messages.filter(({ m }) => m.customType === "agents-result").map(({ m }) => m.details?.id),
-         [first.id, second.id]
-      );
+      const messages = p.messages.filter(({ m }) => m.customType === "agents-result");
+      assert.equal(messages.length, 1);
+      assert.deepEqual(messages[0].m.details?.tasks.map(({ id }) => id), [first.id, second.id]);
+      assert.equal(messages[0].o?.deliverAs, "followUp");
+      assert.equal(messages[0].o?.triggerTurn, true);
+      assert.equal((await get(first.id))?.resultDelivered, true);
       assert.equal((await get(second.id))?.resultDelivered, true);
    } finally {
       await p.emit("session_shutdown", parent);

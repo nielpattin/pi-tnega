@@ -27,8 +27,7 @@ import {
    AgentCancelToolParamsSchema,
    AGENT_SPAWN_TOOL_BASE_DESCRIPTION,
    AGENT_SPAWN_TOOL_BASE_PROMPT_SNIPPET,
-   augmentAgentToolMetadata,
-   resolveAgentBackground
+   augmentAgentToolMetadata
 } from "./tools/agent.js";
 import { formatDuration } from "./ui/formatters.js";
 import {
@@ -113,12 +112,6 @@ function asErrorResult(message: string) {
    };
 }
 
-function settledIdsFromSpawnResult(result: unknown): string[] {
-   const tasks = (result as { tasks?: ReadonlyArray<{ id: string; status: string }> } | undefined)?.tasks;
-   if (!Array.isArray(tasks)) return [];
-   return tasks.filter((task) => task.status === "completed" || task.status === "failed").map((task) => task.id);
-}
-
 interface ParentToolDelivery {
    readonly ready: Promise<void>;
    readonly notifyAsyncWidget: (ctx: ExtensionContext) => void;
@@ -155,7 +148,13 @@ function createDeferredResultDelivery() {
 
       const completeBatches = Array.from(batches.values()).filter((tasks) => {
          const expected = tasks[0]?.batchSize;
-         return expected !== undefined && tasks.length >= expected;
+         return (
+            expected !== undefined &&
+            tasks.length >= expected &&
+            tasks.every(
+               (task) => task.status === "completed" || task.status === "failed" || task.status === "cancelled"
+            )
+         );
       });
 
       return [...singles, ...completeBatches];
@@ -165,6 +164,12 @@ function createDeferredResultDelivery() {
       defer(task: Task): void {
          if (!pending.has(task.id)) sent.delete(task.id);
          pending.set(task.id, task);
+      },
+      refresh(task: Task): void {
+         if (pending.has(task.id)) pending.set(task.id, task);
+      },
+      isPending(id: string): boolean {
+         return pending.has(id);
       },
       isSent(id: string): boolean {
          return sent.has(id);
@@ -301,21 +306,8 @@ function createAgentToolDefinition(
                }),
                { signal, interruptMessage: "agent spawn aborted" }
             );
-            if (!resolveAgentBackground(params.background)) {
-               const settledIds = settledIdsFromSpawnResult(result);
-               if (settledIds.length > 0) {
-                  try {
-                     await runTool(
-                        runtime,
-                        AgentManager.use((manager) => manager.markResultsDelivered(settledIds))
-                     );
-                  } catch {
-                     // A delivery acknowledgement must not fail a successful spawn result.
-                  }
-               }
-            }
             if (ctx.hasUI) delivery.notifyAsyncWidget(ctx);
-            return asTextResult(result);
+            return { ...asTextResult(result), terminate: true };
          } catch (err) {
             return asErrorResult(err instanceof Error ? err.message : String(err));
          }
@@ -468,6 +460,33 @@ function registerParentCommands(
          }
       }
    });
+   pi.registerCommand("wr.resume", {
+      description: "Resume interrupted agent sessions",
+      handler: async (_rawArgs, ctx) => {
+         const ownerSessionId = ctx.sessionManager.getSessionId?.() ?? "parent";
+         const resumed = await runTool(
+            runtime,
+            AgentManager.use((manager) => manager.resumeInterruptedTasks(ownerSessionId))
+         );
+         try {
+            await widget.update(ctx);
+         } catch {
+            // Widget refresh races must not change the resume result.
+         }
+         try {
+            if (typeof ctx.ui?.notify === "function") {
+               ctx.ui.notify(
+                  resumed.length === 0
+                     ? "No interrupted agent sessions to resume."
+                     : `Resumed ${resumed.length} agent session${resumed.length === 1 ? "" : "s"}.`,
+                  "info"
+               );
+            }
+         } catch {
+            // UI notification failures must not change the resume result.
+         }
+      }
+   });
    pi.registerCommand("wr", {
       description: "Expand or collapse the agents widget",
       handler: async (_rawArgs, ctx) => {
@@ -545,49 +564,132 @@ export function registerAgentsExtension(pi: ExtensionAPI, options?: AgentsExtens
          { deliverAs: "followUp", triggerTurn }
       );
    };
+   const deliverBatchResult = (tasks: ReadonlyArray<Task>) => {
+      const batchId = tasks[0]?.batchId ?? "batch";
+      const taskDetails = tasks.map((task) => {
+         const output = task.errorText ?? task.resultData ?? "(no result returned)";
+         const duration =
+            task.settledAt === undefined
+               ? undefined
+               : formatDuration(task.settledAt - (task.startedAt ?? task.createdAt));
+         return {
+            id: task.id,
+            name: task.name,
+            profile: task.profile,
+            status: task.status,
+            duration,
+            result: output
+         };
+      });
+      const content = [
+         `agent batch ${batchId} (${tasks.length} agents)`,
+         "",
+         ...taskDetails.map((task) => {
+            const label = `${task.name ?? task.id} (${task.id}) ${task.status}${task.duration ? ` in ${task.duration}` : ""}`;
+            return `${label}\n${fullResultText(task.result)}`;
+         })
+      ].join("\n\n");
+      const deliveryOptions = { deliverAs: "followUp" as const, triggerTurn: true };
+      pi.sendMessage(
+         {
+            customType: "agents-result",
+            content,
+            display: true,
+            details: { batchId, tasks: taskDetails }
+         },
+         deliveryOptions
+      );
+   };
    const flushResults = () => {
       for (const group of resultDelivery.pendingGroups()) {
-         const lastDeliverableIndex = group.findLastIndex((task) => task.status !== "cancelled");
-         let failed = false;
-         for (let index = 0; index < group.length; index++) {
-            const task = group[index];
-            if (task.status === "cancelled" || resultDelivery.isSent(task.id)) continue;
-            try {
-               deliverResult(task, index === lastDeliverableIndex);
-               resultDelivery.markSent(task.id);
-               void runTool(
-                  runtime,
-                  AgentManager.use((manager) => manager.markResultsDelivered([task.id]))
-               ).catch(() => {});
-            } catch {
-               failed = true;
-               break;
+         if (isBatchTask(group[0])) {
+            const deliverable = group.filter((task) => task.status !== "cancelled" && !resultDelivery.isSent(task.id));
+            if (deliverable.length > 0) {
+               try {
+                  deliverBatchResult(deliverable);
+                  for (const task of deliverable) resultDelivery.markSent(task.id);
+                  void runTool(
+                     runtime,
+                     AgentManager.use((manager) => manager.markResultsDelivered(deliverable.map((task) => task.id)))
+                  ).catch(() => {});
+               } catch {
+                  continue;
+               }
             }
+            if (group.every((task) => task.status === "cancelled" || resultDelivery.isSent(task.id))) {
+               resultDelivery.consume(group.map((task) => task.id));
+            }
+            continue;
          }
-         if (failed) continue;
-         if (group.every((task) => task.status === "cancelled" || resultDelivery.isSent(task.id))) {
-            resultDelivery.consume(group.map((task) => task.id));
+         const [task] = group;
+         if (!task || task.status === "cancelled" || resultDelivery.isSent(task.id)) continue;
+         try {
+            deliverResult(task);
+            resultDelivery.markSent(task.id);
+            void runTool(
+               runtime,
+               AgentManager.use((manager) => manager.markResultsDelivered([task.id]))
+            ).catch(() => {});
+            resultDelivery.consume([task.id]);
+         } catch {
+            // Keep the task queued for the next idle turn if sending fails.
          }
       }
    };
    const flushDeferredResults = () => {
       flushResults();
    };
+   const queueSettledResult = (task: Task): void => {
+      if (switchingParent || !parentContext || task.ownerSessionId !== activeOwnerSessionId) return;
+      if (task.status === "cancelled" && !isBatchTask(task)) return;
+      resultDelivery.defer({ ...task });
+      if (isBatchTask(task)) {
+         void runTool(
+            runtime,
+            TaskRegistry.use((registry) =>
+               Effect.gen(function* () {
+                  const tasks = yield* registry.list();
+                  const candidates = tasks.filter(
+                     (candidate) =>
+                        candidate.ownerSessionId === task.ownerSessionId &&
+                        candidate.batchId === task.batchId &&
+                        candidate.status !== "pending" &&
+                        candidate.status !== "running" &&
+                        candidate.resultDelivered !== true
+                  );
+                  for (const candidate of candidates) {
+                     if (candidate.runtimeOwned !== true) {
+                        yield* registry.updateStatus(candidate.id, candidate.status, { runtimeOwned: true });
+                     }
+                  }
+                  return candidates;
+               })
+            )
+         )
+            .then((tasks) => {
+               if (switchingParent || !parentContext || task.ownerSessionId !== activeOwnerSessionId) return;
+               if (!resultDelivery.isPending(task.id)) return;
+               for (const candidate of tasks) resultDelivery.defer({ ...candidate });
+               void asyncWidget.update(parentContext);
+               if (parentContext.isIdle()) flushDeferredResults();
+            })
+            .catch(() => {});
+      }
+      if (parentContext.isIdle()) flushDeferredResults();
+   };
    const deliveryReady = runTool(
       runtime,
       TaskRegistry.use((registry) =>
          Effect.gen(function* () {
             const unsubscribeSettledListener = yield* registry.onSettled((task) => {
-               if (switchingParent || !parentContext || task.ownerSessionId !== activeOwnerSessionId) return;
-               void asyncWidget.update(parentContext);
-               if (task.background !== true) return;
-               if (task.status === "cancelled" && !isBatchTask(task)) return;
-               resultDelivery.defer({ ...task });
-               if (parentContext.isIdle()) flushDeferredResults();
+               queueSettledResult(task);
             });
             const unsubscribeChangeListener = yield* registry.onChange((tasks) => {
                if (switchingParent || !parentContext) return;
                if (!tasks.some((task) => task.ownerSessionId === activeOwnerSessionId)) return;
+               for (const task of tasks) {
+                  if (task.ownerSessionId === activeOwnerSessionId) resultDelivery.refresh({ ...task });
+               }
                void asyncWidget.update(parentContext);
             });
             return { unsubscribeSettledListener, unsubscribeChangeListener };
@@ -757,10 +859,6 @@ export function registerAgentsExtension(pi: ExtensionAPI, options?: AgentsExtens
       } catch {
          // Runtime disposal below handles failed subscription setup.
       }
-      unsubscribeSettled?.();
-      unsubscribeChanged?.();
-      unsubscribeChanged = undefined;
-      unsubscribeSettled = undefined;
       try {
          await runTool(
             runtime,
@@ -769,6 +867,10 @@ export function registerAgentsExtension(pi: ExtensionAPI, options?: AgentsExtens
       } catch {
          // ignore
       }
+      unsubscribeSettled?.();
+      unsubscribeChanged?.();
+      unsubscribeChanged = undefined;
+      unsubscribeSettled = undefined;
       try {
          await runTool(runtime, flushPendingWrites());
       } catch (error: unknown) {

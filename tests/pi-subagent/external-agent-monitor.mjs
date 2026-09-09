@@ -99,6 +99,20 @@ test("completion monitor waits for and consumes an atomic exit sidecar", async (
    assert.equal(existsSync(exitFile), false);
 });
 
+
+test("completion monitor keeps watching after an error until a later run completes", async () => {
+   const exitFile = join(scratch, "task-recover.jsonl.exit");
+   const errors = [];
+   setTimeout(() => writeFileSync(exitFile, JSON.stringify({ type: "error", errorMessage: "first run failed" })), 20).unref();
+   setTimeout(() => writeFileSync(exitFile, JSON.stringify({ type: "done" })), 60).unref();
+   const result = await completion.waitForAgentCompletion(new AbortController().signal, {
+      exitFile,
+      intervalMs: 5,
+      onRecoverableError: (message) => errors.push(message)
+   });
+   assert.deepEqual(result, { reason: "done", exitCode: 0 });
+   assert.deepEqual(errors, ["first run failed"]);
+});
 test("child completion sidecars use normal assistant completion evidence", () => {
    assert.deepEqual(child.buildAgentCompletionSidecar([{ role: "assistant", stopReason: "stop" }]), { type: "done" });
    assert.deepEqual(
@@ -172,9 +186,25 @@ test("child extension writes an exit sidecar and stays open after settle", () =>
             handlers.set(event, handler);
          }
       });
+      handlers.get("agent_end")({ messages: [{ role: "assistant", stopReason: "error", errorMessage: "first run failed" }] });
+      handlers.get("agent_settled")({}, { shutdown: () => shutdowns += 1 });
+      assert.deepEqual(JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8")), {
+         type: "error",
+         errorMessage: "first run failed",
+         stopReason: "error"
+      });
+      assert.equal(shutdowns, 0);
+      handlers.get("agent_start")();
+      const restartedActivity = activity.readAgentActivityFile(activityFile, "task-child");
+      assert.equal(restartedActivity.ok, true);
+      assert.equal(restartedActivity.activity.phase, "active");
       handlers.get("agent_end")({ messages: [{ role: "assistant", stopReason: "stop" }] });
       handlers.get("agent_settled")({}, { shutdown: () => shutdowns += 1 });
       assert.deepEqual(JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8")), { type: "done" });
+      const activityState = activity.readAgentActivityFile(activityFile, "task-child");
+      assert.equal(activityState.ok, true);
+      assert.equal(activityState.activity.phase, "done");
+      assert.equal(activityState.activity.latestEvent, "agent_end");
       assert.equal(shutdowns, 0);
    } finally {
       restore("PI_AGENT_ID", previous.id);
@@ -199,6 +229,18 @@ test("external agent command carries child extension and monitor identity", () =
    });
    assert.ok(command.args.includes("/extension/agent-child.ts"));
    assert.ok(command.args.includes("--tools"));
+   const interactive = processModule.buildAgentCommand({
+      id: "task-3",
+      name: "inspect",
+      cwd: "/repo",
+      sessionFile: "/tmp/task-3.jsonl",
+      childExtensionPath: "/extension/agent-child.ts",
+      tools: ["read", "bash"],
+      model: "provider/model",
+      thinking: "low",
+      useHerdr: false
+   });
+   assert.equal(interactive.args.includes("--"), false);
    const script = processModule.buildAgentLaunchScript({
       id: "task-3",
       name: "inspect",
@@ -375,7 +417,6 @@ test("agent batch shares one herdr tab across its panes", async () => {
                {
                   ownerSessionId: "parent-tab-test",
                   parentSessionFile: join(scratch, "parent.jsonl"),
-                  background: false,
                   useHerdr: true,
                   herdrOps,
                   batchId: "batch-tab",
@@ -392,6 +433,13 @@ test("agent batch shares one herdr tab across its panes", async () => {
       assert.ok(calls.panes.every(({ direction }) => direction === "right"));
       assert.equal(calls.panes[0].name, "two");
       assert.deepEqual(calls.renamed, [["fake-root-1", "one"]]);
+      for (const t of spawned) {
+         for (let attempt = 0; attempt < 30; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            const cur = await runtimeModule.runTool(runtime, registryModule.TaskRegistry.use((reg) => reg.get(t.id)));
+            if (cur?.status === "completed") break;
+         }
+      }
       const settled = await runtimeModule.runTool(runtime, registryModule.TaskRegistry.use((registry) => registry.list()));
       const mine = settled.filter((task) => task.ownerSessionId === "parent-tab-test");
       assert.equal(mine.length, 3);
@@ -415,10 +463,13 @@ test("agent manager settles a background child and mirrors activity into the tas
          "import { appendFileSync, writeFileSync } from 'node:fs';",
          "const session = process.env.PI_AGENT_SESSION;",
          "const now = Date.now();",
-         "writeFileSync(process.env.PI_AGENT_ACTIVITY_FILE, JSON.stringify({ version: 1, runningChildId: process.env.PI_AGENT_ID, createdAt: now, updatedAt: now, sequence: 1, latestEvent: 'tool_execution_start', phase: 'active', agentActive: true, turnActive: true, providerActive: false, toolActive: true, activeScope: 'tool', toolCallId: 'call-1', toolName: 'read', toolStartedAt: now }) + '\\n');",
+         "const writeActivity = (sequence, phase, createdAt = now) => writeFileSync(process.env.PI_AGENT_ACTIVITY_FILE, JSON.stringify({ version: 1, runningChildId: process.env.PI_AGENT_ID, createdAt, updatedAt: Date.now(), sequence, latestEvent: phase === 'active' ? 'tool_execution_start' : 'agent_end', phase, agentActive: phase === 'active', turnActive: phase === 'active', providerActive: false, toolActive: phase === 'active', activeScope: phase === 'active' ? 'tool' : undefined, toolCallId: phase === 'active' ? 'call-1' : undefined, toolName: phase === 'active' ? 'read' : undefined, toolStartedAt: phase === 'active' ? now : undefined }) + '\\n');",
+         "writeActivity(1, 'active');",
          "appendFileSync(session, JSON.stringify({ type: 'session', id: 'manager-child' }) + '\\n');",
-         "appendFileSync(session, JSON.stringify({ type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: 'manager result' }], stopReason: 'stop' } }) + '\\n');",
-         "setTimeout(() => writeFileSync(session + '.exit', JSON.stringify({ type: 'done' }) + '\\n'), 450);",
+         "appendFileSync(session, JSON.stringify({ type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: 'first failure' }], stopReason: 'error' } }) + '\\n');",
+         "setTimeout(() => writeFileSync(session + '.exit', JSON.stringify({ type: 'error', errorMessage: 'first failure', stopReason: 'error' }) + '\\n'), 100);",
+         "setTimeout(() => { writeActivity(1, 'active', now + 1); appendFileSync(session, JSON.stringify({ type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: 'manager result' }], stopReason: 'stop' } }) + '\\n'); }, 1500);",
+         "setTimeout(() => { writeActivity(2, 'done', now + 1); writeFileSync(session + '.exit', JSON.stringify({ type: 'done' }) + '\\n'); }, 2200);",
          "",
       ].join("\n"),
       { mode: 0o755 }
@@ -440,7 +491,6 @@ test("agent manager settles a background child and mirrors activity into the tas
                {
                   ownerSessionId: 'parent-test',
                   parentSessionFile: join(scratch, 'parent.jsonl'),
-                  background: true,
                   useHerdr: false
                }
             )
@@ -449,14 +499,20 @@ test("agent manager settles a background child and mirrors activity into the tas
       const taskId = spawned[0].id;
       assert.match(taskId, /^task-[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
       let settled = spawned[0];
-      for (let attempt = 0; attempt < 15; attempt += 1) {
+      let sawFailed = false;
+      let sawRunningAfterFailure = false;
+      for (let attempt = 0; attempt < 30; attempt += 1) {
          await new Promise((resolve) => setTimeout(resolve, 100));
          settled = await runtimeModule.runTool(runtime, registryModule.TaskRegistry.use((registry) => registry.get(taskId)));
+         if (settled?.status === 'failed') sawFailed = true;
+         if (sawFailed && settled?.status === 'running') sawRunningAfterFailure = true;
          if (settled?.status === 'completed') break;
       }
+      assert.equal(sawFailed, true);
+      assert.equal(sawRunningAfterFailure, true);
       assert.equal(settled?.status, 'completed');
       assert.equal(settled?.resultData, 'manager result');
-      assert.equal(settled?.activity?.toolName, 'read');
+      assert.equal(settled?.activity?.sequence, 2);
    } finally {
       await runtime.dispose();
       if (previousCommand === undefined) delete process.env.PI_COMMAND;

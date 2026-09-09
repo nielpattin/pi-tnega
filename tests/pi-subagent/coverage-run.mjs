@@ -16,6 +16,8 @@ const runner = await loadExtension("extensions/pi-subagent/src/shared/agent-runn
 const childExtension = await loadExtension("extensions/pi-subagent/src/agent-child.ts");
 const managerModule = await loadExtension("extensions/pi-subagent/src/services/agent-manager.ts");
 const runtimeModule = await loadExtension("extensions/pi-subagent/src/runtime.ts");
+const registryModule = await loadExtension("extensions/pi-subagent/src/services/task-registry.ts");
+const persistenceModule = await loadExtension("extensions/pi-subagent/src/services/task-persistence.ts");
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const validState = (id = "id") => activity.createAgentActivityState(id, 10);
 const ops = (overrides = {}) => ({ available: () => true, createTab: () => ({ tabId: "tab", rootPaneId: "root" }), createPane: () => "pane", runScript: () => {}, readPane: () => "", inspectPane: async () => "present", closePane: () => {}, closeTab: () => {}, renamePane: () => {}, sendText: () => {}, ...overrides });
@@ -141,6 +143,226 @@ test("in-process runner returns success, failure and abort outcomes", async () =
 });
 
 test("manager rejects profiles and handles panes and cancellation", async () => {
-  const runtime = runtimeModule.makeAgentsRuntime(); try { await assert.rejects(runtimeModule.runTool(runtime, managerModule.AgentManager.use((m) => m.spawnBatch([{ profile: "" }]))), /profile/); const h = ops({ inspectPane: async () => "missing" }); const tasks = await runtimeModule.runTool(runtime, managerModule.AgentManager.use((m) => m.spawnBatch([{ profile: "worker", task: "x" }], { background: true, useHerdr: true, herdrOps: h }))); assert.equal(tasks.length, 1); assert.equal(await runtimeModule.runTool(runtime, managerModule.AgentManager.use((m) => m.pruneClosedPanes())), 1); assert.equal((await runtimeModule.runTool(runtime, managerModule.AgentManager.use((m) => m.cancelTask(tasks[0].id)))).status, "cancelled"); assert.equal((await runtimeModule.runTool(runtime, managerModule.AgentManager.use((m) => m.cancelTask(tasks[0].id)))).status, "cancelled"); } finally { await runtime.dispose(); }
+  const runtime = runtimeModule.makeAgentsRuntime(); try { await assert.rejects(runtimeModule.runTool(runtime, managerModule.AgentManager.use((m) => m.spawnBatch([{ profile: "" }]))), /profile/); const h = ops({ inspectPane: async () => "missing" }); const tasks = await runtimeModule.runTool(runtime, managerModule.AgentManager.use((m) => m.spawnBatch([{ profile: "worker", task: "x" }], { useHerdr: true, herdrOps: h }))); assert.equal(tasks.length, 1); assert.equal(await runtimeModule.runTool(runtime, managerModule.AgentManager.use((m) => m.pruneClosedPanes())), 1); assert.equal((await runtimeModule.runTool(runtime, managerModule.AgentManager.use((m) => m.cancelTask(tasks[0].id)))).status, "cancelled"); assert.equal((await runtimeModule.runTool(runtime, managerModule.AgentManager.use((m) => m.cancelTask(tasks[0].id)))).status, "cancelled"); } finally { await runtime.dispose(); }
 });
 
+test("wr.resume continues a live interrupted session without creating another pane", async () => {
+   const runtime = runtimeModule.makeAgentsRuntime();
+   const sent = [];
+   const moved = [];
+   const herdrOps = ops({
+      movePaneToNewTab: (paneId, name) => moved.push({ paneId, name }),
+      sendText: (paneId, text) => sent.push({ paneId, text })
+   });
+   try {
+      const [task] = await runtimeModule.runTool(runtime, managerModule.AgentManager.use((manager) => manager.spawnBatch([{ profile: "worker", name: "live", task: "original" }], { useHerdr: true, herdrOps })));
+      await runtimeModule.runTool(runtime, registryModule.TaskRegistry.use((registry) => registry.updateStatus(task.id, "failed", { errorText: "recoverable", resumeWithPrompt: true, paneClosed: true, runtimeOwned: false })));
+      const resumed = await runtimeModule.runTool(runtime, managerModule.AgentManager.use((manager) => manager.resumeInterruptedTasks(task.ownerSessionId)));
+      assert.equal(resumed.length, 1);
+      assert.equal(resumed[0].status, "running");
+      assert.equal(resumed[0].paneClosed, undefined);
+      assert.equal(resumed[0].runtimeOwned, true);
+      assert.equal(sent.length, 1);
+      assert.equal(moved.length, 1);
+      assert.match(sent[0].text, /Continue the work pls/);
+      await runtimeModule.runTool(runtime, managerModule.AgentManager.use((manager) => manager.cancelTask(task.id)));
+   } finally {
+      await runtime.dispose();
+   }
+});
+
+test("wr.resume reopens a stopped session without an automatic prompt", async () => {
+   const runtime = runtimeModule.makeAgentsRuntime();
+   const scripts = [];
+   const tabs = [];
+   const sessionFile = join(dir, "resume-session.jsonl");
+   writeFileSync(sessionFile, "");
+   const herdrOps = ops({
+      createTab: (name, cwd) => {
+         tabs.push({ name, cwd });
+         return { tabId: "resume-tab", rootPaneId: "resume-root" };
+      },
+      runScript: (_paneId, scriptPath) => scripts.push(readFileSync(scriptPath, "utf8"))
+   });
+   try {
+      const [seed] = await runtimeModule.runTool(
+         runtime,
+         managerModule.AgentManager.use((manager) =>
+            manager.spawnBatch([{ profile: "worker", name: "seed", task: "seed" }], {
+               useHerdr: true,
+               herdrOps
+            })
+         )
+      );
+      await runtimeModule.runTool(runtime, managerModule.AgentManager.use((manager) => manager.cancelTask(seed.id)));
+      scripts.length = 0;
+      const task = await runtimeModule.runTool(
+         runtime,
+         registryModule.TaskRegistry.use((registry) =>
+            registry.register({
+               id: "resume-task",
+               ownerSessionId: "parent",
+               name: "resume",
+               profile: "worker",
+               cwd: dir,
+               promptOrCommand: "original",
+               sessionFile,
+               paneId: "old-pane",
+               runtimeOwned: true
+            })
+         )
+      );
+      await runtimeModule.runTool(
+         runtime,
+         registryModule.TaskRegistry.use((registry) =>
+            registry.updateStatus(task.id, "failed", {
+               errorText: persistenceModule.RESTART_INTERRUPTED_ERROR,
+               recoveryPending: undefined
+            })
+         )
+      );
+      const before = await runtimeModule.runTool(runtime, registryModule.TaskRegistry.use((registry) => registry.get(task.id)));
+      assert.equal(before.status, "failed");
+      assert.equal(before.ownerSessionId, "parent");
+      assert.equal(before.recoveryPending, undefined);
+      assert.equal(before.errorText, persistenceModule.RESTART_INTERRUPTED_ERROR);
+      assert.equal(before.sessionFile, sessionFile);
+      const resumed = await runtimeModule.runTool(
+         runtime,
+         managerModule.AgentManager.use((manager) => manager.resumeInterruptedTasks("parent"))
+      );
+      assert.equal(resumed.length, 1);
+      assert.equal(resumed[0].id, task.id);
+      assert.equal(resumed[0].status, "running");
+      assert.equal(scripts.length, 1);
+      assert.equal(tabs.length, 1);
+      assert.doesNotMatch(scripts[0], /-- ['"]original['"]$/m);
+      await runtimeModule.runTool(runtime, managerModule.AgentManager.use((manager) => manager.cancelTask(task.id)));
+   } finally {
+      await runtime.dispose();
+   }
+});
+
+test("wr.resume does not prompt a live session that failed on its own", async () => {
+   const runtime = runtimeModule.makeAgentsRuntime();
+   const sent = [];
+   const moved = [];
+   const herdrOps = ops({
+      movePaneToNewTab: (paneId, name) => moved.push({ paneId, name }),
+      sendText: (paneId, text) => sent.push({ paneId, text })
+   });
+   try {
+      const [task] = await runtimeModule.runTool(
+         runtime,
+         managerModule.AgentManager.use((manager) =>
+            manager.spawnBatch([{ profile: "worker", name: "failed", task: "original" }], { useHerdr: true, herdrOps })
+         )
+      );
+      await runtimeModule.runTool(
+         runtime,
+         registryModule.TaskRegistry.use((registry) =>
+            registry.updateStatus(task.id, "failed", { errorText: "provider failed", recoveryPending: true })
+         )
+      );
+      const resumed = await runtimeModule.runTool(
+         runtime,
+         managerModule.AgentManager.use((manager) => manager.resumeInterruptedTasks(task.ownerSessionId))
+      );
+      assert.equal(resumed.length, 1);
+      assert.equal(sent.length, 0);
+      assert.equal(moved.length, 1);
+      assert.equal(resumed[0].status, "failed");
+      await runtimeModule.runTool(runtime, managerModule.AgentManager.use((manager) => manager.cancelTask(task.id)));
+   } finally {
+      await runtime.dispose();
+   }
+});
+
+test("wr.resume does not create a replacement session when the original file is missing", async () => {
+   const runtime = runtimeModule.makeAgentsRuntime();
+   const tabs = [];
+   const herdrOps = ops({ createTab: (name, cwd) => { tabs.push({ name, cwd }); return { tabId: "new", rootPaneId: "new-root" }; } });
+   try {
+      const task = await runtimeModule.runTool(
+         runtime,
+         registryModule.TaskRegistry.use((registry) =>
+            registry.register({
+               id: "missing-session-task", ownerSessionId: "parent", name: "missing", profile: "worker",
+               cwd: dir, promptOrCommand: "original", sessionFile: join(dir, "missing-session.jsonl"),
+               status: "pending"
+            })
+         )
+      );
+      await runtimeModule.runTool(
+         runtime,
+         registryModule.TaskRegistry.use((registry) =>
+            registry.updateStatus(task.id, "failed", { errorText: persistenceModule.RESTART_INTERRUPTED_ERROR })
+         )
+      );
+      const resumed = await runtimeModule.runTool(
+         runtime,
+         managerModule.AgentManager.use((manager) => manager.resumeInterruptedTasks(task.ownerSessionId))
+      );
+      assert.equal(resumed.length, 0);
+      assert.equal(tabs.length, 0);
+   } finally {
+      await runtime.dispose();
+   }
+});
+
+
+test("wr.resume sends a continuation prompt for a stopped task that was running", async () => {
+   const runtime = runtimeModule.makeAgentsRuntime();
+   const scripts = [];
+   const herdrOps = ops({ runScript: (_paneId, scriptPath) => scripts.push(readFileSync(scriptPath, "utf8")) });
+   const sessionFile = join(dir, "resume-prompt-session.jsonl");
+   writeFileSync(sessionFile, "");
+   try {
+      const [seed] = await runtimeModule.runTool(
+         runtime,
+         managerModule.AgentManager.use((manager) =>
+            manager.spawnBatch([{ profile: "worker", name: "seed", task: "seed" }], {
+               useHerdr: true,
+               herdrOps
+            })
+         )
+      );
+      await runtimeModule.runTool(runtime, managerModule.AgentManager.use((manager) => manager.cancelTask(seed.id)));
+      scripts.length = 0;
+      const task = await runtimeModule.runTool(
+         runtime,
+         registryModule.TaskRegistry.use((registry) =>
+            registry.register({
+               id: "prompt-task",
+               ownerSessionId: "parent",
+               name: "prompt",
+               profile: "worker",
+               cwd: dir,
+               promptOrCommand: "original",
+               sessionFile,
+               runtimeOwned: true,
+               resumeWithPrompt: true
+            })
+         )
+      );
+      await runtimeModule.runTool(
+         runtime,
+         registryModule.TaskRegistry.use((registry) =>
+            registry.updateStatus(task.id, "failed", {
+               errorText: persistenceModule.RESTART_INTERRUPTED_ERROR,
+               recoveryPending: undefined
+            })
+         )
+      );
+      const resumed = await runtimeModule.runTool(
+         runtime,
+         managerModule.AgentManager.use((manager) => manager.resumeInterruptedTasks("parent"))
+      );
+      assert.equal(resumed[0].id, task.id);
+      assert.equal(scripts.length, 1);
+      assert.match(scripts[0], /Continue the work pls/);
+      await runtimeModule.runTool(runtime, managerModule.AgentManager.use((manager) => manager.cancelTask(task.id)));
+   } finally {
+      await runtime.dispose();
+   }
+});

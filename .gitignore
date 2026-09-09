@@ -185,9 +185,8 @@ models-store.json
 agents.json
 *.workspace
 
-pi-mcp-adapter/
 agents/
-.pi/cortex
+.pi
 **/target/
 
 .ext-config/
@@ -198,5 +197,5 @@ agents/
 !package.json
 
 pnpm-lock.yaml
-
+*fabric/
 fff/

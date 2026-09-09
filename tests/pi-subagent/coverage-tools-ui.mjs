@@ -88,9 +88,7 @@ function result(details, text = "result") {
 }
 
 test("agent schemas, metadata, and pure execution helpers cover all variants", async () => {
-   assert.equal(agentTools.resolveAgentBackground(), false);
-   assert.equal(agentTools.resolveAgentBackground(false), false);
-   assert.equal(agentTools.resolveAgentBackground(true), true);
+   assert.equal(agentTools.AgentSpawnToolParamsSchema.properties.background, undefined);
    assert.equal(agentTools.createAgentSpawnToolParamsSchema([]).properties.agents.items.properties.profile.not !== undefined, true);
    assert.equal(agentTools.createAgentSpawnToolParamsSchema(["solo"]).properties.agents.items.properties.profile.const, "solo");
    assert.equal(agentTools.createAgentSpawnToolParamsSchema(["a", "b"]).properties.agents.items.properties.profile.anyOf.length, 2);
@@ -141,7 +139,7 @@ test("agent schemas, metadata, and pure execution helpers cover all variants", a
       spawningManager
    );
    assert.equal(spawned.tasks[0].status, "spawned");
-   assert.match(spawned.message, /1 agent finished/);
+   assert.match(spawned.message, /1 agent spawned in background/);
    assert.deepEqual(
       await runAgentEffect(agentTools.handleAgentSpawn({ agents: [] }), fakeRegistry([]), fakeManager()),
       { ok: false, error: 'agent_spawn requires a non-empty "agents" array.' }
@@ -149,7 +147,7 @@ test("agent schemas, metadata, and pure execution helpers cover all variants", a
 
    const backgroundSpawned = await runAgentEffect(
       agentTools.handleAgentSpawn(
-         { context: "shared", agents: [{ task: "x", name: "n", profile: "worker" }], background: true },
+         { context: "shared", agents: [{ task: "x", name: "n", profile: "worker" }] },
          { cwd: "/tmp" }
       ),
       fakeRegistry([]),
@@ -335,8 +333,9 @@ test("async agent widget covers visibility, activity, idle, overflow, and trunca
       task({ runtimeOwned: true, paneClosed: true, resultDelivered: true, status: "completed" }),
       task({ runtimeOwned: true, paneClosed: true, status: "completed" }),
       task({ runtimeOwned: true, paneClosed: true, status: "running" }),
-      task({ runtimeOwned: true, status: "pending" })
-   ]).map((value) => value.status), ["completed", "running", "pending"]);
+      task({ runtimeOwned: true, status: "pending" }),
+      task({ id: "stale-closed", runtimeOwned: true, paneId: "open-pane", paneClosed: true, resultDelivered: true, status: "completed" })
+   ]).map((value) => value.id), ["task-1", "task-1", "task-1", "stale-closed"]);
    const summary = widget.summarizeAsyncAgentStatus([
       task({ id: "r", name: null, status: "running", runtimeOwned: true }),
       task({ id: "p", name: "pending", status: "pending", runtimeOwned: true, activity: { phase: "waiting" } }),
@@ -465,22 +464,16 @@ test("renderer helpers cover calls, markdown, stats, records, results, and error
    assert.match(render(renderers.renderAgentResult({ content: [{ type: "text", text: "fallback" }] }, { expanded: false, isPartial: false }, theme, {})), /fallback/);
    assert.match(render(renderers.renderAgentResult({ content: [] }, { expanded: false, isPartial: false }, theme, {})), /Done/);
 
-   render(renderers.renderAgentResult(result({ jobs: [{ id: "job", status: "completed" }] }), { expanded: false, isPartial: false }, theme, { state: {} }));
-   render(renderers.renderAgentResult(result({ jobs: [{ id: "job", status: "running" }] }), { expanded: false, isPartial: false }, theme, { state: {} }));
-   const recordCases = [
-      { jobs: [{ id: "j", status: "completed", resultData: "output" }] },
-      { jobs: [{ id: "object", resultData: { value: 1 } }, { id: "empty" }] },
-      { jobs: [{ name: "n", agent: "agent" }, { id: "j2", status: "failed", errorText: { code: 1 } }, { status: "completed", resultData: { summary: "summary" } }] },
-      { lines: ["one", 2, "two", "three", "four", "five"] },
-      { job: { id: "entity", status: "completed", resultData: "entity output" } },
-      { arbitrary: "json" }
-   ];
-   for (const details of recordCases) {
-      render(renderers.renderJobListResult(result(details), { expanded: false, isPartial: false }, theme, {}));
-      render(renderers.renderJobListResult(result(details), { expanded: true, isPartial: false }, theme, {}));
-   }
-   assert.match(render(renderers.renderJobListResult({ content: [], details: "not-record" }, { expanded: false, isPartial: false }, theme, {})), /Done/);
-   for (const fn of [renderers.renderAgentListResult, renderers.renderAgentCancelResult]) {
-      assert.match(render(fn(result({ jobs: [{ id: "j", status: "completed" }] }), { expanded: false, isPartial: false }, theme, {})), /j/);
-   }
+   render(renderers.renderAgentListResult(result({ tasks: [{ id: "l1", name: "list-1", status: "running", errorText: "err" }] }), { expanded: false, isPartial: false }, theme, {}));
+   render(renderers.renderAgentListResult(result({ tasks: [{ id: "l1", name: "list-1", status: "running", errorText: "err", sessionFile: "s", model: "m", cwd: "/tmp" }] }), { expanded: true, isPartial: false }, theme, {}));
+   render(renderers.renderAgentListResult(result({ tasks: Array.from({ length: 8 }, (_, i) => ({ id: `t-${i}`, status: "completed" })) }), { expanded: false, isPartial: false }, theme, {}));
+   render(renderers.renderAgentListResult(result({ ok: false, error: "err" }), { expanded: false, isPartial: false }, theme, {}));
+   render(renderers.renderAgentListResult(result("not-record"), { expanded: false, isPartial: false }, theme, {}));
+   render(renderers.renderAgentListResult(result({ tasks: [] }), { expanded: false, isPartial: true }, theme, {}));
+
+   render(renderers.renderAgentCancelResult(result({ ok: true, action: "cancelled", id: "c1", task: { id: "c1", name: "c1", status: "cancelled", sessionFile: "s" } }), { expanded: false, isPartial: false }, theme, {}));
+   render(renderers.renderAgentCancelResult(result({ ok: true, action: "cancelled", id: "c1", task: { id: "c1", name: "diff", status: "cancelled", sessionFile: "s" } }), { expanded: true, isPartial: false }, theme, {}));
+   render(renderers.renderAgentCancelResult(result({ ok: false, error: "err" }), { expanded: false, isPartial: false }, theme, {}));
+   render(renderers.renderAgentCancelResult(result("not-record"), { expanded: false, isPartial: false }, theme, {}));
+   render(renderers.renderAgentCancelResult(result({}), { expanded: false, isPartial: true }, theme, {}));
 });

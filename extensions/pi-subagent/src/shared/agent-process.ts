@@ -36,13 +36,14 @@ export interface AgentHerdrOps {
    readonly closePane: (paneId: string) => void;
    readonly closeTab: (tabId: string) => void;
    readonly renamePane: (paneId: string, name: string) => void;
+   readonly movePaneToNewTab?: (paneId: string, name: string) => void;
    readonly sendText: (paneId: string, text: string) => void;
 }
 
 export interface AgentLaunchRequest {
    readonly id: string;
    readonly name: string;
-   readonly prompt: string;
+   readonly prompt?: string;
    readonly cwd: string;
    readonly sessionFile: string;
    readonly activityFile?: string;
@@ -59,6 +60,7 @@ export interface AgentLaunchRequest {
    readonly splitFromPaneId?: string;
    readonly splitDirection?: AgentSplitDirection;
    readonly onActivity?: (activity: AgentActivityState) => void;
+   readonly onRecoverableError?: (message: string) => void;
 }
 
 export interface AgentSessionMetadata {
@@ -88,6 +90,8 @@ export interface ExternalAgentHandle {
    readonly completion: Promise<ExternalAgentOutcome>;
    readonly abort: () => Promise<void>;
    readonly control: (text: string) => Promise<void>;
+   /** Stop monitoring without closing a Herdr pane. */
+   readonly stopWatching: () => void;
 }
 
 export interface AgentArtifactsOptions {
@@ -145,7 +149,7 @@ export function buildAgentCommand(request: AgentLaunchRequest): AgentCommand {
    args.push("--exclude-tools", "ask_user,agent_spawn,agent_list,agent_cancel");
    const appendSystemPrompt = resolveAppendSystemPromptSource(request.cwd);
    if (appendSystemPrompt) args.push("--append-system-prompt", appendSystemPrompt);
-   args.push("--", request.prompt);
+   if (request.prompt !== undefined) args.push("--", request.prompt);
    return {
       executable,
       args,
@@ -269,6 +273,12 @@ function closeHerdrPane(paneId: string): void {
       // The pane may already be gone.
    }
 }
+function moveHerdrPaneToNewTab(paneId: string, name: string): void {
+   execFileSync("herdr", ["pane", "move", paneId, "--new-tab", "--tab-label", `agents ${name}`, "--no-focus"], {
+      stdio: "ignore",
+      timeout: 10_000
+   });
+}
 
 function renameHerdrPane(paneId: string, name: string): void {
    try {
@@ -378,6 +388,7 @@ export const defaultAgentHerdrOps: AgentHerdrOps = {
    inspectPane: (paneId) => inspectHerdrPane(paneId),
    closePane: (paneId) => closeHerdrPane(paneId),
    renamePane: (paneId, name) => renameHerdrPane(paneId, name),
+   movePaneToNewTab: (paneId, name) => moveHerdrPaneToNewTab(paneId, name),
    closeTab: (tabId) => closeHerdrTab(tabId),
    sendText: (paneId, text) => {
       execFileSync("herdr", ["pane", "send-text", paneId, text], { stdio: "ignore", timeout: 5_000 });
@@ -474,7 +485,8 @@ export async function launchExternalAgent(request: AgentLaunchRequest): Promise<
       readTerminalTail: paneId ? () => Promise.resolve(ops.readPane(paneId!)) : undefined,
       inspectPane: paneId ? () => ops.inspectPane(paneId!) : undefined,
       processExited: child ? () => processExitCode : undefined,
-      onActivitySnapshot: request.onActivity
+      onActivitySnapshot: request.onActivity,
+      onRecoverableError: request.onRecoverableError
    })
       .then((result) => outcomeFromCompletion(result, { ...request, sessionFile, activityFile }, paneId))
       .catch((error) => {
@@ -520,12 +532,16 @@ export async function launchExternalAgent(request: AgentLaunchRequest): Promise<
          ops.sendText(paneId, text);
       }
    };
+   const stopWatching = () => {
+      completionSignal.abort();
+   };
 
    return {
       metadata: { ...metadata, paneId },
       completion,
       abort,
-      control
+      control,
+      stopWatching
    };
 }
 

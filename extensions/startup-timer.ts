@@ -26,7 +26,7 @@ function srcPath(si: unknown): string | undefined {
 
 // Extract a meaningful display name from an extension path.
 // npm packages → package name   (e.g. @scope/name or package-name)
-// dir extensions → dir name     (e.g. pi-mcp-adapter/index.ts → pi-mcp-adapter)
+// dir extensions → dir name     (e.g. package/index.ts → package)
 // file extensions → filename    (e.g. files.ts → files)
 function makeLabel(path: string): string {
    const n = normalizeP(path);

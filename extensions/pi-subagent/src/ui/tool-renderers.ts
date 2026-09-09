@@ -3,6 +3,14 @@ import { Container, Markdown, type MarkdownTheme, Text, truncateToWidth, type Co
 import type { AgentSpec } from "../domain.js";
 import type { AgentCancelToolParams, AgentListToolParams, AgentSpawnToolParams } from "../tools/agent.js";
 
+function safeKeyHint(id: Parameters<typeof keyHint>[0], fallback: string): string {
+   try {
+      return keyHint(id, fallback);
+   } catch {
+      return fallback;
+   }
+}
+
 interface ToolResultLike {
    readonly content: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
    readonly details?: unknown;
@@ -47,9 +55,6 @@ function taskStatusesFromDetails(details: unknown): ReadonlyArray<string | undef
    if (!isRecord(details)) return [];
    if (Array.isArray(details.tasks)) {
       return details.tasks.map((task) => stringValue((task as Details).status));
-   }
-   if (Array.isArray(details.jobs)) {
-      return details.jobs.map((job) => stringValue((job as Details).status));
    }
    const status = stringValue(details.status);
    return status !== undefined ? [status] : [];
@@ -109,18 +114,6 @@ function resultPrelude(
 function fallbackResult(result: ToolResultLike, theme: Theme): Component {
    const text = preview(textContent(result), 240);
    return new Text(theme.fg("muted", text || "Done"), 0, 0);
-}
-
-const JOB_JSON_PREVIEW_LINES = 6;
-
-function renderJsonResult(details: Details, options: RenderOptions, theme: Theme): Component {
-   const json = JSON.stringify(details, null, 2);
-   const lines = json.split("\n");
-   const visibleLines = options.expanded ? lines : lines.slice(0, JOB_JSON_PREVIEW_LINES);
-   // Pi owns the expand/collapse interaction and passes `expanded` back to
-   // this renderer. Do not replace the hidden JSON with a lossy ellipsis.
-   const rendered = visibleLines.map((line) => theme.fg("toolOutput", line));
-   return new Text(rendered.join("\n"), 0, 0);
 }
 
 const AGENT_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
@@ -222,8 +215,8 @@ export function renderAgentResult(
    const prelude = resultPrelude(result, options, theme, context, "agent_spawn");
    if (prelude) return prelude;
    if (!isRecord(result.details)) return fallbackResult(result, theme);
-   const jobs = records(result.details.tasks ?? result.details.jobs);
-   const agentRows = jobs.length > 0 ? jobs : stringValue(result.details.id) ? [result.details] : [];
+   const tasks = records(result.details.tasks);
+   const agentRows = tasks.length > 0 ? tasks : stringValue(result.details.id) ? [result.details] : [];
    if (agentRows.length === 0) return fallbackResult(result, theme);
    const allSettled = agentRows.every((task) => {
       const status = stringValue(task.status);
@@ -243,7 +236,7 @@ export function renderAgentResult(
             );
          } else {
             lines.push(
-               theme.fg("muted", "(") + `${keyHint("app.tools.expand", "to see schema")}${theme.fg("muted", ")")}`
+               theme.fg("muted", "(") + `${safeKeyHint("app.tools.expand", "to see schema")}${theme.fg("muted", ")")}`
             );
          }
          return new Text(lines.join("\n"), 0, 0);
@@ -263,7 +256,7 @@ export function renderAgentResult(
       if (!options.expanded) {
          lines.push(theme.fg("dim", "---"));
          lines.push(
-            theme.fg("muted", "(") + `${keyHint("app.tools.expand", "to see schema")}${theme.fg("muted", ")")}`
+            theme.fg("muted", "(") + `${safeKeyHint("app.tools.expand", "to see schema")}${theme.fg("muted", ")")}`
          );
       }
       return new Text(lines.join("\n"), 0, 0);
@@ -303,7 +296,8 @@ export function renderAgentResult(
                );
             }
             lines.push(
-               theme.fg("muted", "(") + `${keyHint("app.tools.expand", "to expand output")}${theme.fg("muted", ")")}`
+               theme.fg("muted", "(") +
+                  `${safeKeyHint("app.tools.expand", "to expand output")}${theme.fg("muted", ")")}`
             );
             return new Text(lines.join("\n"), 0, 0);
          }
@@ -337,7 +331,7 @@ export function renderAgentResult(
          }
          lines.push(theme.fg("dim", "---"));
          lines.push(
-            theme.fg("muted", "(") + `${keyHint("app.tools.expand", "to expand output")}${theme.fg("muted", ")")}`
+            theme.fg("muted", "(") + `${safeKeyHint("app.tools.expand", "to expand output")}${theme.fg("muted", ")")}`
          );
          return new Text(lines.join("\n"), 0, 0);
       }
@@ -480,84 +474,9 @@ export function formatAgentStatLine(input: AgentStatLineInput, theme: Theme): st
    return `${statusMark(input.status, theme)} ${name}${agentStr}${statsStr}${lineCountStr}`;
 }
 
-function recordOutput(item: Details): unknown {
-   return item.errorText ?? item.resultData;
-}
-
-function outputPreview(value: unknown): string {
-   if (typeof value === "string") return preview(value, 120);
-   if (isRecord(value) && typeof value.summary === "string") return preview(value.summary, 120);
-   if (value !== undefined) return preview(JSON.stringify(value), 120);
-   return "";
-}
-
-function agentPayloadText(value: unknown): string {
-   if (typeof value === "string") return value;
-   if (isRecord(value) && typeof value.summary === "string") return value.summary;
-   if (value === undefined) return "";
-   return JSON.stringify(value) ?? "";
-}
-
 function expandedOutput(value: unknown): string {
    if (typeof value === "string") return value;
    return value === undefined ? "" : JSON.stringify(value, null, 2);
-}
-
-function renderRecordList(
-   noun: string,
-   items: ReadonlyArray<Details>,
-   options: RenderOptions,
-   theme: Theme
-): Component {
-   const lines = [theme.fg("muted", `${items.length} ${noun}${items.length === 1 ? "" : "s"}`)];
-   const shown = options.expanded ? items : items.slice(0, 4);
-   for (const item of shown) {
-      const status = stringValue(item.status);
-      const id = stringValue(item.id) ?? stringValue(item.name) ?? "item";
-      const detail = status ?? stringValue(item.agent) ?? "";
-      const output = recordOutput(item);
-      const summary = outputPreview(output);
-      lines.push(
-         `${statusMark(status, theme)} ${theme.fg("accent", id)}${detail ? ` ${theme.fg("muted", preview(detail))}` : ""}${!options.expanded && summary ? theme.fg("dim", ` · ${summary}`) : ""}`
-      );
-      if (options.expanded && output !== undefined) {
-         for (const line of expandedOutput(output).split("\n")) lines.push(`  ${theme.fg("toolOutput", line)}`);
-      }
-   }
-   if (shown.length < items.length) lines.push(theme.fg("dim", `… ${items.length - shown.length} more`));
-   return new Text(lines.join("\n"), 0, 0);
-}
-
-/** Render a agent run result without exposing raw JSON envelopes. */
-export function renderJobListResult(
-   result: ToolResultLike,
-   options: RenderOptions,
-   theme: Theme,
-   context: RenderContext,
-   noun = "run"
-): Component {
-   const details = isRecord(result.details) ? result.details : undefined;
-   const prelude = resultPrelude(result, options, theme, context, noun);
-   if (prelude) return prelude;
-   if (!details) return fallbackResult(result, theme);
-   if (Array.isArray(details.jobs)) {
-      return renderRecordList("run", records(details.jobs), options, theme);
-   }
-
-   if (Array.isArray(details.lines)) {
-      const lines = details.lines.filter((line): line is string => typeof line === "string");
-      const shown = options.expanded ? lines : lines.slice(-4);
-      return new Text(
-         `${theme.fg("muted", `${lines.length} log lines`)}\n${shown.map((line) => theme.fg("toolOutput", line)).join("\n")}`,
-         0,
-         0
-      );
-   }
-   const entity = isRecord(details.job) ? details.job : undefined;
-   if (entity) {
-      return renderRecordList("item", [entity], options, theme);
-   }
-   return renderJsonResult(details, options, theme);
 }
 
 export function renderAgentListResult(
@@ -566,7 +485,92 @@ export function renderAgentListResult(
    theme: Theme,
    context: RenderContext
 ): Component {
-   return renderJobListResult(result, options, theme, context, "agent");
+   if (options.isPartial) return new Text(theme.fg("warning", "Listing agent tasks…"), 0, 0);
+   const prelude = resultPrelude(result, options, theme, context, "agent_list");
+   if (prelude) return prelude;
+   if (!isRecord(result.details)) return fallbackResult(result, theme);
+   if (result.details.ok === false) {
+      const message = stringValue(result.details.error) ?? (textContent(result).trim() || "agent_list failed");
+      return new Text(theme.fg("error", `✗ ${message}`), 0, 0);
+   }
+
+   const tasks = records(result.details.tasks);
+   if (tasks.length === 0) {
+      return new Text(theme.fg("muted", "No agent tasks."), 0, 0);
+   }
+
+   const header = theme.fg("muted", `${tasks.length} agent task${tasks.length === 1 ? "" : "s"}`);
+   const lines: string[] = [header];
+
+   if (!options.expanded) {
+      const maxVisible = 6;
+      const visible = tasks.slice(0, maxVisible);
+      for (const task of visible) {
+         const status = stringValue(task.status) ?? "unknown";
+         const name = stringValue(task.name) ?? stringValue(task.id) ?? "agent";
+         const profile = stringValue(task.profile);
+         const statLine = formatAgentStatLine(
+            {
+               status,
+               name,
+               profile,
+               usage: task.usage as AgentStatLineInput["usage"] | undefined
+            },
+            theme
+         );
+         lines.push(statLine);
+         const err = stringValue(task.errorText);
+         if (err) {
+            lines.push(theme.fg("error", `  ✗ ${preview(err, 60)}`));
+         }
+      }
+      if (tasks.length > visible.length) {
+         lines.push(
+            theme.fg("muted", `... (${tasks.length - visible.length} more, `) +
+               safeKeyHint("app.tools.expand", "to expand") +
+               theme.fg("muted", ")")
+         );
+      } else {
+         lines.push(theme.fg("muted", "(") + safeKeyHint("app.tools.expand", "to expand") + theme.fg("muted", ")"));
+      }
+      return new Text(lines.join("\n"), 0, 0);
+   }
+
+   for (const task of tasks) {
+      const status = stringValue(task.status) ?? "unknown";
+      const id = stringValue(task.id) ?? "unknown";
+      const name = stringValue(task.name) ?? id;
+      const profile = stringValue(task.profile);
+      const statLine = formatAgentStatLine(
+         {
+            status,
+            name,
+            profile,
+            boldName: true,
+            usage: task.usage as AgentStatLineInput["usage"] | undefined
+         },
+         theme
+      );
+      lines.push(statLine);
+      lines.push(theme.fg("dim", `  id: ${id}`));
+      const sessionFile = stringValue(task.sessionFile);
+      if (sessionFile) {
+         lines.push(theme.fg("dim", `  session: ${sessionFile}`));
+      }
+      const model = stringValue(task.model);
+      if (model) {
+         lines.push(theme.fg("dim", `  model: ${model}`));
+      }
+      const cwd = stringValue(task.cwd);
+      if (cwd) {
+         lines.push(theme.fg("dim", `  cwd: ${cwd}`));
+      }
+      const err = stringValue(task.errorText);
+      if (err) {
+         lines.push(theme.fg("error", `  error: ${err}`));
+      }
+   }
+   return new Text(lines.join("\n"), 0, 0);
 }
 
 export function renderAgentCancelResult(
@@ -575,5 +579,31 @@ export function renderAgentCancelResult(
    theme: Theme,
    context: RenderContext
 ): Component {
-   return renderJobListResult(result, options, theme, context, "agent");
+   if (options.isPartial) return new Text(theme.fg("warning", "Cancelling agent…"), 0, 0);
+   const prelude = resultPrelude(result, options, theme, context, "agent_cancel");
+   if (prelude) return prelude;
+   if (!isRecord(result.details)) return fallbackResult(result, theme);
+   if (result.details.ok === false) {
+      const message = stringValue(result.details.error) ?? (textContent(result).trim() || "agent_cancel failed");
+      return new Text(theme.fg("error", `✗ ${message}`), 0, 0);
+   }
+
+   const id = stringValue(result.details.id) ?? "agent";
+   const task = isRecord(result.details.task) ? result.details.task : undefined;
+   const name = task ? stringValue(task.name) : undefined;
+   const profile = task ? stringValue(task.profile) : undefined;
+   const nameDisplay = name && name !== id ? ` ${theme.fg("accent", name)}` : "";
+   const profileDisplay = profile ? ` ${theme.fg("muted", `· ${profile}`)}` : "";
+   const mainLine = `${theme.fg("success", "✓")} ${theme.fg("muted", "Cancelled")} ${theme.fg("accent", id)}${nameDisplay}${profileDisplay}`;
+
+   if (!options.expanded || !task) {
+      return new Text(mainLine, 0, 0);
+   }
+
+   const lines = [mainLine];
+   const sessionFile = stringValue(task.sessionFile);
+   if (sessionFile) {
+      lines.push(theme.fg("dim", `  session: ${sessionFile}`));
+   }
+   return new Text(lines.join("\n"), 0, 0);
 }

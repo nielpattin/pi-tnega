@@ -63,6 +63,10 @@ test("manifest normalizer handles JSON-ish values, cycles, getters, and bounds",
    assert.equal(manifest.normalizePersistedTask(baseTask()).task.id, "");
    manifest.resetManifestLimits();
    assert.equal(manifest.normalizePersistedTask(baseTask()).truncated, false);
+   const recovered = manifest.normalizePersistedTask(baseTask({ recoveryPending: true })).task;
+   assert.equal(manifest.parsePersistedTaskEntry(recovered)?.recoveryPending, true);
+   const resume = manifest.normalizePersistedTask(baseTask({ resumeWithPrompt: true })).task;
+   assert.equal(manifest.parsePersistedTaskEntry(resume)?.resumeWithPrompt, true);
 });
 
 test("manifest retention, ids, and hard size reductions", () => {
@@ -99,7 +103,7 @@ test("manifest parser accepts valid shapes and rejects malformed ones", () => {
       { ...good, summary: { totalJobs: -1, truncatedJobs: 0, droppedStringChars: 0, droppedArrayItems: 0, droppedJobs: 0 } }, { ...good, reservedTaskSeq: 1.2 }, { ...good, writtenAt: Infinity },
       { ...good, jobs: [{ id: "", ownerSessionId: "p", promptOrCommand: "x", status: "pending", createdAt: 1 }] }];
    for (const bad of bads) assert.equal(manifest.parsePersistedIndex(bad), undefined);
-   const optionalBad = ["ownerSessionId", "promptOrCommand", "status", "createdAt", "name", "origin", "startedAt", "settledAt", "async", "model", "thinking", "cwd", "context", "contextTokens", "batchId", "batchSize", "errorText", "systemPrompt", "sessionFile", "paneId", "sessionId"];
+   const optionalBad = ["ownerSessionId", "promptOrCommand", "status", "createdAt", "name", "origin", "startedAt", "settledAt", "async", "model", "thinking", "cwd", "context", "contextTokens", "batchId", "batchSize", "errorText", "systemPrompt", "recoveryPending", "resumeWithPrompt", "sessionFile", "paneId", "sessionId"];
    for (const key of optionalBad) { const x = structuredClone(good); x.jobs = [structuredClone(good.jobs[0])]; x.jobs[0][key] = key === "status" ? "bad" : {}; assert.equal(manifest.parsePersistedIndex(x), undefined, key); }
    for (const key of ["resultData", "transcript", "usage"]) { const x = structuredClone(good); x.jobs[0][key] = key === "usage" ? { cost: 1 } : key === "transcript" ? [{ type: "bad" }] : 1n; assert.equal(manifest.parsePersistedIndex(x), undefined); }
    assert.equal(manifest.parsePersistedTaskEntry({ ...baseTask(), background: true }), undefined);
@@ -170,6 +174,7 @@ test("interrupted tasks are marked failed and parent gate state transitions", as
    const withFile = persistence.markInterruptedTaskFailed(baseTask({ status: "running", sessionFile: "x" })); const noFile = persistence.markInterruptedTaskFailed(baseTask({ status: "running", sessionFile: undefined }));
    assert.equal(withFile.status, "failed"); assert.equal(noFile.status, "failed"); assert.match(withFile.errorText, /marked failed/);
    const rt = ManagedRuntime.make(session.ParentSessionGate.layer); const use = (fn) => rt.runPromise(session.ParentSessionGate.use(fn)); assert.equal(await use((g) => g.stateFor("p")), "idle"); await use((g) => g.markBusy("p"));
+   assert.equal(withFile.recoveryPending, true); assert.equal(withFile.resumeWithPrompt, true);
    assert.equal(await use((g) => g.stateFor("p")), "idle"); const waiting = use((g) => g.awaitReady("p")); await use((g) => g.markReady()); await waiting; assert.equal(await use((g) => g.stateFor("p")), "ready");
    await use((g) => g.markBusy("p")); await use((g) => g.markFailed("bad", "p")); await assert.rejects(() => use((g) => g.awaitReady("p")), /bad/); await use((g) => g.markBusy("q")); await assert.rejects(() => use((g) => g.awaitReady("p")), /mismatch/);
    await use((g) => g.markFailed(new Error("boom"), "q")); await assert.rejects(() => use((g) => g.awaitReady("q")), /boom/); await use((g) => g.markBusy("q")); await use((g) => g.markReady()); assert.equal(await use((g) => g.stateFor(null)), "idle"); await rt.dispose();
@@ -185,6 +190,42 @@ test("parent activation runs offline with fake filesystem and manager dependenci
    await rt.runPromise(session.startTaskPersistenceListener());
    await rt.runPromise(session.ensureParentSessionReady(undefined));
    await rt.dispose();
+});
+test("parent activation restores interrupted work for the widget", async () => {
+   const parent = join(mkdtempSync(join(tmpdir(), "agents-restore-")), "parent.jsonl");
+   const manifestPath = join(parent.slice(0, -6), "agents-tasks.json");
+   const f = fakeFs({ [manifestPath]: JSON.stringify(validIndex(baseTask({ status: "running" })) ) });
+   const base = Layer.mergeAll(registry.TaskRegistry.layer, session.ParentSessionGate.layer, persistence.AgentsTaskPersistence.layerWith(f.fs));
+   const live = Layer.mergeAll(manager.AgentManager.layer.pipe(Layer.provideMerge(base)), base);
+   const rt = ManagedRuntime.make(live);
+   try {
+      await rt.runPromise(session.activateParentSession(parent));
+      const [restored] = await rt.runPromise(registry.TaskRegistry.use((value) => value.list()));
+      assert.equal(restored.status, "failed");
+      assert.equal(restored.recoveryPending, true);
+      assert.equal(restored.runtimeOwned, true);
+   } finally {
+      await rt.dispose();
+   }
+});
+
+test("parent activation keeps completed history out of runtime widget ownership", async () => {
+   const parent = join(mkdtempSync(join(tmpdir(), "agents-terminal-")), "parent.jsonl");
+   const manifestPath = join(parent.slice(0, -6), "agents-tasks.json");
+   const f = fakeFs({
+      [manifestPath]: JSON.stringify(validIndex(baseTask({ status: "completed", settledAt: 200, recoveryPending: true })) )
+   });
+   const base = Layer.mergeAll(registry.TaskRegistry.layer, session.ParentSessionGate.layer, persistence.AgentsTaskPersistence.layerWith(f.fs));
+   const live = Layer.mergeAll(manager.AgentManager.layer.pipe(Layer.provideMerge(base)), base);
+   const rt = ManagedRuntime.make(live);
+   try {
+      await rt.runPromise(session.activateParentSession(parent));
+      const [restored] = await rt.runPromise(registry.TaskRegistry.use((value) => value.list()));
+      assert.equal(restored.status, "completed");
+      assert.equal(restored.runtimeOwned, undefined);
+   } finally {
+      await rt.dispose();
+   }
 });
 
 

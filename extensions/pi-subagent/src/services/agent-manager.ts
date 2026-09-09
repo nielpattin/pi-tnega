@@ -1,5 +1,6 @@
 import { Context, Effect, Layer, Option } from "effect";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { existsSync } from "node:fs";
 import {
    CapacityError,
    ConcurrencyLimitError,
@@ -28,7 +29,7 @@ import {
    type AgentSplitDirection
 } from "../shared/agent-process.ts";
 import { createAgentActivityState, getAgentActivityFile } from "../shared/agent-activity.ts";
-
+import { RESTART_INTERRUPTED_ERROR } from "./task-persistence.js";
 export const MAX_RUNNING_AGENTS = 4;
 
 export interface AgentManagerSpawnOptions {
@@ -38,20 +39,23 @@ export interface AgentManagerSpawnOptions {
    modelRegistry?: ProfileModelRegistry<any>;
    inheritedModel?: InheritedModelIdentity;
    parentSessionFile?: string;
-   background?: boolean;
    useHerdr?: boolean;
    herdrOps?: AgentHerdrOps;
+   resumeTasks?: ReadonlyArray<Task>;
+   forceNewTab?: boolean;
 }
 
 export interface ActiveAgentSession {
    readonly abort: () => Effect.Effect<void, any>;
    readonly control: (text: string, mode: ControlMode) => Effect.Effect<void, any>;
+   readonly stopWatching: Effect.Effect<void>;
 }
 
 interface SpawnAgentOptions {
    readonly taskId: string;
    readonly displayName: string;
-   readonly prompt: string;
+   readonly prompt?: string;
+   readonly preserveSessionModel?: boolean;
    readonly cwd: string;
    readonly agentDef: Pick<AgentProfile, "name" | "systemPrompt" | "body" | "model" | "thinking" | "tools">;
    readonly specThinking?: string;
@@ -64,6 +68,7 @@ interface SpawnAgentOptions {
    readonly splitDirection?: AgentSplitDirection;
    readonly sessionFile: string;
    readonly onActivity: (activity: ReturnType<typeof createAgentActivityState>) => void;
+   readonly onRecoverableError: (message: string) => void;
 }
 
 function modelArgument(
@@ -91,6 +96,7 @@ function outcomeError(error: unknown): ExternalAgentOutcome {
    };
 }
 
+const RESUME_CONTINUE_PROMPT = "Continue the work pls";
 function statusForOutcome(outcome: ExternalAgentOutcome): "completed" | "failed" | "cancelled" {
    if (outcome.aborted) return "cancelled";
    return outcome.ok ? "completed" : "failed";
@@ -103,7 +109,8 @@ function controlFor(handle: ExternalAgentHandle): ActiveAgentSession {
          Effect.tryPromise({
             try: () => handle.control(text),
             catch: (error) => new ControlError({ message: error instanceof Error ? error.message : String(error) })
-         })
+         }),
+      stopWatching: Effect.sync(handle.stopWatching)
    };
 }
 
@@ -118,15 +125,16 @@ async function launchAgent(options: SpawnAgentOptions): Promise<ExternalAgentHan
       activityFile: getAgentActivityFile(options.sessionFile),
       tools,
       systemPrompt: profileSystemPrompt(options.agentDef),
-      model: modelArgument(options.agentDef, options.inheritedModel),
-      thinking: options.specThinking ?? options.agentDef.thinking,
+      model: options.preserveSessionModel ? undefined : modelArgument(options.agentDef, options.inheritedModel),
+      thinking: options.preserveSessionModel ? undefined : (options.specThinking ?? options.agentDef.thinking),
       additionalExtensionPaths: getChildExtensionPathsForTools(tools, getAgentDir()),
       useHerdr: options.useHerdr,
       herdrOps: options.herdrOps,
       existingPaneId: options.existingPaneId,
       splitFromPaneId: options.splitFromPaneId,
       splitDirection: options.splitDirection,
-      onActivity: options.onActivity
+      onActivity: options.onActivity,
+      onRecoverableError: options.onRecoverableError
    });
 }
 
@@ -150,6 +158,7 @@ export interface AgentManagerShape {
    /** Record that the parent received these settled results. Returns newly marked ids. */
    readonly markResultsDelivered: (ids: Iterable<string>) => Effect.Effect<ReadonlyArray<string>>;
    readonly cancelActiveSessions: Effect.Effect<void>;
+   readonly resumeInterruptedTasks: (ownerSessionId: string) => Effect.Effect<ReadonlyArray<Task>, any>;
 }
 
 export class AgentManager extends Context.Service<AgentManager, AgentManagerShape>()("agents/AgentManager") {
@@ -176,13 +185,22 @@ export class AgentManager extends Context.Service<AgentManager, AgentManagerShap
          const updateRunningIfActive = (taskId: string, patch: Partial<Task>, ownerSessionId?: string) =>
             Effect.gen(function* () {
                const current = yield* registry.get(taskId);
+               const recovering =
+                  current?.status === "failed" &&
+                  (patch.activity?.phase === "starting" || patch.activity?.phase === "active");
                if (
                   !current ||
                   (ownerSessionId !== undefined && current.ownerSessionId !== ownerSessionId) ||
-                  isSettledStatus(current.status)
+                  (isSettledStatus(current.status) && !recovering)
                )
                   return current;
-               return yield* registry.updateStatus(taskId, "running", patch);
+               return yield* registry.updateStatus(
+                  taskId,
+                  "running",
+                  recovering
+                     ? { ...patch, resultData: undefined, errorText: undefined, recoveryPending: undefined }
+                     : patch
+               );
             });
 
          const updateSettledIfActive = (
@@ -211,6 +229,10 @@ export class AgentManager extends Context.Service<AgentManager, AgentManagerShap
                Effect.gen(function* () {
                   const current = yield* registry.get(taskId);
                   if (!current || current.ownerSessionId !== ownerSessionId) return;
+                  if (current.recoveryPending === true) {
+                     clearActiveSession(taskId, ownerSessionId);
+                     return;
+                  }
                   clearActiveSession(taskId, ownerSessionId);
                   const resultStatus = statusForOutcome(outcome);
                   if (resultStatus === "completed") {
@@ -221,7 +243,8 @@ export class AgentManager extends Context.Service<AgentManager, AgentManagerShap
                            resultData: outcome.output.length > 0 ? outcome.output : undefined,
                            sessionFile: outcome.sessionFile || current.sessionFile,
                            sessionId: outcome.sessionId ?? current.sessionId,
-                           usage: outcome.stats
+                           usage: outcome.stats,
+                           recoveryPending: undefined
                         },
                         ownerSessionId
                      );
@@ -234,7 +257,8 @@ export class AgentManager extends Context.Service<AgentManager, AgentManagerShap
                         errorText: outcome.error,
                         sessionFile: outcome.sessionFile || current.sessionFile,
                         sessionId: outcome.sessionId ?? current.sessionId,
-                        usage: outcome.stats
+                        usage: outcome.stats,
+                        recoveryPending: undefined
                      },
                      ownerSessionId
                   );
@@ -306,9 +330,11 @@ export class AgentManager extends Context.Service<AgentManager, AgentManagerShap
             let batchTab: AgentHerdrTab | undefined;
             let prevTabPaneId: string | undefined;
             const shouldManageHerdrLayout =
-               incomingCount > 1 || (incomingCount === 1 && ops.currentTabPaneCount !== undefined);
+               options?.forceNewTab === true ||
+               incomingCount > 1 ||
+               (incomingCount === 1 && ops.currentTabPaneCount !== undefined);
             const herdrUsable = shouldManageHerdrLayout && options?.useHerdr !== false && ops.available();
-            if (incomingCount > 1 && herdrUsable) {
+            if ((incomingCount > 1 || options?.forceNewTab === true) && herdrUsable) {
                try {
                   batchTab = ops.createTab(`agents ${options?.batchId ?? "batch"}`, specs[0].cwd ?? process.cwd());
                   prevTabPaneId = batchTab.rootPaneId;
@@ -338,12 +364,16 @@ export class AgentManager extends Context.Service<AgentManager, AgentManagerShap
                const settlements: Array<Promise<void>> = [];
                const registeredTasks: Task[] = [];
                for (const [index, spec] of specs.entries()) {
-                  const taskId = formatTaskId();
+                  const resumedTask = options?.resumeTasks?.[index];
+                  const taskId = resumedTask?.id ?? formatTaskId();
                   const targetProfile = spec.profile.trim();
-                  let agentDef = resolveAgentProfile(targetProfile, spec.cwd ?? process.cwd());
+                  let agentDef = resolveAgentProfile(targetProfile, spec.cwd ?? resumedTask?.cwd ?? process.cwd());
                   if (!agentDef) {
                      return yield* new AgentProfileNotFoundError({
-                        message: formatUnknownAgentProfileError(targetProfile, spec.cwd ?? process.cwd()),
+                        message: formatUnknownAgentProfileError(
+                           targetProfile,
+                           spec.cwd ?? resumedTask?.cwd ?? process.cwd()
+                        ),
                         profile: targetProfile
                      });
                   }
@@ -356,44 +386,71 @@ export class AgentManager extends Context.Service<AgentManager, AgentManagerShap
                      };
                   }
 
-                  const sessionFile = createAgentSessionFile({
-                     id: taskId,
-                     parentSessionFile: options?.parentSessionFile,
-                     agentDir: getAgentDir()
-                  });
-                  const task = yield* registry.register({
-                     id: taskId,
-                     ownerSessionId,
-                     name: spec.name ?? taskId,
-                     profile: targetProfile,
-                     model: agentDef.model,
-                     thinking: spec.thinking ?? agentDef.thinking,
-                     cwd: spec.cwd ?? process.cwd(),
-                     context: spec.context,
-                     batchId: options?.batchId,
-                     batchSize: options?.batchSize,
-                     promptOrCommand: spec.task,
-                     background: options?.background === true,
-                     sessionFile,
-                     activity: createAgentActivityState(taskId),
-                     runtimeOwned: true
-                  });
-                  const runningTask = yield* registry.updateStatus(task.id, "running");
+                  const sessionFile =
+                     resumedTask?.sessionFile ??
+                     createAgentSessionFile({
+                        id: taskId,
+                        parentSessionFile: options?.parentSessionFile,
+                        agentDir: getAgentDir()
+                     });
+                  const task =
+                     resumedTask ??
+                     (yield* registry.register({
+                        id: taskId,
+                        ownerSessionId,
+                        name: spec.name ?? taskId,
+                        profile: targetProfile,
+                        model: agentDef.model,
+                        thinking: spec.thinking ?? agentDef.thinking,
+                        cwd: spec.cwd ?? process.cwd(),
+                        context: spec.context,
+                        batchId: options?.batchId,
+                        batchSize: options?.batchSize,
+                        promptOrCommand: spec.task,
+                        sessionFile,
+                        activity: createAgentActivityState(taskId),
+                        runtimeOwned: true
+                     }));
+                  const runningTask = yield* registry.updateStatus(
+                     task.id,
+                     "running",
+                     resumedTask
+                        ? {
+                             resultData: undefined,
+                             errorText: undefined,
+                             recoveryPending: undefined,
+                             paneClosed: undefined,
+                             startedAt: Date.now(),
+                             settledAt: undefined,
+                             runtimeOwned: true,
+                             resumeWithPrompt: undefined
+                          }
+                        : undefined
+                  );
                   registeredTasks.push(runningTask);
                   spawnedTaskIds.push(taskId);
 
                   const startupController = new AbortController();
+                  let latestActivitySequence = -1;
+                  let latestActivityCreatedAt: number | undefined;
+                  let recoverableErrorSequence = -1;
+                  let recoverableErrorCreatedAt: number | undefined;
                   pendingStartup.set(taskId, startupController);
                   const launched = yield* Effect.promise(async () => {
                      try {
                         const handle = await launchAgent({
                            taskId,
-                           displayName: spec.name ?? taskId,
-                           prompt: spec.task,
-                           cwd: spec.cwd ?? process.cwd(),
+                           displayName: resumedTask?.name ?? spec.name ?? taskId,
+                           prompt: resumedTask?.resumeWithPrompt
+                              ? RESUME_CONTINUE_PROMPT
+                              : resumedTask
+                                ? undefined
+                                : spec.task,
+                           cwd: resumedTask?.cwd ?? spec.cwd ?? process.cwd(),
                            agentDef,
                            specThinking: spec.thinking,
                            specTools: spec.tools,
+                           preserveSessionModel: resumedTask !== undefined,
                            inheritedModel: options?.inheritedModel,
                            useHerdr: options?.useHerdr,
                            herdrOps: ops,
@@ -402,9 +459,31 @@ export class AgentManager extends Context.Service<AgentManager, AgentManagerShap
                            splitDirection: "right",
                            sessionFile,
                            onActivity: (activity) => {
+                              const generationChanged =
+                                 latestActivityCreatedAt !== undefined &&
+                                 activity.createdAt !== latestActivityCreatedAt;
+                              if (generationChanged) {
+                                 latestActivitySequence = -1;
+                                 recoverableErrorSequence = -1;
+                                 recoverableErrorCreatedAt = undefined;
+                              }
+                              latestActivityCreatedAt = activity.createdAt;
+                              latestActivitySequence = Math.max(latestActivitySequence, activity.sequence);
+                              if (
+                                 recoverableErrorCreatedAt === activity.createdAt &&
+                                 activity.sequence <= recoverableErrorSequence
+                              )
+                                 return;
                               void Effect.runPromise(updateRunningIfActive(taskId, { activity }, ownerSessionId)).catch(
                                  () => {}
                               );
+                           },
+                           onRecoverableError: (error) => {
+                              recoverableErrorSequence = latestActivitySequence;
+                              recoverableErrorCreatedAt = latestActivityCreatedAt;
+                              void Effect.runPromise(
+                                 updateSettledIfActive(taskId, "failed", { errorText: error }, ownerSessionId)
+                              ).catch(() => {});
                            }
                         });
                         return { handle } as const;
@@ -444,9 +523,6 @@ export class AgentManager extends Context.Service<AgentManager, AgentManagerShap
                   );
                }
 
-               if (options?.background !== true) {
-                  yield* Effect.promise(() => Promise.all(settlements)).pipe(Effect.ignore);
-               }
                return registeredTasks;
             }).pipe(
                Effect.onInterrupt(() => abortSpawnedSessions),
@@ -472,7 +548,7 @@ export class AgentManager extends Context.Service<AgentManager, AgentManagerShap
             }
             const current = yield* registry.get(id);
             if (current && isTerminalStatus(current.status)) return current;
-            return yield* registry.updateStatus(id, "cancelled", { paneId: undefined });
+            return yield* registry.updateStatus(id, "cancelled", { paneId: undefined, recoveryPending: undefined });
          });
          const pruneClosedPanes = Effect.fn("AgentManager.pruneClosedPanes")(function* () {
             const ops = lastHerdrOps;
@@ -554,24 +630,123 @@ export class AgentManager extends Context.Service<AgentManager, AgentManagerShap
                   current.resultDelivered === true
                )
                   continue;
-               yield* registry.updateStatus(id, current.status, { resultDelivered: true });
+               const active = activeSessions.get(id);
+               if (current.status === "failed" && active) {
+                  yield* active.stopWatching.pipe(Effect.ignore);
+                  clearActiveSession(id);
+               }
+               yield* registry.updateStatus(id, current.status, { resultDelivered: true, recoveryPending: undefined });
                marked.push(id);
             }
             return marked;
          });
          const cancelActiveSessions = Effect.gen(function* () {
+            const tasks = yield* registry.list();
+            for (const task of tasks) {
+               if (task.status === "cancelled" || task.resultDelivered === true || task.recoveryPending === true)
+                  continue;
+               yield* registry.updateStatus(task.id, task.status, { recoveryPending: true }).pipe(Effect.ignore);
+            }
             for (const [id, startup] of Array.from(pendingStartup.entries())) {
                startup.abort();
                pendingStartup.delete(id);
-               yield* updateSettledIfActive(id, "cancelled").pipe(Effect.ignore);
+               yield* updateSettledIfActive(id, "failed", {
+                  errorText: RESTART_INTERRUPTED_ERROR,
+                  recoveryPending: true
+               }).pipe(Effect.ignore);
             }
             for (const [id, session] of Array.from(activeSessions.entries())) {
+               const current = yield* registry.get(id);
+               if (current?.status === "pending" || current?.status === "running") {
+                  yield* registry.updateStatus(id, "failed", {
+                     errorText: RESTART_INTERRUPTED_ERROR,
+                     recoveryPending: true,
+                     resumeWithPrompt: current.status === "running" ? true : undefined
+                  });
+               } else if (current?.status === "failed") {
+                  yield* registry.updateStatus(id, "failed", { recoveryPending: true });
+               }
                yield* session.abort().pipe(Effect.ignore);
-               yield* updateSettledIfActive(id, "cancelled").pipe(Effect.ignore);
                clearActiveSession(id);
             }
             activeSessions.clear();
             activeSessionOwners.clear();
+         });
+         const resumeInterruptedTasks = Effect.fn("AgentManager.resumeInterruptedTasks")(function* (
+            ownerSessionId: string
+         ) {
+            const tasks = yield* registry.list();
+            const resumable = tasks.filter(
+               (task) =>
+                  task.ownerSessionId === ownerSessionId &&
+                  task.status === "failed" &&
+                  (task.recoveryPending === true ||
+                     task.resumeWithPrompt === true ||
+                     task.errorText === RESTART_INTERRUPTED_ERROR)
+            );
+            const resumed: Task[] = [];
+            const restartGroups = new Map<string, Task[]>();
+            for (const task of resumable) {
+               const active = activeSessions.get(task.id);
+               if (active) {
+                  const ops = lastHerdrOps ?? defaultAgentHerdrOps;
+                  if (task.paneId && ops.movePaneToNewTab) {
+                     try {
+                        if (ops.available()) ops.movePaneToNewTab(task.paneId, task.name ?? task.id);
+                     } catch {
+                        // Keep the live session usable when Herdr cannot move its pane.
+                     }
+                  }
+                  if (task.resumeWithPrompt === true) {
+                     yield* active.control(RESUME_CONTINUE_PROMPT, "steer");
+                     resumed.push(
+                        yield* registry.updateStatus(task.id, "running", {
+                           errorText: undefined,
+                           resultData: undefined,
+                           recoveryPending: undefined,
+                           resumeWithPrompt: undefined,
+                           paneClosed: undefined,
+                           runtimeOwned: true
+                        })
+                     );
+                  } else {
+                     resumed.push(
+                        yield* registry.updateStatus(task.id, task.status, {
+                           paneClosed: undefined,
+                           runtimeOwned: true
+                        })
+                     );
+                  }
+                  continue;
+               }
+               if (!task.sessionFile || !existsSync(task.sessionFile)) continue;
+               const key = task.batchId ?? task.id;
+               const group = restartGroups.get(key) ?? [];
+               group.push(task);
+               restartGroups.set(key, group);
+            }
+            for (const group of restartGroups.values()) {
+               const batchId = group[0]?.batchId;
+               const spawned = yield* spawnBatch(
+                  group.map((task) => ({
+                     task: task.promptOrCommand,
+                     name: task.name ?? task.id,
+                     profile: task.profile ?? "worker",
+                     thinking: task.thinking,
+                     cwd: task.cwd
+                  })),
+                  {
+                     ownerSessionId,
+                     batchId,
+                     batchSize: group[0]?.batchSize ?? group.length,
+                     resumeTasks: group,
+                     herdrOps: lastHerdrOps,
+                     forceNewTab: true
+                  }
+               );
+               resumed.push(...spawned);
+            }
+            return resumed;
          });
 
          return AgentManager.of({
@@ -580,7 +755,8 @@ export class AgentManager extends Context.Service<AgentManager, AgentManagerShap
             pruneClosedPanes,
             closeSettledPanes,
             markResultsDelivered,
-            cancelActiveSessions
+            cancelActiveSessions,
+            resumeInterruptedTasks
          });
       })
    );

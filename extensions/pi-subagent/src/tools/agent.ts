@@ -51,12 +51,7 @@ function createBatchParamsSchema<const AgentSchema extends TSchema>(agentSchema:
          minItems: 1,
          maxItems: 4,
          description: "One to four agent specifications."
-      }),
-      background: Type.Optional(
-         Type.Boolean({
-            description: "Return immediately while agents continue independently. Defaults to false."
-         })
-      )
+      })
    });
 }
 
@@ -65,10 +60,6 @@ export const AgentSpawnToolParamsSchema = createBatchParamsSchema(AgentSpecSchem
 
 /** Typed input accepted by the agent tool. */
 export type AgentSpawnToolParams = Static<typeof AgentSpawnToolParamsSchema>;
-
-export function resolveAgentBackground(background?: boolean): boolean {
-   return background === true;
-}
 
 export const AgentListToolParamsSchema = Type.Object({}, { description: "List agent tasks." });
 export type AgentListToolParams = Static<typeof AgentListToolParamsSchema>;
@@ -115,12 +106,12 @@ export function createAgentSpawnToolParamsSchema(agentNames: readonly string[]) 
 
 /** Description sent to the model with the agent spawn tool definition. */
 export const AGENT_SPAWN_TOOL_BASE_DESCRIPTION = [
-   "Spawn one or more agents.",
-   'Use this input: { agents: [{ task: "prompt", name: "short-title", profile, ... }], context?, background? }.',
+   "Spawn one or more agents in the background.",
+   'Use this input: { agents: [{ task: "prompt", name: "short-title", profile, ... }], context? }.',
    "The agents array must contain 1 to 4 agent specifications.",
-   "By default, the tool waits for all agents and returns their final results.",
-   "Set background to true to return a spawned acknowledgement immediately while agents continue independently.",
-   "Background agent results are delivered to the parent session automatically.",
+   "The tool returns a spawned acknowledgement immediately while agents run in the background.",
+   "After this tool returns, end the current turn. Do not call agent_spawn or agent_list to wait.",
+   "Agent results are delivered to the parent session automatically.",
    "The agent name is a display label. The returned task id is the agent identity.",
    "Each agent's `profile` field selects an enabled agent profile.",
    "If an agent fails, use agent_list to inspect its status and session file."
@@ -128,7 +119,7 @@ export const AGENT_SPAWN_TOOL_BASE_DESCRIPTION = [
 
 /** Short description shown in the available-tools section. */
 export const AGENT_SPAWN_TOOL_BASE_PROMPT_SNIPPET =
-   "Spawn 1 to 4 agents with { agents: [{ task, name, profile, ... }], context?, background? }.";
+   "Spawn 1 to 4 agents with { agents: [{ task, name, profile, ... }], context? }.";
 
 /** Static agent tool definition for callers that do not need dynamic profile names. */
 export const agentSpawnToolDefinition = {
@@ -298,7 +289,7 @@ function summarizeTask(task: Task): AgentTaskSummary {
    };
 }
 
-function summarizeSpawnedAgents(tasks: ReadonlyArray<Task>, background: boolean): AgentToolResult {
+function summarizeSpawnedAgents(tasks: ReadonlyArray<Task>): AgentToolResult {
    const summaries = tasks.map(summarizeTask);
    const agentWord = summaries.length === 1 ? "agent" : "agents";
 
@@ -306,13 +297,11 @@ function summarizeSpawnedAgents(tasks: ReadonlyArray<Task>, background: boolean)
       ok: true,
       count: summaries.length,
       tasks: summaries,
-      message: background
-         ? `${summaries.length} ${agentWord} spawned in background. Results will be delivered automatically.`
-         : `${summaries.length} ${agentWord} finished.`
+      message: `${summaries.length} ${agentWord} spawned in background. End this turn; results will be delivered automatically.`
    };
 }
 
-/** Spawn a batch of agents, waiting unless background execution is requested. */
+/** Spawn a batch of agents in the background. */
 export const handleAgentSpawn = Effect.fn("agent.handleSpawn")(function* (
    params: AgentSpawnToolParams,
    options?: HandleAgentSpawnOptions
@@ -325,15 +314,13 @@ export const handleAgentSpawn = Effect.fn("agent.handleSpawn")(function* (
       return { ok: false, error: 'agent_spawn requires a non-empty "agents" array.' } satisfies AgentToolResult;
    }
 
-   const background = resolveAgentBackground(params.background);
    const spawnedTasks = yield* agentManager.spawnBatch(agents, {
       ownerSessionId: options?.ownerSessionId,
       modelRegistry: options?.modelRegistry,
       inheritedModel: options?.inheritedModel,
       parentSessionFile: options?.parentSessionFile,
       batchId: createAgentBatchId(),
-      batchSize: agents.length,
-      background
+      batchSize: agents.length
    });
 
    const currentTasks: Task[] = [];
@@ -342,7 +329,7 @@ export const handleAgentSpawn = Effect.fn("agent.handleSpawn")(function* (
       currentTasks.push(currentTask ?? spawnedTask);
    }
 
-   return summarizeSpawnedAgents(currentTasks, background);
+   return summarizeSpawnedAgents(currentTasks);
 });
 
 export const handleAgentList = Effect.fn("agent.handleList")(function* (_params: AgentListToolParams) {

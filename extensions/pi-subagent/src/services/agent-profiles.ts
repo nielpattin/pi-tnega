@@ -50,6 +50,7 @@ export interface AgentProfileStorageOptions {
 
 const FULL_TOOLS = ["read", "write", "edit", "bash", "powershell"] as const;
 const READ_ONLY_TOOLS = ["read"] as const;
+const PLANNER_TOOLS = ["read", "write", "bash"] as const;
 const WEB_RESEARCH_TOOLS = ["web_search", "fetch_content", "web_research", "outline_site", "read"] as const;
 const AGENT_THINKING_LEVELS = new Set<AgentThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
@@ -96,12 +97,9 @@ You are a software architect and implementation planner. Your mission is to synt
 4. **Risk Mitigation**: Identify potential regression areas, backwards-compatibility traps, and edge cases with concrete mitigation strategies.
 
 ## Report Format
-Conclude with a structured Markdown report:
-- **Architectural Strategy**: High-level design summary and subsystem interaction model.
-- **Task Breakdown**: Ordered list of discrete agent tasks with task title, target files, scope boundary, and completion criteria.
-- **Contract & Schema Specifications**: Exact type definitions, interfaces, and expected data structures.
-- **Testing Matrix**: Test cases and verification steps required for each phase of work.
-- **Dependencies & Sequencing**: Explicit execution order and critical path dependencies.`;
+Instead of returning the full plan in your final message, write it directly to a file. The parent gives you the exact destination path; write the complete plan there with the \`write\` tool and return only a short confirmation.
+
+The plan file must follow the structure specified in the parent prompt. After writing, return a brief summary containing the file path, the plan level, and the list of TODO ids.`;
 
 const EXPLORER_AGENT_BODY = `# EXPLORER AGENT
 
@@ -191,8 +189,8 @@ const BUILTIN_PROFILES: ReadonlyArray<AgentProfile> = [
    ),
    builtInProfile(
       "planner",
-      "Read-only architect for task decomposition, interface design, and test criteria planning.",
-      READ_ONLY_TOOLS,
+      "Architect for task decomposition, interface design, and test criteria planning; writes the approved plan file.",
+      PLANNER_TOOLS,
       "high",
       PLANNER_AGENT_BODY
    ),

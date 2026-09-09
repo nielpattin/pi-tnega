@@ -33,6 +33,8 @@ export interface AgentCompletionOptions {
    readonly onActivitySnapshot?: (
       activity: Extract<AgentActivityReadResult, { readonly ok: true }>["activity"]
    ) => void;
+   /** Report an error while keeping the child monitor alive for a later pane run. */
+   readonly onRecoverableError?: (message: string) => void;
    readonly onTick?: (elapsedSeconds: number) => void;
 }
 
@@ -170,17 +172,28 @@ export async function waitForAgentCompletion(
 ): Promise<AgentCompletionResult> {
    const startedAt = Date.now();
    let lastActivitySequence = -1;
+   let activityCreatedAt: number | undefined;
    for (;;) {
       if (signal.aborted) throw new Error(ABORT_MESSAGE);
 
-      const sidecarResult = consumeAgentExitSidecar(options.exitFile);
-      if (sidecarResult) return sidecarResult;
-
       if (options.activityFile && options.runningChildId && options.onActivitySnapshot) {
          const activity = readAgentActivityFile(options.activityFile, options.runningChildId);
-         if (activity.ok && activity.activity.sequence > lastActivitySequence) {
-            lastActivitySequence = activity.activity.sequence;
-            options.onActivitySnapshot(activity.activity);
+         if (activity.ok) {
+            const generationChanged =
+               activityCreatedAt !== undefined && activity.activity.createdAt !== activityCreatedAt;
+            if (generationChanged || activity.activity.sequence > lastActivitySequence) {
+               activityCreatedAt = activity.activity.createdAt;
+               lastActivitySequence = activity.activity.sequence;
+               options.onActivitySnapshot(activity.activity);
+            }
+         }
+      }
+      const sidecarResult = consumeAgentExitSidecar(options.exitFile);
+      if (sidecarResult) {
+         if (sidecarResult.reason === "error" && options.onRecoverableError) {
+            options.onRecoverableError(sidecarResult.errorMessage);
+         } else {
+            return sidecarResult;
          }
       }
 

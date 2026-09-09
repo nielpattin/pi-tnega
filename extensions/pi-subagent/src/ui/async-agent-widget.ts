@@ -21,7 +21,7 @@ export function visibleWidgetTasks(tasks: ReadonlyArray<Task>): ReadonlyArray<Ta
       if (task.runtimeOwned !== true) return false;
       if (task.status === "cancelled") return false;
       if (task.status === "running" || task.status === "pending") return true;
-      if (task.paneClosed === true && task.resultDelivered === true) return false;
+      if (!task.paneId && task.paneClosed === true && task.resultDelivered === true) return false;
       return true;
    });
 }

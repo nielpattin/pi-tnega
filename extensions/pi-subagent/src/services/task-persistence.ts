@@ -14,7 +14,7 @@ import {
 export const AGENTS_TASKS_FILE = "agents-tasks.json";
 export { AGENTS_TASK_MANIFEST_LIMITS };
 
-const RESTART_INTERRUPTED_ERROR =
+export const RESTART_INTERRUPTED_ERROR =
    "Agents parent session restarted before this task settled. The task is marked failed.";
 
 const MAX_REPLACE_ATTEMPTS = 5;
@@ -639,6 +639,8 @@ export function markInterruptedTaskFailed(stored: Task): Task {
       status: "failed",
       resultData: undefined,
       errorText: RESTART_INTERRUPTED_ERROR,
+      recoveryPending: true,
+      resumeWithPrompt: stored.status === "running" ? true : undefined,
       settledAt: Date.now()
    };
 }

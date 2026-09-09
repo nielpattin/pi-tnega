@@ -276,3 +276,142 @@ test("agent result records per-task statuses from the tasks array", async () => 
    );
    assert.deepEqual(context.state.taskStatuses, ["completed", "completed"]);
 });
+
+test("agent list result renders empty, compact list, and expanded details", async () => {
+   const renderers = await loadExtension("extensions/pi-subagent/src/ui/tool-renderers.ts");
+   const theme = {
+      fg: (_color, text) => text,
+      bg: (_color, text) => text,
+      bold: (text) => text,
+      strikethrough: (text) => text
+   };
+
+   // Empty list
+   const empty = renderers.renderAgentListResult(
+      { content: [{ type: "text", text: "[]" }], details: { ok: true, tasks: [] } },
+      { expanded: false, isPartial: false },
+      theme,
+      {}
+   );
+   assert.match(empty.render(120).join("\n"), /No agent tasks/i);
+
+   // Non-empty list - collapsed
+   const sampleTasks = [
+      {
+         id: "task-1",
+         name: "worker-one",
+         profile: "worker",
+         status: "running",
+         usage: { cost: 0.05, toolCalls: 3, contextTokens: 2000 }
+      },
+      {
+         id: "task-2",
+         name: "worker-two",
+         profile: "critic",
+         status: "completed",
+         sessionFile: "/tmp/session-2.jsonl"
+      }
+   ];
+   const collapsed = renderers.renderAgentListResult(
+      { content: [], details: { ok: true, tasks: sampleTasks } },
+      { expanded: false, isPartial: false },
+      theme,
+      {}
+   );
+   const collapsedText = collapsed.render(120).join("\n");
+   assert.match(collapsedText, /2 agent tasks/i);
+   assert.match(collapsedText, /worker-one/);
+   assert.match(collapsedText, /worker-two/);
+
+   // Non-empty list - expanded
+   const expanded = renderers.renderAgentListResult(
+      { content: [], details: { ok: true, tasks: sampleTasks } },
+      { expanded: true, isPartial: false },
+      theme,
+      {}
+   );
+   const expandedText = expanded.render(120).join("\n");
+   assert.match(expandedText, /2 agent tasks/i);
+   assert.match(expandedText, /task-1/);
+   assert.match(expandedText, /\/tmp\/session-2\.jsonl/);
+
+   // Error state
+   const errorResult = renderers.renderAgentListResult(
+      { content: [{ type: "text", text: "boom" }], details: { ok: false, error: "failed to list" } },
+      { expanded: false, isPartial: false },
+      theme,
+      { isError: true }
+   );
+   assert.match(errorResult.render(120).join("\n"), /failed to list/);
+});
+
+test("agent cancel result renders success confirmation and not-found error", async () => {
+   const renderers = await loadExtension("extensions/pi-subagent/src/ui/tool-renderers.ts");
+   const theme = {
+      fg: (_color, text) => text,
+      bg: (_color, text) => text,
+      bold: (text) => text,
+      strikethrough: (text) => text
+   };
+
+   // Success - collapsed
+   const success = renderers.renderAgentCancelResult(
+      {
+         content: [],
+         details: {
+            ok: true,
+            action: "cancelled",
+            id: "task-123",
+            task: { id: "task-123", name: "my-worker", status: "cancelled", profile: "worker" }
+         }
+      },
+      { expanded: false, isPartial: false },
+      theme,
+      {}
+   );
+   const successText = success.render(120).join("\n");
+   assert.match(successText, /Cancelled/i);
+   assert.match(successText, /task-123/);
+   assert.match(successText, /my-worker/);
+
+   // Success - expanded
+   const expanded = renderers.renderAgentCancelResult(
+      {
+         content: [],
+         details: {
+            ok: true,
+            action: "cancelled",
+            id: "task-123",
+            task: { id: "task-123", name: "my-worker", status: "cancelled", profile: "worker", sessionFile: "/tmp/s.jsonl" }
+         }
+      },
+      { expanded: true, isPartial: false },
+      theme,
+      {}
+   );
+   const expandedText = expanded.render(120).join("\n");
+   assert.match(expandedText, /task-123/);
+   assert.match(expandedText, /\/tmp\/s\.jsonl/);
+
+   // Error - not found
+   const notFound = renderers.renderAgentCancelResult(
+      { content: [{ type: "text", text: 'Agent task "task-404" not found.' }], details: { ok: false, error: 'Agent task "task-404" not found.' } },
+      { expanded: false, isPartial: false },
+      theme,
+      {}
+   );
+   const notFoundText = notFound.render(120).join("\n");
+   assert.match(notFoundText, /not found/i);
+});
+
+test("agent_spawn schema does not expose background parameter and always executes in background", async () => {
+   const agentTools = await loadExtension("extensions/pi-subagent/src/tools/agent.ts");
+   assert.equal(agentTools.AgentSpawnToolParamsSchema.properties.background, undefined);
+   assert.equal(agentTools.createAgentSpawnToolParamsSchema([]).properties.background, undefined);
+   assert.equal(agentTools.resolveAgentBackground, undefined);
+   assert.doesNotMatch(agentTools.AGENT_SPAWN_TOOL_BASE_DESCRIPTION, /background\?/);
+   assert.doesNotMatch(agentTools.AGENT_SPAWN_TOOL_BASE_DESCRIPTION, /Set background to true/);
+   assert.doesNotMatch(agentTools.AGENT_SPAWN_TOOL_BASE_PROMPT_SNIPPET, /background\?/);
+   assert.match(agentTools.AGENT_SPAWN_TOOL_BASE_DESCRIPTION, /end the current turn/i);
+   assert.match(agentTools.AGENT_SPAWN_TOOL_BASE_DESCRIPTION, /do not call agent_spawn or agent_list/i);
+});
