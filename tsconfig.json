@@ -8,5 +8,5 @@
     "extensions/treepluss/**/*.ts",
     "extensions/pi-subagent/**/*.ts"
   ],
-  "exclude": ["node_modules", "pi-fabric"]
+  "exclude": ["node_modules"]
 }

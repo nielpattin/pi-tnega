@@ -30,8 +30,10 @@ export default defineConfig({
       "eslint/new-cap": "off",
       "eslint/init-declarations": "off",
       "eslint/no-underscore-dangle": "off",
+      "eslint/no-shadow": "off",
       "unicorn/no-null": "off",
       "unicorn/no-nested-ternary": "off",
+      "unicorn/prefer-array-find": "off",
       "unicorn/consistent-function-scoping": "off",
       "import/no-nodejs-modules": "off",
       "import/no-namespace": "off",
@@ -40,20 +42,12 @@ export default defineConfig({
       "typescript/no-unsafe-type-assertion": "off",
       "typescript/no-unnecessary-boolean-literal-compare": "off",
       "typescript/no-unnecessary-type-assertion": "off",
+      "typescript/no-unnecessary-type-parameters": "off",
       "typescript/no-unnecessary-type-conversion": "off",
       "typescript/no-base-to-string": "error"
    },
    env: {
       builtin: true
    },
-   ignorePatterns: [
-      "**/node_modules/**",
-      "repos/**",
-      "tests/**",
-      "examples/**",
-      "scripts/**",
-      "dist/**",
-      "build/**",
-      "pi-fabric/**"
-   ]
+   ignorePatterns: ["**/node_modules/**", "repos/**", "tests/**", "examples/**", "scripts/**", "dist/**", "build/**"]
 });

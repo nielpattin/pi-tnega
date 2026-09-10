@@ -12,7 +12,6 @@ export default defineConfig({
       ".pi/**",
       "**/.pi/**",
       "repos/**",
-      "pi-fabric/**",
       "workflows/**",
       "**/rust-embedder/models/**",
       "**/rust-embedder/target/**",

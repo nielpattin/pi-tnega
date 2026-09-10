@@ -5,9 +5,8 @@
       "test": "node --test \"tests/*/**/*.mjs\"",
       "typecheck": "node scripts/typecheck.mjs",
       "package": "pnpm --dir extensions/pi-ide-pro/vscode package",
-      "lint": "oxlint -c oxlint.config.ts --no-error-on-unmatched-pattern",
-      "lint:fix": "oxlint -c oxlint.config.ts --fix --no-error-on-unmatched-pattern",
-      "fmt": "oxfmt -c oxfmt.config.ts --no-error-on-unmatched-pattern",
+      "lint": "oxlint -c oxlint.config.ts --no-error-on-unmatched-pattern . extensions/pi-fabric/src",
+      "fmt": "oxfmt -c oxfmt.config.ts --no-error-on-unmatched-pattern . extensions/pi-fabric/src",
       "sync:repos": "node scripts/sync-reference-repos.ts",
       "prepare": "git config core.hooksPath .githooks"
    },
@@ -34,7 +33,7 @@
    },
    "lint-staged": {
       "*.{js,jsx,ts,tsx,mjs,cjs}": [
-         "pnpm run lint:fix",
+         "pnpm run lint",
          "pnpm run fmt"
       ]
    },
