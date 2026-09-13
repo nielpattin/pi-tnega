@@ -45,12 +45,12 @@ The UI keeps these values separate:
     "compactionTarget": 64000,
     "keepRecentTokens": 20000,
     "enabled": true,
-    "summaryModels": ["google/gemini-2.5-flash", "anthropic/claude-3-5-haiku", "openai/gpt-4o-mini"],
-    "modelOverrides": {
-        "provider/model-id": {
-            "maxContext": 96000
-        }
-    }
+    "summaryModels": [
+        "google/gemini-2.5-flash",
+        "anthropic/claude-3-5-haiku",
+        "openai/gpt-4o-mini"
+    ],
+    "modelOverrides": { "provider/model-id": { "maxContext": 96000 } }
 }
 ```
 
