@@ -11,29 +11,24 @@ import { getActiveCwd, getDbPath, loadConfig } from "./config.js";
  * so both caller and callee path default to the row's file.
  */
 export function toCallGraphHits(results: CallGraphResult[], cwd: string): CallGraphHit[] {
-   return results.map((r) => {
-      const callerPath = relative(cwd, r.file_path) || r.file_path;
-      return {
-         callerPath,
-         callerSymbol: r.caller,
-         calleePath: callerPath,
-         calleeSymbol: r.callee
-      };
-   });
+  return results.map((r) => {
+    const callerPath = relative(cwd, r.file_path) || r.file_path;
+    return { callerPath, callerSymbol: r.caller, calleePath: callerPath, calleeSymbol: r.callee };
+  });
 }
 
 export async function callGraphQuery(
-   symbol: string,
-   direction: string,
-   filePath?: string,
-   signal?: AbortSignal
+  symbol: string,
+  direction: string,
+  filePath?: string,
+  signal?: AbortSignal,
 ): Promise<CallGraphHit[]> {
-   await startRustSidecar(loadConfig().model, getDbPath());
-   const cwd = getActiveCwd();
-   const results = await rustCallGraph(symbol, direction, filePath, signal);
-   const hits = toCallGraphHits(results, cwd);
-   logLine(
-      `call_graph: symbol=${JSON.stringify(symbol)} direction=${direction} path=${filePath ?? "None"} → ${hits.length} edge(s)`
-   );
-   return hits;
+  await startRustSidecar(loadConfig().model, getDbPath());
+  const cwd = getActiveCwd();
+  const results = await rustCallGraph(symbol, direction, filePath, signal);
+  const hits = toCallGraphHits(results, cwd);
+  logLine(
+    `call_graph: symbol=${JSON.stringify(symbol)} direction=${direction} path=${filePath ?? "None"} → ${hits.length} edge(s)`,
+  );
+  return hits;
 }
