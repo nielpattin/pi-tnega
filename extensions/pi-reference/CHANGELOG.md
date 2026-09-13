@@ -40,17 +40,14 @@ Add a `references` block to Pi settings (`~/.pi/agent/settings.json` global, `<p
 ```jsonc
 {
     "references": {
-        "docs": {
-            "path": "../product-docs",
-            "description": "Product documentation"
-        },
+        "docs": { "path": "../product-docs", "description": "Product documentation" },
         "sdk": {
             "repository": "anomalyco/opencode-sdk-js",
             "branch": "main",
-            "description": "SDK source"
+            "description": "SDK source",
         },
-        "effect": "Effect-TS/effect"
-    }
+        "effect": "Effect-TS/effect",
+    },
 }
 ```
 

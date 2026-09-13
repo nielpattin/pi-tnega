@@ -15,37 +15,37 @@ import type { ReferenceInfo } from "./types.js";
 // ─── UI context (set by index.ts) ────────────────────────────────
 
 interface UiContext {
-   hasUI: boolean;
-   notify(message: string, type?: "info" | "warning" | "error"): void;
-   setStatus(key: string, text: string | undefined): void;
+  hasUI: boolean;
+  notify(message: string, type?: "info" | "warning" | "error"): void;
+  setStatus(key: string, text: string | undefined): void;
 }
 
 let ui: UiContext | null = null;
 let currentReferences: ReferenceInfo[] = [];
 
 export function setUiContext(ctx: UiContext | null): void {
-   ui = ctx;
+  ui = ctx;
 }
 
 export function setCurrentReferences(refs: ReferenceInfo[]): void {
-   currentReferences = refs;
-   if (!syncActive) {
-      updateFooterStatus();
-   }
+  currentReferences = refs;
+  if (!syncActive) {
+    updateFooterStatus();
+  }
 }
 
 // ─── Status reporting (transient toasts) ─────────────────────────
 
 export function reportInfo(msg: string): void {
-   ui?.notify(msg, "info");
+  ui?.notify(msg, "info");
 }
 
 export function reportWarning(msg: string): void {
-   ui?.notify(msg, "warning");
+  ui?.notify(msg, "warning");
 }
 
 export function reportError(msg: string): void {
-   ui?.notify(msg, "error");
+  ui?.notify(msg, "error");
 }
 
 // ─── Sync progress tracking ──────────────────────────────────────
@@ -73,68 +73,68 @@ let spinnerFrame = 0;
 
 /** Start tracking a sync batch with the given total repo count. */
 export function beginSync(total: number): void {
-   syncTotal = total;
-   syncDone = 0;
-   syncFailed = [];
-   syncActive = total > 0;
-   spinnerFrame = 0;
-   startSpinner();
-   refreshSyncStatus();
+  syncTotal = total;
+  syncDone = 0;
+  syncFailed = [];
+  syncActive = total > 0;
+  spinnerFrame = 0;
+  startSpinner();
+  refreshSyncStatus();
 }
 
 /** Mark one repo as done, optionally recording it as failed. */
 export function reportSyncStep(ownerRepo: string, failed: boolean): void {
-   syncDone++;
-   if (failed) syncFailed.push(ownerRepo);
+  syncDone++;
+  if (failed) syncFailed.push(ownerRepo);
 }
 
 /** Finish the sync batch: revert footer to "refs: N", show summary toast if failures. */
 export function endSync(): void {
-   if (!syncActive) return;
-   syncActive = false;
-   stopSpinner();
-   if (syncFailed.length > 0) {
-      const summary =
-         syncFailed.length === syncTotal
-            ? `All ${syncFailed.length} references failed to sync: ${syncFailed.join(", ")}`
-            : `${syncFailed.length} of ${syncTotal} references failed to sync: ${syncFailed.join(", ")}`;
-      reportWarning(summary);
-   }
-   syncTotal = 0;
-   syncDone = 0;
-   syncFailed = [];
-   updateFooterStatus();
+  if (!syncActive) return;
+  syncActive = false;
+  stopSpinner();
+  if (syncFailed.length > 0) {
+    const summary =
+      syncFailed.length === syncTotal
+        ? `All ${syncFailed.length} references failed to sync: ${syncFailed.join(", ")}`
+        : `${syncFailed.length} of ${syncTotal} references failed to sync: ${syncFailed.join(", ")}`;
+    reportWarning(summary);
+  }
+  syncTotal = 0;
+  syncDone = 0;
+  syncFailed = [];
+  updateFooterStatus();
 }
 
 function startSpinner(): void {
-   if (spinnerTimer) return;
-   spinnerTimer = setInterval(() => {
-      spinnerFrame = (spinnerFrame + 1) % SPINNER_FRAMES.length;
-      refreshSyncStatus();
-   }, SPINNER_INTERVAL_MS);
+  if (spinnerTimer) return;
+  spinnerTimer = setInterval(() => {
+    spinnerFrame = (spinnerFrame + 1) % SPINNER_FRAMES.length;
+    refreshSyncStatus();
+  }, SPINNER_INTERVAL_MS);
 }
 
 function stopSpinner(): void {
-   if (spinnerTimer) {
-      clearInterval(spinnerTimer);
-      spinnerTimer = null;
-   }
+  if (spinnerTimer) {
+    clearInterval(spinnerTimer);
+    spinnerTimer = null;
+  }
 }
 
 function refreshSyncStatus(): void {
-   if (!ui?.hasUI) return;
-   if (!syncActive || syncTotal === 0) return;
-   const spinner = SPINNER_FRAMES[spinnerFrame];
-   ui.setStatus(STATUS_KEY, `${spinner} Syncing references... ${syncDone}/${syncTotal}`);
+  if (!ui?.hasUI) return;
+  if (!syncActive || syncTotal === 0) return;
+  const spinner = SPINNER_FRAMES[spinnerFrame];
+  ui.setStatus(STATUS_KEY, `${spinner} Syncing references... ${syncDone}/${syncTotal}`);
 }
 
 // ─── Footer status (idle state) ──────────────────────────────────
 
 function updateFooterStatus(): void {
-   if (!ui?.hasUI) return;
-   if (currentReferences.length === 0) {
-      ui.setStatus(STATUS_KEY, undefined);
-      return;
-   }
-   ui.setStatus(STATUS_KEY, `refs: ${currentReferences.length}`);
+  if (!ui?.hasUI) return;
+  if (currentReferences.length === 0) {
+    ui.setStatus(STATUS_KEY, undefined);
+    return;
+  }
+  ui.setStatus(STATUS_KEY, `refs: ${currentReferences.length}`);
 }

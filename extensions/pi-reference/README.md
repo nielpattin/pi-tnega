@@ -31,23 +31,23 @@ Add a `references` block to your Pi settings:
         // Local object
         "design-system": {
             "path": "../design-system",
-            "description": "Use for design system components and tokens"
+            "description": "Use for design system components and tokens",
         },
 
         // Git object
         "sdk": {
             "repository": "anomalyco/opencode-sdk-js",
             "branch": "main",
-            "description": "Use for JavaScript SDK implementation details"
+            "description": "Use for JavaScript SDK implementation details",
         },
 
         // Hidden: accessible but not in system prompt guidance
         "internal": {
             "path": "~/internal-code",
             "description": "Internal implementation details",
-            "hidden": true
-        }
-    }
+            "hidden": true,
+        },
+    },
 }
 ```
 
