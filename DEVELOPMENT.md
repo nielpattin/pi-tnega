@@ -102,9 +102,7 @@ pnpm --dir extensions/pi-processes check
         "version": "0.1.0",
         "type": "module",
         "main": "index.ts",
-        "engines": {
-            "node": ">=24"
-        },
+        "engines": { "node": ">=24" },
         "repository": {
             "type": "git",
             "url": "git+https://github.com/nielpattin/pi-packages.git",

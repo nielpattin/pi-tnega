@@ -62,10 +62,12 @@ Use generator style. Attach behavior with combinators after the generator body.
 import { Effect, Schema } from "effect";
 
 export class SomeError extends Schema.TaggedError<SomeError>()("SomeError", {
-    message: Schema.String
+    message: Schema.String,
 }) {}
 
-export const processItem = Effect.fn("processItem")(function* (n: number): Effect.fn.Return<string, SomeError> {
+export const processItem = Effect.fn("processItem")(function* (
+    n: number,
+): Effect.fn.Return<string, SomeError> {
     if (n < 0) {
         return yield* new SomeError({ message: "negative" });
     }
@@ -91,7 +93,7 @@ import { Schema } from "effect";
 
 export class SpawnError extends Schema.TaggedError<SpawnError>()("SpawnError", {
     message: Schema.String,
-    cause: Schema.optional(Schema.Defect())
+    cause: Schema.optional(Schema.Defect()),
 }) {}
 ```
 
@@ -122,18 +124,17 @@ export interface JobRegistryShape {
     readonly list: Effect.Effect<ReadonlyArray<Job>>;
 }
 
-export class JobRegistry extends Context.Service<JobRegistry, JobRegistryShape>()("agents/JobRegistry") {
+export class JobRegistry extends Context.Service<JobRegistry, JobRegistryShape>()(
+    "agents/JobRegistry",
+) {
     static readonly layer = Layer.effect(
         JobRegistry,
         Effect.gen(function* () {
             const get = Effect.fn("JobRegistry.get")(function* (id: string) {
                 return undefined as Job | undefined;
             });
-            return JobRegistry.of({
-                get,
-                list: Effect.succeed([])
-            });
-        })
+            return JobRegistry.of({ get, list: Effect.succeed([]) });
+        }),
     );
 }
 
@@ -212,9 +213,12 @@ export function makeAgentsRuntime() {
 export async function runTool<A, E>(
     runtime: ReturnType<typeof makeAgentsRuntime>,
     effect: Effect.Effect<A, E>,
-    options: { signal?: AbortSignal; interruptMessage?: string } = {}
+    options: { signal?: AbortSignal; interruptMessage?: string } = {},
 ) {
-    const exit = await runtime.runPromiseExit(effect, options.signal ? { signal: options.signal } : undefined);
+    const exit = await runtime.runPromiseExit(
+        effect,
+        options.signal ? { signal: options.signal } : undefined,
+    );
     if (Exit.isSuccess(exit)) return exit.value;
     if (Cause.hasInterruptsOnly(exit.cause)) {
         throw new Error(options.interruptMessage ?? "Operation was aborted.");

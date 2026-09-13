@@ -64,8 +64,6 @@ The contributor monorepo workflow for creating and publishing packages lives in 
 
 ## Testing conventions
 
-- Follow the `test-driven-development` skill for all new features, bugfixes, refactors, and behavior modifications.
-- Write the failing test first, verify that it fails for the expected reason, then write minimal code to pass.
 - Tests are tracked in version control and run with Node's built-in test runner. Run all tests with `pnpm test`, or scope to an extension with `node --test tests/<extension-name>/**/*.mjs`.
 - Import extension modules in test files using `loadExtension` from `tests/_bootstrap.mjs`.
 

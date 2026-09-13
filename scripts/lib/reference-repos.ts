@@ -15,23 +15,23 @@
  */
 
 export interface ReferenceRepo {
-   readonly id: string;
-   readonly repository: string;
-   readonly prefix: string;
-   readonly latestRef: string;
-   readonly versionSourcePath: string;
-   readonly packageVersionPath: ReadonlyArray<string>;
-   readonly versionTagPrefix: string;
+  readonly id: string;
+  readonly repository: string;
+  readonly prefix: string;
+  readonly latestRef: string;
+  readonly versionSourcePath: string;
+  readonly packageVersionPath: ReadonlyArray<string>;
+  readonly versionTagPrefix: string;
 }
 
 export const referenceRepos: ReadonlyArray<ReferenceRepo> = [
-   {
-      id: "effect",
-      repository: "https://github.com/Effect-TS/effect.git",
-      prefix: "repos/effect",
-      latestRef: "main",
-      versionSourcePath: "extensions/pi-subagent/package.json",
-      packageVersionPath: ["dependencies", "effect"],
-      versionTagPrefix: "effect@"
-   }
+  {
+    id: "effect",
+    repository: "https://github.com/Effect-TS/effect.git",
+    prefix: "repos/effect",
+    latestRef: "main",
+    versionSourcePath: "extensions/pi-subagent/package.json",
+    packageVersionPath: ["dependencies", "effect"],
+    versionTagPrefix: "effect@",
+  },
 ];

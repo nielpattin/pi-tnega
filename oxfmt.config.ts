@@ -1,35 +1,29 @@
 import { defineConfig } from "oxfmt";
 
 export default defineConfig({
-   ignorePatterns: [
-      "dist",
-      "build",
-      "node_modules",
-      "settings.json",
-      "mcp.json",
-      "pnpm-workspace.yaml",
-      "*yml",
-      ".pi/**",
-      "**/.pi/**",
-      "repos/**",
-      "workflows/**",
-      "**/rust-embedder/models/**",
-      "**/rust-embedder/target/**",
-      "*.json",
-      "*.lock",
-      "*.tsbuildinfo",
-      "tests/**",
-      "examples/**"
-   ],
-   trailingComma: "none",
-   printWidth: 120,
-   tabWidth: 3,
-   overrides: [
-      {
-         files: ["*.md", "*.html"],
-         options: {
-            tabWidth: 4
-         }
-      }
-   ]
+  ignorePatterns: [
+    "dist",
+    "build",
+    "node_modules",
+    "settings.json",
+    "mcp.json",
+    "pnpm-workspace.yaml",
+    "*yml",
+    ".pi/**",
+    "**/.pi/**",
+    "repos/**",
+    "workflows/**",
+    "**/rust-embedder/models/**",
+    "**/rust-embedder/target/**",
+    "*.json",
+    "*.lock",
+    "*.tsbuildinfo",
+    "tests/**",
+    "examples/**",
+  ],
+  trailingComma: "all",
+  objectWrap: "collapse",
+  printWidth: 100,
+  tabWidth: 2,
+  overrides: [{ files: ["*.md", "*.html"], options: { tabWidth: 4 } }],
 });
