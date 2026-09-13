@@ -138,11 +138,7 @@ extensions/pi-acks/
 The package exposes its Pi extension through `package.json`:
 
 ```json
-{
-    "pi": {
-        "extensions": ["./index.ts"]
-    }
-}
+{ "pi": { "extensions": ["./index.ts"] } }
 ```
 
 ## 🔎 Keywords
