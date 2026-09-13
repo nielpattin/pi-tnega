@@ -14,23 +14,23 @@ export const CODEX_VERBOSITY_LEVELS: readonly CodexVerbosity[] = ["low", "medium
 
 /** Persisted Codex request options. */
 export interface CodexUsageConfig {
-   /** Use OpenAI's `priority` service tier (fast mode) for Codex requests. */
-   fast: boolean;
-   /** Response verbosity sent to OpenAI. */
-   verbosity: CodexVerbosity;
+  /** Use OpenAI's `priority` service tier (fast mode) for Codex requests. */
+  fast: boolean;
+  /** Response verbosity sent to OpenAI. */
+  verbosity: CodexVerbosity;
 }
 
 export const DEFAULT_CODEX_USAGE_CONFIG: CodexUsageConfig = {
-   fast: DEFAULT_CODEX_FAST_MODE,
-   verbosity: DEFAULT_CODEX_VERBOSITY
+  fast: DEFAULT_CODEX_FAST_MODE,
+  verbosity: DEFAULT_CODEX_VERBOSITY,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-   return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function configPath(dir: string): string {
-   return join(dir, CODEX_USAGE_CONFIG_FILE);
+  return join(dir, CODEX_USAGE_CONFIG_FILE);
 }
 
 /**
@@ -40,9 +40,11 @@ function configPath(dir: string): string {
  * @returns A supported verbosity level, or `undefined` when the value is invalid.
  */
 export function normalizeCodexVerbosity(value: unknown): CodexVerbosity | undefined {
-   if (typeof value !== "string") return undefined;
-   const normalized = value.trim().toLowerCase();
-   return normalized === "low" || normalized === "medium" || normalized === "high" ? normalized : undefined;
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "low" || normalized === "medium" || normalized === "high"
+    ? normalized
+    : undefined;
 }
 
 /**
@@ -52,7 +54,7 @@ export function normalizeCodexVerbosity(value: unknown): CodexVerbosity | undefi
  * @returns The boolean value, or `undefined` when the value is not a boolean.
  */
 export function normalizeFastMode(value: unknown): boolean | undefined {
-   return typeof value === "boolean" ? value : undefined;
+  return typeof value === "boolean" ? value : undefined;
 }
 
 /**
@@ -62,16 +64,16 @@ export function normalizeFastMode(value: unknown): boolean | undefined {
  * @returns The saved options, or defaults when no valid settings are stored.
  */
 export async function loadCodexUsageConfig(dir: string = getAgentDir()): Promise<CodexUsageConfig> {
-   try {
-      const value: unknown = JSON.parse(await readFile(configPath(dir), "utf8"));
-      if (!isRecord(value)) return { ...DEFAULT_CODEX_USAGE_CONFIG };
-      return {
-         fast: normalizeFastMode(value.fast) ?? DEFAULT_CODEX_FAST_MODE,
-         verbosity: normalizeCodexVerbosity(value.verbosity) ?? DEFAULT_CODEX_VERBOSITY
-      };
-   } catch {
-      return { ...DEFAULT_CODEX_USAGE_CONFIG };
-   }
+  try {
+    const value: unknown = JSON.parse(await readFile(configPath(dir), "utf8"));
+    if (!isRecord(value)) return { ...DEFAULT_CODEX_USAGE_CONFIG };
+    return {
+      fast: normalizeFastMode(value.fast) ?? DEFAULT_CODEX_FAST_MODE,
+      verbosity: normalizeCodexVerbosity(value.verbosity) ?? DEFAULT_CODEX_VERBOSITY,
+    };
+  } catch {
+    return { ...DEFAULT_CODEX_USAGE_CONFIG };
+  }
 }
 
 /**
@@ -80,9 +82,12 @@ export async function loadCodexUsageConfig(dir: string = getAgentDir()): Promise
  * @param config - The options to save.
  * @param dir - Directory holding the config file (defaults to the agent dir).
  */
-export async function saveCodexUsageConfig(config: CodexUsageConfig, dir: string = getAgentDir()): Promise<void> {
-   await mkdir(dir, { recursive: true });
-   await writeFile(configPath(dir), `${JSON.stringify(config, null, 2)}\n`);
+export async function saveCodexUsageConfig(
+  config: CodexUsageConfig,
+  dir: string = getAgentDir(),
+): Promise<void> {
+  await mkdir(dir, { recursive: true });
+  await writeFile(configPath(dir), `${JSON.stringify(config, null, 2)}\n`);
 }
 
 /**
@@ -96,11 +101,11 @@ export async function saveCodexUsageConfig(config: CodexUsageConfig, dir: string
  * @returns The payload with fast mode and verbosity applied.
  */
 export function applyCodexRequestOptions(payload: unknown, config: CodexUsageConfig): unknown {
-   if (!isRecord(payload)) return payload;
-   const text = isRecord(payload.text) ? payload.text : {};
-   return {
-      ...payload,
-      ...(config.fast ? { service_tier: "priority" } : {}),
-      text: { ...text, verbosity: config.verbosity }
-   };
+  if (!isRecord(payload)) return payload;
+  const text = isRecord(payload.text) ? payload.text : {};
+  return {
+    ...payload,
+    ...(config.fast ? { service_tier: "priority" } : {}),
+    text: { ...text, verbosity: config.verbosity },
+  };
 }

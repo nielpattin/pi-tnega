@@ -7,6 +7,7 @@
 ## ✨ Features
 
 - **Usage & Quota Monitoring**: View token limits, current window usage, and quota status for OpenAI Codex models in an interactive TUI screen.
+- **Banked Resets**: See banked rate-limit reset credits with expiry hints and spend one with **Ctrl+R**. Locked until **R** refresh, mirroring upstream reset UX.
 - **Fast Mode**: Route Codex requests through OpenAI's `priority` service tier (`service_tier: "priority"`) for faster responses. Off by default.
 - **Response Verbosity Tuning**: Dynamically adjust OpenAI Codex output verbosity (`low`, `medium`, `high`) to optimize response detail and token consumption.
 - **Persistent Preferences**: Stores fast mode and verbosity settings across agent sessions in `~/.pi/agent/pi-codex-usage.json`.
@@ -24,7 +25,7 @@
 | `/codex-usage <low\|medium\|high>` | Set OpenAI Codex response verbosity directly.                  |
 | `/codex-usage verbosity`           | Select response verbosity from an interactive UI menu.         |
 
-From the usage screen, press **S** to jump straight to the settings screen.
+From the usage screen, press **S** to jump straight to the settings screen, **R** to refresh usage (unlocking another reset), and **Ctrl+R** to spend one banked reset credit.
 
 ---
 
