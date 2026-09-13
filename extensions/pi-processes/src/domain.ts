@@ -11,36 +11,36 @@ export const MAX_PROCESS_SNAPSHOT_BYTES = 50_000;
 
 /** Readiness state for a supervised process. */
 export interface ProcessReadyState {
-   ready: boolean;
-   logMatched: boolean;
-   portMatched: boolean;
-   timedOut?: boolean;
+  ready: boolean;
+  logMatched: boolean;
+  portMatched: boolean;
+  timedOut?: boolean;
 }
 
 /** A retained process and its observable lifecycle state. */
 export interface ProcessEntry {
-   readonly id: string;
-   readonly name: string;
-   readonly command: string;
-   readonly cwd: string;
-   readonly pid: number;
-   status: "running" | "exited" | "failed";
-   readonly readyCondition?: { log?: string; port?: number; timeoutSec?: number };
-   readyState: ProcessReadyState;
-   readonly spawnTime: number;
-   settledAt?: number;
-   exitCode?: number;
-   signal?: string;
-   errorText?: string;
+  readonly id: string;
+  readonly name: string;
+  readonly command: string;
+  readonly cwd: string;
+  readonly pid: number;
+  status: "running" | "exited" | "failed";
+  readonly readyCondition?: { log?: string; port?: number; timeoutSec?: number };
+  readyState: ProcessReadyState;
+  readonly spawnTime: number;
+  settledAt?: number;
+  exitCode?: number;
+  signal?: string;
+  errorText?: string;
 }
 
 /** Typed failure returned when the process concurrency limit is reached. */
-export class ConcurrencyLimitError extends Schema.TaggedError<ConcurrencyLimitError>()("ConcurrencyLimitError", {
-   message: Schema.String,
-   limit: Schema.Number
-}) {}
+export class ConcurrencyLimitError extends Schema.TaggedError<ConcurrencyLimitError>()(
+  "ConcurrencyLimitError",
+  { message: Schema.String, limit: Schema.Number },
+) {}
 
 /** Format a stable process identity. */
 export function formatProcessId(sequence: number): string {
-   return `process-${sequence}`;
+  return `process-${sequence}`;
 }

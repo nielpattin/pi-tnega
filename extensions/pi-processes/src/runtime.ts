@@ -7,7 +7,7 @@ export const ProcessesLive = ProcessSupervisor.layer.pipe(Layer.provideMerge(She
 
 /** Create one managed process runtime for an extension registration. */
 export function makeProcessesRuntime() {
-   return ManagedRuntime.make(ProcessesLive);
+  return ManagedRuntime.make(ProcessesLive);
 }
 
 /**
@@ -19,15 +19,18 @@ export function makeProcessesRuntime() {
  * @returns The successful operation value.
  */
 export async function runProcessTool<A, E>(
-   runtime: ReturnType<typeof makeProcessesRuntime>,
-   effect: Effect.Effect<A, E, ProcessSupervisor | ShellExecutor>,
-   options: { readonly signal?: AbortSignal; readonly interruptMessage?: string } = {}
+  runtime: ReturnType<typeof makeProcessesRuntime>,
+  effect: Effect.Effect<A, E, ProcessSupervisor | ShellExecutor>,
+  options: { readonly signal?: AbortSignal; readonly interruptMessage?: string } = {},
 ): Promise<A> {
-   const exit = await runtime.runPromiseExit(effect, options.signal ? { signal: options.signal } : undefined);
-   if (Exit.isSuccess(exit)) return exit.value;
-   if (Cause.hasInterruptsOnly(exit.cause)) {
-      throw new Error(options.interruptMessage ?? "Operation was aborted.");
-   }
-   const [first] = Cause.prettyErrors(exit.cause);
-   throw new Error(first?.message ?? Cause.pretty(exit.cause));
+  const exit = await runtime.runPromiseExit(
+    effect,
+    options.signal ? { signal: options.signal } : undefined,
+  );
+  if (Exit.isSuccess(exit)) return exit.value;
+  if (Cause.hasInterruptsOnly(exit.cause)) {
+    throw new Error(options.interruptMessage ?? "Operation was aborted.");
+  }
+  const [first] = Cause.prettyErrors(exit.cause);
+  throw new Error(first?.message ?? Cause.pretty(exit.cause));
 }

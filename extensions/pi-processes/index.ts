@@ -13,5 +13,5 @@ export * from "./src/ui/tool-renderers.ts";
 
 /** Register the standalone process supervision extension. */
 export default function processesExtension(pi: ExtensionAPI): void {
-   registerProcessesExtension(pi);
+  registerProcessesExtension(pi);
 }
