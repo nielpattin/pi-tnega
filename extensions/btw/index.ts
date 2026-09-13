@@ -5,5 +5,5 @@ export * from "./src/btw.ts";
 
 /** Register the independent BTW side-chat extension. */
 export default function btwExtension(pi: ExtensionAPI): void {
-   registerBtwCommand(pi);
+  registerBtwCommand(pi);
 }

@@ -17,12 +17,7 @@
 Configure notification preferences in `~/.pi/agent/settings.json` (or `.pi/settings.json` for project-level settings):
 
 ```json
-{
-    "notification": {
-        "sound": "assets/done.mp3",
-        "volume": 100
-    }
-}
+{ "notification": { "sound": "assets/done.mp3", "volume": 100 } }
 ```
 
 - **`sound`**: Path to the audio file. Relative paths resolve from the settings file directory. Defaults to `~/.pi/agent/assets/done.mp3`.
