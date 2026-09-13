@@ -4,159 +4,152 @@ import { fetchWithTimeout } from "../fetch/client.ts";
 import { cleanSnippet } from "../utils/text.ts";
 
 function mapFreshnessToTbs(freshness?: "day" | "week" | "month" | "year"): string | undefined {
-   if (!freshness) return undefined;
-   switch (freshness) {
-      case "day":
-         return "qdr:d";
-      case "week":
-         return "qdr:w";
-      case "month":
-         return "qdr:m";
-      case "year":
-         return "qdr:y";
-      default:
-         return undefined;
-   }
+  if (!freshness) return undefined;
+  switch (freshness) {
+    case "day":
+      return "qdr:d";
+    case "week":
+      return "qdr:w";
+    case "month":
+      return "qdr:m";
+    case "year":
+      return "qdr:y";
+    default:
+      return undefined;
+  }
 }
 
 interface FirecrawlSearchItem {
-   url?: string;
-   title?: string;
-   description?: string;
-   markdown?: string;
-   category?: string;
-   metadata?: {
-      title?: string;
-      description?: string;
-      sourceURL?: string;
-      url?: string;
-      statusCode?: number;
-   };
+  url?: string;
+  title?: string;
+  description?: string;
+  markdown?: string;
+  category?: string;
+  metadata?: {
+    title?: string;
+    description?: string;
+    sourceURL?: string;
+    url?: string;
+    statusCode?: number;
+  };
 }
 
 interface FirecrawlSearchApiResponse {
-   success?: boolean;
-   creditsUsed?: number;
-   id?: string;
-   warning?: string;
-   data?:
-      | FirecrawlSearchItem[]
-      | {
-           web?: FirecrawlSearchItem[];
-           news?: FirecrawlSearchItem[];
-           images?: Array<{ title?: string; url?: string }>;
-        };
-   error?: string;
+  success?: boolean;
+  creditsUsed?: number;
+  id?: string;
+  warning?: string;
+  data?:
+    | FirecrawlSearchItem[]
+    | {
+        web?: FirecrawlSearchItem[];
+        news?: FirecrawlSearchItem[];
+        images?: Array<{ title?: string; url?: string }>;
+      };
+  error?: string;
 }
 
 export async function searchFirecrawl(options: SearchOptions): Promise<SearchResponse> {
-   const config = getWebAccessConfig();
-   const apiKey = config.firecrawlApiKey;
-   const query = options.query.trim();
+  const config = getWebAccessConfig();
+  const apiKey = config.firecrawlApiKey;
+  const query = options.query.trim();
 
-   if (!apiKey) {
-      return {
-         query,
-         provider: "firecrawl",
-         results: [],
-         error: "FIRECRAWL_API_KEY is not configured"
-      };
-   }
-
-   const limit = options.limit ?? 5;
-   const searchUrl = "https://api.firecrawl.dev/v2/search";
-
-   // Return search metadata only. Full page content is fetched separately through fetch_content.
-   const requestBody: Record<string, unknown> = {
+  if (!apiKey) {
+    return {
       query,
-      limit
-   };
+      provider: "firecrawl",
+      results: [],
+      error: "FIRECRAWL_API_KEY is not configured",
+    };
+  }
 
-   // Time-based search
-   const tbs = mapFreshnessToTbs(options.freshness);
-   if (tbs) {
-      requestBody.tbs = tbs;
-   }
+  const limit = options.limit ?? 5;
+  const searchUrl = "https://api.firecrawl.dev/v2/search";
 
-   // Categories filter (developer, research, pdf)
-   if (options.category === "developer" || options.category === "research" || options.category === "pdf") {
-      requestBody.categories = [{ type: options.category }];
-   }
+  // Return search metadata only. Full page content is fetched separately through fetch_content.
+  const requestBody: Record<string, unknown> = { query, limit };
 
-   // Domain filtering
-   if (options.includeDomains && options.includeDomains.length > 0) {
-      requestBody.includeDomains = options.includeDomains;
-   } else if (options.excludeDomains && options.excludeDomains.length > 0) {
-      requestBody.excludeDomains = options.excludeDomains;
-   }
+  // Time-based search
+  const tbs = mapFreshnessToTbs(options.freshness);
+  if (tbs) {
+    requestBody.tbs = tbs;
+  }
 
-   // Geo-location / Country
-   const country = options.userLocation || config.userLocation;
-   if (country) {
-      requestBody.country = country.toUpperCase();
-   }
+  // Categories filter (developer, research, pdf)
+  if (
+    options.category === "developer" ||
+    options.category === "research" ||
+    options.category === "pdf"
+  ) {
+    requestBody.categories = [{ type: options.category }];
+  }
 
-   try {
-      const response = await fetchWithTimeout(searchUrl, {
-         method: "POST",
-         headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json"
-         },
-         body: JSON.stringify(requestBody),
-         signal: options.signal
-      });
+  // Domain filtering
+  if (options.includeDomains && options.includeDomains.length > 0) {
+    requestBody.includeDomains = options.includeDomains;
+  } else if (options.excludeDomains && options.excludeDomains.length > 0) {
+    requestBody.excludeDomains = options.excludeDomains;
+  }
 
-      if (!response.ok) {
-         const errorText = await response.text();
-         return {
-            query,
-            provider: "firecrawl",
-            results: [],
-            error: `Firecrawl API error (${response.status}): ${errorText}`
-         };
-      }
+  // Geo-location / Country
+  const country = options.userLocation || config.userLocation;
+  if (country) {
+    requestBody.country = country.toUpperCase();
+  }
 
-      const responseJson = (await response.json()) as FirecrawlSearchApiResponse;
+  try {
+    const response = await fetchWithTimeout(searchUrl, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(requestBody),
+      signal: options.signal,
+    });
 
-      let rawItems: FirecrawlSearchItem[] = [];
-      if (Array.isArray(responseJson.data)) {
-         rawItems = responseJson.data;
-      } else if (responseJson.data?.web && Array.isArray(responseJson.data.web)) {
-         rawItems = responseJson.data.web;
-      }
+    if (!response.ok) {
+      const errorText = await response.text();
+      return {
+        query,
+        provider: "firecrawl",
+        results: [],
+        error: `Firecrawl API error (${response.status}): ${errorText}`,
+      };
+    }
 
-      const results: SearchItem[] = rawItems.map((item) => {
-         const itemUrl = item.url || item.metadata?.sourceURL || item.metadata?.url || "";
-         const itemTitle = item.title || item.metadata?.title || itemUrl || "Untitled";
-         const itemSnippet = item.description || item.metadata?.description || item.markdown?.slice(0, 300) || "";
+    const responseJson = (await response.json()) as FirecrawlSearchApiResponse;
 
-         return {
-            title: cleanSnippet(itemTitle),
-            url: itemUrl,
-            snippet: cleanSnippet(itemSnippet),
-            category: item.category
-         };
-      });
+    let rawItems: FirecrawlSearchItem[] = [];
+    if (Array.isArray(responseJson.data)) {
+      rawItems = responseJson.data;
+    } else if (responseJson.data?.web && Array.isArray(responseJson.data.web)) {
+      rawItems = responseJson.data.web;
+    }
 
-      const cost =
-         responseJson.creditsUsed !== undefined
-            ? `${responseJson.creditsUsed} credit${responseJson.creditsUsed === 1 ? "" : "s"}`
-            : undefined;
+    const results: SearchItem[] = rawItems.map((item) => {
+      const itemUrl = item.url || item.metadata?.sourceURL || item.metadata?.url || "";
+      const itemTitle = item.title || item.metadata?.title || itemUrl || "Untitled";
+      const itemSnippet =
+        item.description || item.metadata?.description || item.markdown?.slice(0, 300) || "";
 
       return {
-         query,
-         provider: "firecrawl",
-         results,
-         cost,
-         requestId: responseJson.id
+        title: cleanSnippet(itemTitle),
+        url: itemUrl,
+        snippet: cleanSnippet(itemSnippet),
+        category: item.category,
       };
-   } catch (error) {
-      return {
-         query,
-         provider: "firecrawl",
-         results: [],
-         error: error instanceof Error ? error.message : String(error)
-      };
-   }
+    });
+
+    const cost =
+      responseJson.creditsUsed !== undefined
+        ? `${responseJson.creditsUsed} credit${responseJson.creditsUsed === 1 ? "" : "s"}`
+        : undefined;
+
+    return { query, provider: "firecrawl", results, cost, requestId: responseJson.id };
+  } catch (error) {
+    return {
+      query,
+      provider: "firecrawl",
+      results: [],
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }

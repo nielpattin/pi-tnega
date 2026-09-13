@@ -98,11 +98,7 @@ File: `~/.pi/agent/.ext-config/pi-web-access.json`
 
 ```json
 {
-    "search": {
-        "defaultProvider": "firecrawl",
-        "userLocation": "US",
-        "limit": 5
-    },
+    "search": { "defaultProvider": "firecrawl", "userLocation": "US", "limit": 5 },
     "research": {
         "provider": "llm",
         "model": "google/gemini-3.6-flash",
@@ -111,11 +107,7 @@ File: `~/.pi/agent/.ext-config/pi-web-access.json`
         "searchProvider": "firecrawl",
         "fetchProvider": "auto"
     },
-    "fetch": {
-        "provider": "auto",
-        "maxBytes": 50000,
-        "timeoutMs": 20000
-    },
+    "fetch": { "provider": "auto", "maxBytes": 50000, "timeoutMs": 20000 },
     "keys": {
         "firecrawl": "your-firecrawl-key",
         "exa": "your-exa-key",

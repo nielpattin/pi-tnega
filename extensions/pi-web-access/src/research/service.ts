@@ -8,63 +8,57 @@ import { researchLLM } from "./llm.ts";
 export type ResearchProgressCallback = (partial: Partial<ResearchResponse>) => void;
 
 export function resolveResearchProvider(requested?: ResearchProviderId): ResearchProviderId {
-   if (requested) {
-      return requested;
-   }
+  if (requested) {
+    return requested;
+  }
 
-   const config = getWebAccessConfig();
+  const config = getWebAccessConfig();
 
-   if (config.researchProvider === "exa" && config.exaApiKey) {
-      return "exa";
-   }
+  if (config.researchProvider === "exa" && config.exaApiKey) {
+    return "exa";
+  }
 
-   return "llm";
+  return "llm";
 }
 
 export async function executeResearch(
-   options: ResearchOptions,
-   ctx?: ExtensionContext,
-   onProgress?: ResearchProgressCallback
+  options: ResearchOptions,
+  ctx?: ExtensionContext,
+  onProgress?: ResearchProgressCallback,
 ): Promise<ResearchResponse> {
-   const startTime = Date.now();
+  const startTime = Date.now();
 
-   // If academic scope is explicitly requested, route to academic literature pipeline
-   if (options.scope === "academic") {
-      const academicResult = await researchAcademic(options, ctx, onProgress);
-      return {
-         ...academicResult,
-         durationMs: Date.now() - startTime
-      };
-   }
+  // If academic scope is explicitly requested, route to academic literature pipeline
+  if (options.scope === "academic") {
+    const academicResult = await researchAcademic(options, ctx, onProgress);
+    return { ...academicResult, durationMs: Date.now() - startTime };
+  }
 
-   const provider = resolveResearchProvider(options.provider);
+  const provider = resolveResearchProvider(options.provider);
 
-   let result: ResearchResponse;
+  let result: ResearchResponse;
 
-   switch (provider) {
-      case "exa":
-         result = await researchExa(options);
-         break;
+  switch (provider) {
+    case "exa":
+      result = await researchExa(options);
+      break;
 
-      case "llm":
-      default: {
-         result = await researchLLM(options, ctx, onProgress);
+    case "llm":
+    default: {
+      result = await researchLLM(options, ctx, onProgress);
 
-         // If in-harness search produced no results and Exa is configured, fallback to Exa Agent
-         if ((result.error || result.sources.length === 0) && getWebAccessConfig().exaApiKey) {
-            const exaResult = await researchExa(options);
-            if (!exaResult.error && exaResult.sources.length > 0) {
-               result = exaResult;
-            }
-         }
-         break;
+      // If in-harness search produced no results and Exa is configured, fallback to Exa Agent
+      if ((result.error || result.sources.length === 0) && getWebAccessConfig().exaApiKey) {
+        const exaResult = await researchExa(options);
+        if (!exaResult.error && exaResult.sources.length > 0) {
+          result = exaResult;
+        }
       }
-   }
+      break;
+    }
+  }
 
-   return {
-      ...result,
-      durationMs: Date.now() - startTime
-   };
+  return { ...result, durationMs: Date.now() - startTime };
 }
 
 export { researchLLM } from "./llm.ts";

@@ -1,240 +1,242 @@
 import { Type, type Static } from "typebox";
-import type { AgentToolResult, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type {
+  AgentToolResult,
+  ExtensionContext,
+  ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
 import type { SearchItem, SearchResponse } from "../domain.ts";
 import { executeSearch } from "../providers/index.ts";
 import { renderSearchCall, renderSearchResult } from "../ui/tool-renderers.ts";
 
 export const WebSearchToolParamsSchema = Type.Object(
-   {
-      query: Type.Optional(
-         Type.String({
-            description: "Single search keywords or question to find relevant web pages."
-         })
+  {
+    query: Type.Optional(
+      Type.String({
+        description: "Single search keywords or question to find relevant web pages.",
+      }),
+    ),
+    queries: Type.Optional(
+      Type.Array(Type.String(), {
+        description:
+          "Multiple search queries to run in parallel. For broad research, vary phrasing and angle across 2-4 queries.",
+      }),
+    ),
+    mode: Type.Optional(
+      Type.Union([Type.Literal("search"), Type.Literal("answer")], {
+        default: "search",
+        description:
+          "Search mode: 'search' (default: returns ranked web pages and snippets) or 'answer' (use when user asks a question or wants a direct cited factual answer).",
+      }),
+    ),
+    category: Type.Optional(
+      Type.Union(
+        [
+          Type.Literal("developer"),
+          Type.Literal("research"),
+          Type.Literal("pdf"),
+          Type.Literal("company"),
+          Type.Literal("publication"),
+          Type.Literal("news"),
+          Type.Literal("personal site"),
+          Type.Literal("financial report"),
+          Type.Literal("people"),
+        ],
+        {
+          description:
+            "Optional category filter: 'developer' (code repos/docs/PRs), 'research' (academic/scientific), 'pdf' (PDF files), 'company', 'publication', 'news', 'personal site', 'financial report', 'people'.",
+        },
       ),
-      queries: Type.Optional(
-         Type.Array(Type.String(), {
-            description:
-               "Multiple search queries to run in parallel. For broad research, vary phrasing and angle across 2-4 queries."
-         })
+    ),
+    includeDomains: Type.Optional(
+      Type.Array(Type.String(), {
+        description:
+          "Optional list of domains or paths to restrict results to (e.g. ['docs.rs', 'github.com']).",
+      }),
+    ),
+    excludeDomains: Type.Optional(
+      Type.Array(Type.String(), {
+        description: "Optional list of domains to exclude from search results.",
+      }),
+    ),
+    freshness: Type.Optional(
+      Type.Union(
+        [Type.Literal("day"), Type.Literal("week"), Type.Literal("month"), Type.Literal("year")],
+        {
+          description:
+            "Time range filter: 'day' (past 24h), 'week' (past 7 days), 'month' (past 30 days), 'year'.",
+        },
       ),
-      mode: Type.Optional(
-         Type.Union([Type.Literal("search"), Type.Literal("answer")], {
-            default: "search",
-            description:
-               "Search mode: 'search' (default: returns ranked web pages and snippets) or 'answer' (use when user asks a question or wants a direct cited factual answer)."
-         })
-      ),
-      category: Type.Optional(
-         Type.Union(
-            [
-               Type.Literal("developer"),
-               Type.Literal("research"),
-               Type.Literal("pdf"),
-               Type.Literal("company"),
-               Type.Literal("publication"),
-               Type.Literal("news"),
-               Type.Literal("personal site"),
-               Type.Literal("financial report"),
-               Type.Literal("people")
-            ],
-            {
-               description:
-                  "Optional category filter: 'developer' (code repos/docs/PRs), 'research' (academic/scientific), 'pdf' (PDF files), 'company', 'publication', 'news', 'personal site', 'financial report', 'people'."
-            }
-         )
-      ),
-      includeDomains: Type.Optional(
-         Type.Array(Type.String(), {
-            description: "Optional list of domains or paths to restrict results to (e.g. ['docs.rs', 'github.com'])."
-         })
-      ),
-      excludeDomains: Type.Optional(
-         Type.Array(Type.String(), {
-            description: "Optional list of domains to exclude from search results."
-         })
-      ),
-      freshness: Type.Optional(
-         Type.Union([Type.Literal("day"), Type.Literal("week"), Type.Literal("month"), Type.Literal("year")], {
-            description: "Time range filter: 'day' (past 24h), 'week' (past 7 days), 'month' (past 30 days), 'year'."
-         })
-      ),
-      userLocation: Type.Optional(
-         Type.String({
-            description: "Two-letter ISO country code to localize search results (e.g. 'US', 'GB', 'DE')."
-         })
-      ),
-      systemPrompt: Type.Optional(
-         Type.String({
-            description: "Guidance to steer search ranking, source preferences, or output constraints."
-         })
-      ),
-      limit: Type.Optional(
-         Type.Integer({
-            minimum: 1,
-            maximum: 20,
-            description: "Maximum number of search results to return per query (1-20). Defaults to 5."
-         })
-      )
-   },
-   {
-      description:
-         "Search the web using multi-engine routing with domain filtering, freshness filters, geo-location, and category targeting. Automatically falls back to available search providers if errors occur."
-   }
+    ),
+    userLocation: Type.Optional(
+      Type.String({
+        description:
+          "Two-letter ISO country code to localize search results (e.g. 'US', 'GB', 'DE').",
+      }),
+    ),
+    systemPrompt: Type.Optional(
+      Type.String({
+        description: "Guidance to steer search ranking, source preferences, or output constraints.",
+      }),
+    ),
+    limit: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: 20,
+        description: "Maximum number of search results to return per query (1-20). Defaults to 5.",
+      }),
+    ),
+  },
+  {
+    description:
+      "Search the web using multi-engine routing with domain filtering, freshness filters, geo-location, and category targeting. Automatically falls back to available search providers if errors occur.",
+  },
 );
 
 export type WebSearchToolParams = Static<typeof WebSearchToolParamsSchema>;
 
 export async function handleWebSearch(
-   _toolCallId: string,
-   params: WebSearchToolParams,
-   signal?: AbortSignal,
-   _onUpdate?: unknown,
-   _ctx?: ExtensionContext
+  _toolCallId: string,
+  params: WebSearchToolParams,
+  signal?: AbortSignal,
+  _onUpdate?: unknown,
+  _ctx?: ExtensionContext,
 ): Promise<AgentToolResult<SearchResponse>> {
-   const queryList: string[] =
-      params.queries && params.queries.length > 0
-         ? params.queries.map((q) => q.trim()).filter((q) => q.length > 0)
-         : params.query
-           ? [params.query.trim()]
-           : [];
+  const queryList: string[] =
+    params.queries && params.queries.length > 0
+      ? params.queries.map((q) => q.trim()).filter((q) => q.length > 0)
+      : params.query
+        ? [params.query.trim()]
+        : [];
 
-   if (queryList.length === 0) {
+  if (queryList.length === 0) {
+    return {
+      content: [{ type: "text", text: "Error: No query or queries provided for web search." }],
+      details: { query: "", provider: "firecrawl", results: [], error: "No query provided" },
+    };
+  }
+
+  // Single query execution
+  if (queryList.length === 1) {
+    const singleQuery = queryList[0]!;
+    const result = await executeSearch({
+      query: singleQuery,
+      mode: params.mode,
+      category: params.category,
+      includeDomains: params.includeDomains,
+      excludeDomains: params.excludeDomains,
+      freshness: params.freshness,
+      userLocation: params.userLocation,
+      systemPrompt: params.systemPrompt,
+      limit: params.limit,
+      signal,
+    });
+
+    if (result.error && result.results.length === 0) {
       return {
-         content: [{ type: "text", text: "Error: No query or queries provided for web search." }],
-         details: {
-            query: "",
-            provider: "firecrawl",
-            results: [],
-            error: "No query provided"
-         }
+        content: [
+          {
+            type: "text",
+            text: `Search failed for "${singleQuery}" (${result.provider}): ${result.error}`,
+          },
+        ],
+        details: result,
       };
-   }
+    }
 
-   // Single query execution
-   if (queryList.length === 1) {
-      const singleQuery = queryList[0]!;
-      const result = await executeSearch({
-         query: singleQuery,
-         mode: params.mode,
-         category: params.category,
-         includeDomains: params.includeDomains,
-         excludeDomains: params.excludeDomains,
-         freshness: params.freshness,
-         userLocation: params.userLocation,
-         systemPrompt: params.systemPrompt,
-         limit: params.limit,
-         signal
-      });
+    const text = formatSearchTextResponse(result);
+    return { content: [{ type: "text", text }], details: result };
+  }
 
-      if (result.error && result.results.length === 0) {
-         return {
-            content: [
-               { type: "text", text: `Search failed for "${singleQuery}" (${result.provider}): ${result.error}` }
-            ],
-            details: result
-         };
+  // Multi-query parallel execution
+  const searchPromises = queryList.map((q) =>
+    executeSearch({
+      query: q,
+      mode: params.mode,
+      category: params.category,
+      includeDomains: params.includeDomains,
+      excludeDomains: params.excludeDomains,
+      freshness: params.freshness,
+      userLocation: params.userLocation,
+      systemPrompt: params.systemPrompt,
+      limit: params.limit,
+      signal,
+    }),
+  );
+
+  const settled = await Promise.allSettled(searchPromises);
+  const combinedResults: SearchItem[] = [];
+  const seenUrls = new Set<string>();
+  const answers: string[] = [];
+  let resolvedProvider: SearchResponse["provider"] = "firecrawl";
+
+  for (let i = 0; i < settled.length; i++) {
+    const res = settled[i];
+    if (!res || res.status === "rejected") continue;
+    const resp = res.value;
+    if (resp.provider) resolvedProvider = resp.provider;
+    if (resp.answer) {
+      answers.push(`[${queryList[i]}]: ${resp.answer}`);
+    }
+    for (const item of resp.results) {
+      if (item.url && !seenUrls.has(item.url)) {
+        seenUrls.add(item.url);
+        combinedResults.push(item);
       }
+    }
+  }
 
-      const text = formatSearchTextResponse(result);
-      return {
-         content: [{ type: "text", text }],
-         details: result
-      };
-   }
+  const mergedResponse: SearchResponse = {
+    query: queryList.join("; "),
+    provider: resolvedProvider as SearchResponse["provider"],
+    results: combinedResults,
+    answer: answers.length > 0 ? answers.join("\n\n") : undefined,
+  };
 
-   // Multi-query parallel execution
-   const searchPromises = queryList.map((q) =>
-      executeSearch({
-         query: q,
-         mode: params.mode,
-         category: params.category,
-         includeDomains: params.includeDomains,
-         excludeDomains: params.excludeDomains,
-         freshness: params.freshness,
-         userLocation: params.userLocation,
-         systemPrompt: params.systemPrompt,
-         limit: params.limit,
-         signal
-      })
-   );
-
-   const settled = await Promise.allSettled(searchPromises);
-   const combinedResults: SearchItem[] = [];
-   const seenUrls = new Set<string>();
-   const answers: string[] = [];
-   let resolvedProvider: SearchResponse["provider"] = "firecrawl";
-
-   for (let i = 0; i < settled.length; i++) {
-      const res = settled[i];
-      if (!res || res.status === "rejected") continue;
-      const resp = res.value;
-      if (resp.provider) resolvedProvider = resp.provider;
-      if (resp.answer) {
-         answers.push(`[${queryList[i]}]: ${resp.answer}`);
-      }
-      for (const item of resp.results) {
-         if (item.url && !seenUrls.has(item.url)) {
-            seenUrls.add(item.url);
-            combinedResults.push(item);
-         }
-      }
-   }
-
-   const mergedResponse: SearchResponse = {
-      query: queryList.join("; "),
-      provider: resolvedProvider as SearchResponse["provider"],
-      results: combinedResults,
-      answer: answers.length > 0 ? answers.join("\n\n") : undefined
-   };
-
-   const text = formatSearchTextResponse(mergedResponse);
-   return {
-      content: [{ type: "text", text }],
-      details: mergedResponse
-   };
+  const text = formatSearchTextResponse(mergedResponse);
+  return { content: [{ type: "text", text }], details: mergedResponse };
 }
 
 export function formatSearchTextResponse(response: SearchResponse): string {
-   const parts: string[] = [];
+  const parts: string[] = [];
 
-   if (response.answer) {
-      parts.push(`Summary Answer:\n${response.answer}\n`);
-   }
+  if (response.answer) {
+    parts.push(`Summary Answer:\n${response.answer}\n`);
+  }
 
-   if (response.results.length === 0) {
-      parts.push(`No search results found for query: "${response.query}".`);
-      return parts.join("\n");
-   }
+  if (response.results.length === 0) {
+    parts.push(`No search results found for query: "${response.query}".`);
+    return parts.join("\n");
+  }
 
-   parts.push(`Search results for "${response.query}" (${response.provider}):\n`);
+  parts.push(`Search results for "${response.query}" (${response.provider}):\n`);
 
-   for (let i = 0; i < response.results.length; i++) {
-      const item = response.results[i];
-      if (!item) continue;
-      parts.push(`${i + 1}. ${item.title}`);
-      parts.push(`   URL: ${item.url}`);
-      if (item.publishedDate) {
-         parts.push(`   Date: ${item.publishedDate}`);
-      }
-      if (item.category) {
-         parts.push(`   Category: ${item.category}`);
-      }
-      if (item.snippet) {
-         parts.push(`   ${item.snippet}`);
-      }
-      parts.push("");
-   }
+  for (let i = 0; i < response.results.length; i++) {
+    const item = response.results[i];
+    if (!item) continue;
+    parts.push(`${i + 1}. ${item.title}`);
+    parts.push(`   URL: ${item.url}`);
+    if (item.publishedDate) {
+      parts.push(`   Date: ${item.publishedDate}`);
+    }
+    if (item.category) {
+      parts.push(`   Category: ${item.category}`);
+    }
+    if (item.snippet) {
+      parts.push(`   ${item.snippet}`);
+    }
+    parts.push("");
+  }
 
-   return parts.join("\n").trim();
+  return parts.join("\n").trim();
 }
 
 export const webSearchTool: ToolDefinition<typeof WebSearchToolParamsSchema, SearchResponse> = {
-   name: "web_search",
-   label: "Web Search",
-   description:
-      "Search the web using multi-engine routing with domain filtering, freshness filters, geo-location, and category targeting. Automatically falls back across available search backends if errors occur. Set mode='answer' when the user asks a question or wants a direct factual answer with citations. Set mode='search' (default) to find web pages, documentation, and URLs.",
-   parameters: WebSearchToolParamsSchema,
-   execute: handleWebSearch,
-   renderCall: renderSearchCall,
-   renderResult: renderSearchResult
+  name: "web_search",
+  label: "Web Search",
+  description:
+    "Search the web using multi-engine routing with domain filtering, freshness filters, geo-location, and category targeting. Automatically falls back across available search backends if errors occur. Set mode='answer' when the user asks a question or wants a direct factual answer with citations. Set mode='search' (default) to find web pages, documentation, and URLs.",
+  parameters: WebSearchToolParamsSchema,
+  execute: handleWebSearch,
+  renderCall: renderSearchCall,
+  renderResult: renderSearchResult,
 };

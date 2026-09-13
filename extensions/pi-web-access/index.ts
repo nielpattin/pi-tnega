@@ -28,9 +28,9 @@ export * from "./src/ui/tool-renderers.ts";
 
 /** Register the Web Access extension tools and commands. */
 export default function webAccessExtension(pi: ExtensionAPI): void {
-   pi.registerTool(webSearchTool);
-   pi.registerTool(outlineSiteTool);
-   pi.registerTool(fetchContentTool);
-   pi.registerTool(webResearchTool);
-   registerSearchCommand(pi);
+  pi.registerTool(webSearchTool);
+  pi.registerTool(outlineSiteTool);
+  pi.registerTool(fetchContentTool);
+  pi.registerTool(webResearchTool);
+  registerSearchCommand(pi);
 }
