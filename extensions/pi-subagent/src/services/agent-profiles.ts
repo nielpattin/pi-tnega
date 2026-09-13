@@ -10,56 +10,70 @@ export type AgentProfileSource = "builtin" | "global" | "project";
 
 /** A named child-agent configuration selected by the parent session. */
 export interface AgentProfile {
-   /** Stable profile selector used by parent agent delegation. */
-   readonly name: string;
-   /** Optional display name shown by the profile editor. */
-   readonly display_name?: string;
-   /** Human-readable profile description. */
-   readonly description: string;
-   /** Tools allowed in the child session. */
-   readonly tools: ReadonlyArray<string>;
-   /** Optional guidance retained in profile files. */
-   readonly guidance?: string;
-   /** Profile instructions appended to the child system prompt. */
-   readonly systemPrompt: string;
-   /** Compatibility alias used by the existing profile editor format. */
-   readonly body?: string;
-   /** Optional provider/model selector inherited by child sessions. */
-   readonly model?: string;
-   /** Optional thinking level inherited by child sessions. */
-   readonly thinking?: AgentThinkingLevel;
-   /** Whether the profile may be selected. */
-   readonly enabled: boolean;
-   /** Where the profile was loaded from. */
-   readonly source: AgentProfileSource;
-   /** Profile file path when loaded from disk. */
-   readonly filePath?: string;
-   /** Whether a disk file overrides a built-in profile. */
-   readonly isOverride?: boolean;
-   /** Compatibility metadata used by the editor. */
-   readonly scope?: "project" | "global" | "both" | "builtin";
-   readonly scopes?: ReadonlyArray<"project" | "global">;
+  /** Stable profile selector used by parent agent delegation. */
+  readonly name: string;
+  /** Optional display name shown by the profile editor. */
+  readonly display_name?: string;
+  /** Human-readable profile description. */
+  readonly description: string;
+  /** Tools allowed in the child session. */
+  readonly tools: ReadonlyArray<string>;
+  /** Optional guidance retained in profile files. */
+  readonly guidance?: string;
+  /** Profile instructions appended to the child system prompt. */
+  readonly systemPrompt: string;
+  /** Compatibility alias used by the existing profile editor format. */
+  readonly body?: string;
+  /** Optional provider/model selector inherited by child sessions. */
+  readonly model?: string;
+  /** Optional thinking level inherited by child sessions. */
+  readonly thinking?: AgentThinkingLevel;
+  /** Whether the profile may be selected. */
+  readonly enabled: boolean;
+  /** Where the profile was loaded from. */
+  readonly source: AgentProfileSource;
+  /** Profile file path when loaded from disk. */
+  readonly filePath?: string;
+  /** Whether a disk file overrides a built-in profile. */
+  readonly isOverride?: boolean;
+  /** Compatibility metadata used by the editor. */
+  readonly scope?: "project" | "global" | "both" | "builtin";
+  readonly scopes?: ReadonlyArray<"project" | "global">;
 }
 
 export interface AgentProfileStorageOptions {
-   /** Pi agent directory. Defaults to the active Pi agent directory. */
-   readonly agentDir?: string;
-   /** Project directory used for project-file cleanup. */
-   readonly cwd?: string;
+  /** Pi agent directory. Defaults to the active Pi agent directory. */
+  readonly agentDir?: string;
+  /** Project directory used for project-file cleanup. */
+  readonly cwd?: string;
 }
 
 const FULL_TOOLS = ["read", "write", "edit", "bash", "powershell"] as const;
 const READ_ONLY_TOOLS = ["read"] as const;
 const PLANNER_TOOLS = ["read", "write", "bash"] as const;
-const WEB_RESEARCH_TOOLS = ["web_search", "fetch_content", "web_research", "outline_site", "read"] as const;
-const AGENT_THINKING_LEVELS = new Set<AgentThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const WEB_RESEARCH_TOOLS = [
+  "web_search",
+  "fetch_content",
+  "web_research",
+  "outline_site",
+  "read",
+] as const;
+const AGENT_THINKING_LEVELS = new Set<AgentThinkingLevel>([
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
 
 export function isAgentThinkingLevel(value: unknown): value is AgentThinkingLevel {
-   return typeof value === "string" && AGENT_THINKING_LEVELS.has(value as AgentThinkingLevel);
+  return typeof value === "string" && AGENT_THINKING_LEVELS.has(value as AgentThinkingLevel);
 }
 
 export function normalizeAgentThinkingLevel(value: unknown): AgentThinkingLevel {
-   return isAgentThinkingLevel(value) ? value : "medium";
+  return isAgentThinkingLevel(value) ? value : "medium";
 }
 
 const WORKER_PROFILE_BODY = `# WORKER PROFILE
@@ -159,220 +173,235 @@ Conclude with a structured Markdown report:
 - **Recommended Remediation**: Exact replacement snippets to resolve identified defects.`;
 
 function builtInProfile(
-   name: string,
-   description: string,
-   tools: ReadonlyArray<string>,
-   thinking: AgentThinkingLevel,
-   body: string
+  name: string,
+  description: string,
+  tools: ReadonlyArray<string>,
+  thinking: AgentThinkingLevel,
+  body: string,
 ): AgentProfile {
-   return {
-      name,
-      description,
-      tools,
-      thinking,
-      enabled: true,
-      source: "builtin",
-      systemPrompt: body,
-      body,
-      scope: "builtin",
-      scopes: []
-   } as AgentProfile & { readonly body: string };
+  return {
+    name,
+    description,
+    tools,
+    thinking,
+    enabled: true,
+    source: "builtin",
+    systemPrompt: body,
+    body,
+    scope: "builtin",
+    scopes: [],
+  } as AgentProfile & { readonly body: string };
 }
 
 const BUILTIN_PROFILES: ReadonlyArray<AgentProfile> = [
-   builtInProfile(
-      "worker",
-      "Full-capability implementation agent for complex coding tasks, TDD, and multi-file changes.",
-      FULL_TOOLS,
-      "high",
-      WORKER_PROFILE_BODY
-   ),
-   builtInProfile(
-      "planner",
-      "Architect for task decomposition, interface design, and test criteria planning; writes the approved plan file.",
-      PLANNER_TOOLS,
-      "high",
-      PLANNER_AGENT_BODY
-   ),
-   builtInProfile(
-      "explorer",
-      "Read-only codebase exploration, dependency tracing, file discovery, and removal/blast-radius mapping.",
-      READ_ONLY_TOOLS,
-      "low",
-      EXPLORER_AGENT_BODY
-   ),
-   builtInProfile(
-      "critic",
-      "Read-only reviewer for auditing code diffs, verifying edge cases, and catching regressions. Use after code changes, not for codebase discovery.",
-      READ_ONLY_TOOLS,
-      "high",
-      CRITIC_AGENT_BODY
-   ),
-   builtInProfile(
-      "librarian",
-      "Read-only web research, documentation lookup, and version verification.",
-      WEB_RESEARCH_TOOLS,
-      "medium",
-      LIBRARIAN_PROFILE_BODY
-   )
+  builtInProfile(
+    "worker",
+    "Full-capability implementation agent for complex coding tasks, TDD, and multi-file changes.",
+    FULL_TOOLS,
+    "high",
+    WORKER_PROFILE_BODY,
+  ),
+  builtInProfile(
+    "planner",
+    "Architect for task decomposition, interface design, and test criteria planning; writes the approved plan file.",
+    PLANNER_TOOLS,
+    "high",
+    PLANNER_AGENT_BODY,
+  ),
+  builtInProfile(
+    "explorer",
+    "Read-only codebase exploration, dependency tracing, file discovery, and removal/blast-radius mapping.",
+    READ_ONLY_TOOLS,
+    "low",
+    EXPLORER_AGENT_BODY,
+  ),
+  builtInProfile(
+    "critic",
+    "Read-only reviewer for auditing code diffs, verifying edge cases, and catching regressions. Use after code changes, not for codebase discovery.",
+    READ_ONLY_TOOLS,
+    "high",
+    CRITIC_AGENT_BODY,
+  ),
+  builtInProfile(
+    "librarian",
+    "Read-only web research, documentation lookup, and version verification.",
+    WEB_RESEARCH_TOOLS,
+    "medium",
+    LIBRARIAN_PROFILE_BODY,
+  ),
 ];
 
 function profileBody(profile: AgentProfile): string {
-   return profile.systemPrompt || profile.body || "";
+  return profile.systemPrompt || profile.body || "";
 }
 
 /** Return the built-in profiles in stable display order. */
 export function listBuiltInAgentProfiles(): ReadonlyArray<AgentProfile> {
-   return BUILTIN_PROFILES;
+  return BUILTIN_PROFILES;
 }
 
 function parseFrontmatter(text: string): { metadata: Map<string, string>; body: string } {
-   if (!text.startsWith("---")) return { metadata: new Map(), body: text.trim() };
-   const end = text.indexOf("\n---", 3);
-   if (end < 0) return { metadata: new Map(), body: text.trim() };
-   const metadata = new Map<string, string>();
-   for (const line of text.slice(3, end).split("\n")) {
-      const separator = line.indexOf(":");
-      if (separator < 0) continue;
-      const key = line.slice(0, separator).trim();
-      const value = line
-         .slice(separator + 1)
-         .trim()
-         .replace(/^['"]|['"]$/g, "");
-      if (key) metadata.set(key, value);
-   }
-   return { metadata, body: text.slice(end + 4).trim() };
+  if (!text.startsWith("---")) return { metadata: new Map(), body: text.trim() };
+  const end = text.indexOf("\n---", 3);
+  if (end < 0) return { metadata: new Map(), body: text.trim() };
+  const metadata = new Map<string, string>();
+  for (const line of text.slice(3, end).split("\n")) {
+    const separator = line.indexOf(":");
+    if (separator < 0) continue;
+    const key = line.slice(0, separator).trim();
+    const value = line
+      .slice(separator + 1)
+      .trim()
+      .replace(/^['"]|['"]$/g, "");
+    if (key) metadata.set(key, value);
+  }
+  return { metadata, body: text.slice(end + 4).trim() };
 }
 
 function parseThinking(value: string | undefined): AgentThinkingLevel | undefined {
-   return isAgentThinkingLevel(value) ? value : undefined;
+  return isAgentThinkingLevel(value) ? value : undefined;
 }
 
-function profileSourceFor(name: string, source: Exclude<AgentProfileSource, "builtin">): AgentProfileSource {
-   return BUILTIN_PROFILES.some((profile) => profile.name === name) ? "builtin" : source;
+function profileSourceFor(
+  name: string,
+  source: Exclude<AgentProfileSource, "builtin">,
+): AgentProfileSource {
+  return BUILTIN_PROFILES.some((profile) => profile.name === name) ? "builtin" : source;
 }
 
 function parseProfile(
-   name: string,
-   text: string,
-   source: Exclude<AgentProfileSource, "builtin">,
-   filePath: string
+  name: string,
+  text: string,
+  source: Exclude<AgentProfileSource, "builtin">,
+  filePath: string,
 ): AgentProfile | undefined {
-   const parsed = parseFrontmatter(text);
-   if (!parsed.body) return undefined;
-   const tools = parsed.metadata
-      .get("tools")
-      ?.split(",")
-      .map((tool) => tool.trim())
-      .filter(Boolean);
-   const thinking = parseThinking(parsed.metadata.get("thinking"));
-   const resolvedSource = profileSourceFor(name, source);
-   return {
-      name,
-      display_name: parsed.metadata.get("display_name"),
-      description: parsed.metadata.get("description") ?? `Custom ${name} profile.`,
-      tools: tools && tools.length > 0 ? tools : [...FULL_TOOLS],
-      ...(parsed.metadata.get("guidance") ? { guidance: parsed.metadata.get("guidance") } : {}),
-      systemPrompt: parsed.body,
-      body: parsed.body,
-      ...(parsed.metadata.get("model") ? { model: parsed.metadata.get("model") } : {}),
-      ...(thinking ? { thinking } : {}),
-      enabled: parsed.metadata.get("enabled")?.toLowerCase() !== "false",
-      source: resolvedSource,
-      filePath,
-      ...(resolvedSource === "builtin" ? { isOverride: true } : {}),
-      scope: source,
-      scopes: [source]
-   };
+  const parsed = parseFrontmatter(text);
+  if (!parsed.body) return undefined;
+  const tools = parsed.metadata
+    .get("tools")
+    ?.split(",")
+    .map((tool) => tool.trim())
+    .filter(Boolean);
+  const thinking = parseThinking(parsed.metadata.get("thinking"));
+  const resolvedSource = profileSourceFor(name, source);
+  return {
+    name,
+    display_name: parsed.metadata.get("display_name"),
+    description: parsed.metadata.get("description") ?? `Custom ${name} profile.`,
+    tools: tools && tools.length > 0 ? tools : [...FULL_TOOLS],
+    ...(parsed.metadata.get("guidance") ? { guidance: parsed.metadata.get("guidance") } : {}),
+    systemPrompt: parsed.body,
+    body: parsed.body,
+    ...(parsed.metadata.get("model") ? { model: parsed.metadata.get("model") } : {}),
+    ...(thinking ? { thinking } : {}),
+    enabled: parsed.metadata.get("enabled")?.toLowerCase() !== "false",
+    source: resolvedSource,
+    filePath,
+    ...(resolvedSource === "builtin" ? { isOverride: true } : {}),
+    scope: source,
+    scopes: [source],
+  };
 }
 
 export function parseAgentProfileMarkdown(
-   name: string,
-   text: string,
-   filePath?: string,
-   source: Exclude<AgentProfileSource, "builtin"> = filePath?.includes(".pi/agents") ? "project" : "global"
+  name: string,
+  text: string,
+  filePath?: string,
+  source: Exclude<AgentProfileSource, "builtin"> = filePath?.includes(".pi/agents")
+    ? "project"
+    : "global",
 ): AgentProfile | undefined {
-   return parseProfile(name, text, source, filePath ?? "");
+  return parseProfile(name, text, source, filePath ?? "");
 }
 
-function loadProfileDirectory(directory: string, source: Exclude<AgentProfileSource, "builtin">): AgentProfile[] {
-   if (!fs.existsSync(directory)) return [];
-   let files: string[];
-   try {
-      files = fs.readdirSync(directory).filter((file) => file.endsWith(".md"));
-   } catch {
-      return [];
-   }
-   const profiles: AgentProfile[] = [];
-   for (const file of files) {
-      try {
-         const filePath = path.join(directory, file);
-         const name = path.basename(file, ".md");
-         const profile = parseProfile(name, fs.readFileSync(filePath, "utf8"), source, filePath);
-         if (profile) profiles.push(profile);
-      } catch {
-         // Optional profile files are isolated from agent startup.
-      }
-   }
-   return profiles;
+function loadProfileDirectory(
+  directory: string,
+  source: Exclude<AgentProfileSource, "builtin">,
+): AgentProfile[] {
+  if (!fs.existsSync(directory)) return [];
+  let files: string[];
+  try {
+    files = fs.readdirSync(directory).filter((file) => file.endsWith(".md"));
+  } catch {
+    return [];
+  }
+  const profiles: AgentProfile[] = [];
+  for (const file of files) {
+    try {
+      const filePath = path.join(directory, file);
+      const name = path.basename(file, ".md");
+      const profile = parseProfile(name, fs.readFileSync(filePath, "utf8"), source, filePath);
+      if (profile) profiles.push(profile);
+    } catch {
+      // Optional profile files are isolated from agent startup.
+    }
+  }
+  return profiles;
 }
 
 /** Return the global profile directory. */
 export function getGlobalAgentProfilesDir(agentDir = getAgentDir()): string {
-   return path.join(agentDir, "agents");
+  return path.join(agentDir, "agents");
 }
 
 /** Return both supported project profile directories. */
 export function getProjectAgentProfilesDirs(cwd?: string): string[] {
-   return cwd ? [path.join(cwd, "agents"), path.join(cwd, ".pi", "agents")] : [];
+  return cwd ? [path.join(cwd, "agents"), path.join(cwd, ".pi", "agents")] : [];
 }
 
 function mergeProfile(profile: AgentProfile, existing: AgentProfile | undefined): AgentProfile {
-   if (!existing || !BUILTIN_PROFILES.some((builtin) => builtin.name === profile.name)) return profile;
-   return {
-      ...profile,
-      source: "builtin",
-      isOverride: true,
-      scope: existing.scope === "builtin" ? profile.scope : "both",
-      scopes: existing.scope === "builtin" ? profile.scopes : ["global", "project"]
-   };
+  if (!existing || !BUILTIN_PROFILES.some((builtin) => builtin.name === profile.name))
+    return profile;
+  return {
+    ...profile,
+    source: "builtin",
+    isOverride: true,
+    scope: existing.scope === "builtin" ? profile.scope : "both",
+    scopes: existing.scope === "builtin" ? profile.scopes : ["global", "project"],
+  };
 }
 
 /** Load built-in and optional global/project profile files. */
 export function listAgentProfiles(
-   cwd?: string,
-   options: { readonly agentDir?: string } = {}
+  cwd?: string,
+  options: { readonly agentDir?: string } = {},
 ): ReadonlyArray<AgentProfile> {
-   const profiles = new Map(BUILTIN_PROFILES.map((profile) => [profile.name, profile]));
-   const globalProfiles = loadProfileDirectory(getGlobalAgentProfilesDir(options.agentDir), "global");
-   for (const profile of globalProfiles) profiles.set(profile.name, mergeProfile(profile, profiles.get(profile.name)));
-   for (const directory of getProjectAgentProfilesDirs(cwd)) {
-      for (const profile of loadProfileDirectory(directory, "project")) {
-         profiles.set(profile.name, mergeProfile(profile, profiles.get(profile.name)));
-      }
-   }
-   return [...profiles.values()];
+  const profiles = new Map(BUILTIN_PROFILES.map((profile) => [profile.name, profile]));
+  const globalProfiles = loadProfileDirectory(
+    getGlobalAgentProfilesDir(options.agentDir),
+    "global",
+  );
+  for (const profile of globalProfiles)
+    profiles.set(profile.name, mergeProfile(profile, profiles.get(profile.name)));
+  for (const directory of getProjectAgentProfilesDirs(cwd)) {
+    for (const profile of loadProfileDirectory(directory, "project")) {
+      profiles.set(profile.name, mergeProfile(profile, profiles.get(profile.name)));
+    }
+  }
+  return [...profiles.values()];
 }
 
 /** Resolve a named profile. Returns undefined when the name is missing, blank, disabled, or unknown. */
 export function resolveAgentProfile(
-   name: unknown,
-   cwd?: string,
-   options: { readonly agentDir?: string } = {}
+  name: unknown,
+  cwd?: string,
+  options: { readonly agentDir?: string } = {},
 ): AgentProfile | undefined {
-   const requested = typeof name === "string" ? name.trim() : "";
-   if (requested.length === 0) return undefined;
-   return listAgentProfiles(cwd, options).find((profile) => profile.enabled && profile.name === requested);
+  const requested = typeof name === "string" ? name.trim() : "";
+  if (requested.length === 0) return undefined;
+  return listAgentProfiles(cwd, options).find(
+    (profile) => profile.enabled && profile.name === requested,
+  );
 }
 
 /** Names of enabled profiles in stable display order. */
 export function listEnabledAgentProfileNames(
-   cwd?: string,
-   options: { readonly agentDir?: string } = {}
+  cwd?: string,
+  options: { readonly agentDir?: string } = {},
 ): ReadonlyArray<string> {
-   return listAgentProfiles(cwd, options)
-      .filter((profile) => profile.enabled)
-      .map((profile) => profile.name);
+  return listAgentProfiles(cwd, options)
+    .filter((profile) => profile.enabled)
+    .map((profile) => profile.name);
 }
 
 /**
@@ -380,72 +409,79 @@ export function listEnabledAgentProfileNames(
  * enabled profiles, then stops without further requests.
  */
 export function formatUnknownAgentProfileError(
-   requested: string,
-   cwd?: string,
-   options: { readonly agentDir?: string } = {}
+  requested: string,
+  cwd?: string,
+  options: { readonly agentDir?: string } = {},
 ): string {
-   const shown = requested.trim().length > 0 ? requested.trim() : "<missing>";
-   const available = listEnabledAgentProfileNames(cwd, options);
-   const list = available.length > 0 ? available.join(", ") : "<none>";
-   return `Agent profile "${shown}" does not exist or is not enabled. Available profiles: ${list}. Stopping without further requests. See /wr.profile.`;
+  const shown = requested.trim().length > 0 ? requested.trim() : "<missing>";
+  const available = listEnabledAgentProfileNames(cwd, options);
+  const list = available.length > 0 ? available.join(", ") : "<none>";
+  return `Agent profile "${shown}" does not exist or is not enabled. Available profiles: ${list}. Stopping without further requests. See /wr.profile.`;
 }
 
 /** Serialize one profile into the existing Pi agent Markdown format. */
 export function serializeAgentProfile(profile: AgentProfile): string {
-   const lines: string[] = ["---"];
-   lines.push(`name: ${profile.name}`);
-   lines.push(`description: ${profile.description || ""}`);
-   if (profile.display_name) lines.push(`display_name: ${profile.display_name}`);
-   if (profile.tools.length > 0) lines.push(`tools: ${profile.tools.join(", ")}`);
-   if (profile.model) lines.push(`model: ${profile.model}`);
-   if (profile.thinking) lines.push(`thinking: ${profile.thinking}`);
-   if (profile.guidance) lines.push(`guidance: ${profile.guidance}`);
-   lines.push(`enabled: ${profile.enabled ? "true" : "false"}`);
-   lines.push("---", "", profileBody(profile) || `# ${profile.name.toUpperCase()} PROFILE`, "");
-   return lines.join("\n");
+  const lines: string[] = ["---"];
+  lines.push(`name: ${profile.name}`);
+  lines.push(`description: ${profile.description || ""}`);
+  if (profile.display_name) lines.push(`display_name: ${profile.display_name}`);
+  if (profile.tools.length > 0) lines.push(`tools: ${profile.tools.join(", ")}`);
+  if (profile.model) lines.push(`model: ${profile.model}`);
+  if (profile.thinking) lines.push(`thinking: ${profile.thinking}`);
+  if (profile.guidance) lines.push(`guidance: ${profile.guidance}`);
+  lines.push(`enabled: ${profile.enabled ? "true" : "false"}`);
+  lines.push("---", "", profileBody(profile) || `# ${profile.name.toUpperCase()} PROFILE`, "");
+  return lines.join("\n");
 }
 
 /** Save a profile as a global Pi profile, matching the existing editor behavior. */
-export function saveAgentProfile(profile: AgentProfile, options: AgentProfileStorageOptions = {}): string {
-   const globalDir = getGlobalAgentProfilesDir(options.agentDir);
-   fs.mkdirSync(globalDir, { recursive: true });
-   const globalPath = path.join(globalDir, `${profile.name}.md`);
-   fs.writeFileSync(globalPath, serializeAgentProfile(profile), "utf8");
+export function saveAgentProfile(
+  profile: AgentProfile,
+  options: AgentProfileStorageOptions = {},
+): string {
+  const globalDir = getGlobalAgentProfilesDir(options.agentDir);
+  fs.mkdirSync(globalDir, { recursive: true });
+  const globalPath = path.join(globalDir, `${profile.name}.md`);
+  fs.writeFileSync(globalPath, serializeAgentProfile(profile), "utf8");
 
-   for (const directory of getProjectAgentProfilesDirs(options.cwd)) {
-      const projectPath = path.join(directory, `${profile.name}.md`);
-      if (path.resolve(projectPath) === path.resolve(globalPath)) continue;
-      try {
-         if (fs.existsSync(projectPath)) fs.unlinkSync(projectPath);
-      } catch {
-         // Global profile persistence remains successful if cleanup fails.
-      }
-   }
-   return globalPath;
+  for (const directory of getProjectAgentProfilesDirs(options.cwd)) {
+    const projectPath = path.join(directory, `${profile.name}.md`);
+    if (path.resolve(projectPath) === path.resolve(globalPath)) continue;
+    try {
+      if (fs.existsSync(projectPath)) fs.unlinkSync(projectPath);
+    } catch {
+      // Global profile persistence remains successful if cleanup fails.
+    }
+  }
+  return globalPath;
 }
 
 /** Delete a profile file from its known path, project paths, or global path. */
 export function deleteAgentProfile(
-   profileOrName: Pick<AgentProfile, "name" | "filePath"> | string,
-   options: AgentProfileStorageOptions = {}
+  profileOrName: Pick<AgentProfile, "name" | "filePath"> | string,
+  options: AgentProfileStorageOptions = {},
 ): { success: boolean; error?: string } {
-   const name = typeof profileOrName === "string" ? profileOrName : profileOrName.name;
-   const knownPath = typeof profileOrName === "string" ? undefined : profileOrName.filePath;
-   const candidates = [
-      ...(knownPath ? [knownPath] : []),
-      ...getProjectAgentProfilesDirs(options.cwd).map((directory) => path.join(directory, `${name}.md`)),
-      path.join(getGlobalAgentProfilesDir(options.agentDir), `${name}.md`)
-   ];
+  const name = typeof profileOrName === "string" ? profileOrName : profileOrName.name;
+  const knownPath = typeof profileOrName === "string" ? undefined : profileOrName.filePath;
+  const candidates = [
+    ...(knownPath ? [knownPath] : []),
+    ...getProjectAgentProfilesDirs(options.cwd).map((directory) =>
+      path.join(directory, `${name}.md`),
+    ),
+    path.join(getGlobalAgentProfilesDir(options.agentDir), `${name}.md`),
+  ];
 
-   let deleted = false;
-   for (const candidate of candidates) {
-      if (!fs.existsSync(candidate)) continue;
-      try {
-         fs.unlinkSync(candidate);
-         deleted = true;
-      } catch (error) {
-         return { success: false, error: error instanceof Error ? error.message : String(error) };
-      }
-   }
-   return deleted ? { success: true } : { success: false, error: `Profile file for "${name}" not found.` };
+  let deleted = false;
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) continue;
+    try {
+      fs.unlinkSync(candidate);
+      deleted = true;
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+  return deleted
+    ? { success: true }
+    : { success: false, error: `Profile file for "${name}" not found.` };
 }

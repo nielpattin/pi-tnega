@@ -2,18 +2,18 @@ import type { AgentProfile } from "./agent-profiles.js";
 
 /** Minimal model registry capability needed by profile resolution. */
 export interface ProfileModelRegistry<Model> {
-   /** Resolve one provider and model identifier. */
-   readonly find: (provider: string, id: string) => Model | undefined;
-   /** List registered provider/model identifiers. */
-   readonly getAll: () => ReadonlyArray<{ readonly provider: string; readonly id: string }>;
+  /** Resolve one provider and model identifier. */
+  readonly find: (provider: string, id: string) => Model | undefined;
+  /** List registered provider/model identifiers. */
+  readonly getAll: () => ReadonlyArray<{ readonly provider: string; readonly id: string }>;
 }
 
 /** Parent model identity used when a profile does not override the model. */
 export interface InheritedModelIdentity {
-   /** Parent provider identifier. */
-   readonly provider: string;
-   /** Parent model identifier. */
-   readonly id: string;
+  /** Parent provider identifier. */
+  readonly provider: string;
+  /** Parent model identifier. */
+  readonly id: string;
 }
 
 /**
@@ -25,37 +25,37 @@ export interface InheritedModelIdentity {
  * @returns The selected model or `undefined` when no model is available.
  */
 export function resolveProfileModel<Model>(
-   registry: ProfileModelRegistry<Model>,
-   profile: Pick<AgentProfile, "model">,
-   inherited?: InheritedModelIdentity
+  registry: ProfileModelRegistry<Model>,
+  profile: Pick<AgentProfile, "model">,
+  inherited?: InheritedModelIdentity,
 ): Model | undefined {
-   const hint = profile.model;
-   if (!hint) {
-      return inherited ? registry.find(inherited.provider, inherited.id) : undefined;
-   }
+  const hint = profile.model;
+  if (!hint) {
+    return inherited ? registry.find(inherited.provider, inherited.id) : undefined;
+  }
 
-   const slash = hint.indexOf("/");
-   if (slash > 0) {
-      const provider = hint.slice(0, slash);
-      const id = hint.slice(slash + 1);
-      const found = registry.find(provider, id);
-      if (found) return found;
-      throw new Error(`Unknown profile model "${hint}".`);
-   }
+  const slash = hint.indexOf("/");
+  if (slash > 0) {
+    const provider = hint.slice(0, slash);
+    const id = hint.slice(slash + 1);
+    const found = registry.find(provider, id);
+    if (found) return found;
+    throw new Error(`Unknown profile model "${hint}".`);
+  }
 
-   if (inherited) {
-      const inheritedMatch = registry.find(inherited.provider, hint);
-      if (inheritedMatch) return inheritedMatch;
-   }
+  if (inherited) {
+    const inheritedMatch = registry.find(inherited.provider, hint);
+    if (inheritedMatch) return inheritedMatch;
+  }
 
-   const matches = registry.getAll().filter((model) => model.id === hint);
-   if (matches.length === 1) {
-      return registry.find(matches[0].provider, matches[0].id);
-   }
-   if (matches.length > 1) {
-      throw new Error(
-         `Profile model "${hint}" exists in multiple providers (${matches.map((model) => model.provider).join(", ")}).`
-      );
-   }
-   throw new Error(`Unknown profile model "${hint}".`);
+  const matches = registry.getAll().filter((model) => model.id === hint);
+  if (matches.length === 1) {
+    return registry.find(matches[0].provider, matches[0].id);
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `Profile model "${hint}" exists in multiple providers (${matches.map((model) => model.provider).join(", ")}).`,
+    );
+  }
+  throw new Error(`Unknown profile model "${hint}".`);
 }

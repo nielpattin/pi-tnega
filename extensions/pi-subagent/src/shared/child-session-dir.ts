@@ -9,15 +9,17 @@ import * as path from "node:path";
  * @param parentSessionFile - The persisted parent session path, when available.
  * @returns The parent-scoped child directory or `undefined` for ephemeral paths.
  */
-export function deriveChildSessionDirectory(parentSessionFile: string | undefined | null): string | undefined {
-   if (!parentSessionFile) return undefined;
+export function deriveChildSessionDirectory(
+  parentSessionFile: string | undefined | null,
+): string | undefined {
+  if (!parentSessionFile) return undefined;
 
-   const resolved = path.resolve(parentSessionFile);
-   const fileName = path.basename(resolved);
-   if (!fileName.endsWith(".jsonl")) return undefined;
+  const resolved = path.resolve(parentSessionFile);
+  const fileName = path.basename(resolved);
+  if (!fileName.endsWith(".jsonl")) return undefined;
 
-   const base = fileName.slice(0, -".jsonl".length);
-   if (!base) return undefined;
+  const base = fileName.slice(0, -".jsonl".length);
+  if (!base) return undefined;
 
-   return path.join(path.dirname(resolved), base);
+  return path.join(path.dirname(resolved), base);
 }
