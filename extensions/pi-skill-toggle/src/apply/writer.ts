@@ -2,37 +2,37 @@ import type { FileSystem } from "../ports/fs.ts";
 import type { ApplyResult, SkillChange } from "../types.ts";
 
 export interface SkillChangeWriter {
-   apply(changes: SkillChange[]): Promise<ApplyResult>;
+  apply(changes: SkillChange[]): Promise<ApplyResult>;
 }
 
 export class AtomicSkillChangeWriter implements SkillChangeWriter {
-   constructor(private readonly fs: FileSystem) {}
+  constructor(private readonly fs: FileSystem) {}
 
-   async apply(changes: SkillChange[]): Promise<ApplyResult> {
-      const result: ApplyResult = { applied: [], skipped: [], errors: [] };
+  async apply(changes: SkillChange[]): Promise<ApplyResult> {
+    const result: ApplyResult = { applied: [], skipped: [], errors: [] };
 
-      await Promise.all(
-         changes.map(async (change) => {
-            try {
-               const current = await this.fs.readFile(change.filePath);
-               if (current !== change.patch.oldText) {
-                  result.errors.push({
-                     skill: change.skill,
-                     message: `${change.skill.name}: file changed while dialog was open; skipped`
-                  });
-                  return;
-               }
-               await this.fs.writeFileAtomic(change.filePath, change.patch.newText);
-               result.applied.push(change);
-            } catch (error) {
-               result.errors.push({
-                  skill: change.skill,
-                  message: `${change.skill.name}: ${error instanceof Error ? error.message : String(error)}`
-               });
-            }
-         })
-      );
+    await Promise.all(
+      changes.map(async (change) => {
+        try {
+          const current = await this.fs.readFile(change.filePath);
+          if (current !== change.patch.oldText) {
+            result.errors.push({
+              skill: change.skill,
+              message: `${change.skill.name}: file changed while dialog was open; skipped`,
+            });
+            return;
+          }
+          await this.fs.writeFileAtomic(change.filePath, change.patch.newText);
+          result.applied.push(change);
+        } catch (error) {
+          result.errors.push({
+            skill: change.skill,
+            message: `${change.skill.name}: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
+      }),
+    );
 
-      return result;
-   }
+    return result;
+  }
 }
