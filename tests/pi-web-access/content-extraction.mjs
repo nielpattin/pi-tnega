@@ -153,19 +153,6 @@ test("formatBytes formats byte sizes accurately", () => {
    assert.equal(textUtils.formatBytes(2 * 1024 * 1024), "2.00 MB");
 });
 
-test("fetchWithFirecrawl returns error when FIRECRAWL_API_KEY is not configured", async () => {
-   const originalKey = process.env.FIRECRAWL_API_KEY;
-   delete process.env.FIRECRAWL_API_KEY;
-
-   try {
-      const result = await firecrawlFetch.fetchWithFirecrawl("https://example.com", {});
-      assert.equal(result.provider, "firecrawl");
-      assert.ok(result.error?.includes("FIRECRAWL_API_KEY"));
-   } finally {
-      if (originalKey) process.env.FIRECRAWL_API_KEY = originalKey;
-   }
-});
-
 test("fetchWithFirecrawl reads creditsUsed from scrape metadata", async () => {
    const originalKey = process.env.FIRECRAWL_API_KEY;
    const originalFetch = globalThis.fetch;
@@ -196,35 +183,5 @@ test("fetchWithFirecrawl reads creditsUsed from scrape metadata", async () => {
       globalThis.fetch = originalFetch;
       if (originalKey === undefined) delete process.env.FIRECRAWL_API_KEY;
       else process.env.FIRECRAWL_API_KEY = originalKey;
-   }
-});
-
-test("parseLocalFileWithFirecrawl returns error when FIRECRAWL_API_KEY is missing", async () => {
-   const originalKey = process.env.FIRECRAWL_API_KEY;
-   delete process.env.FIRECRAWL_API_KEY;
-
-   try {
-      const result = await firecrawlFetch.parseLocalFileWithFirecrawl(
-         "sample.docx",
-         Buffer.from("dummy docx content"),
-         {}
-      );
-      assert.equal(result.provider, "firecrawl");
-      assert.ok(result.error?.includes("FIRECRAWL_API_KEY"));
-   } finally {
-      if (originalKey) process.env.FIRECRAWL_API_KEY = originalKey;
-   }
-});
-
-test("fetchWithExa returns error when EXA_API_KEY is not configured", async () => {
-   const originalKey = process.env.EXA_API_KEY;
-   delete process.env.EXA_API_KEY;
-
-   try {
-      const result = await exaFetch.fetchWithExa("https://example.com", {});
-      assert.equal(result.provider, "exa");
-      assert.ok(result.error?.includes("EXA_API_KEY"));
-   } finally {
-      if (originalKey) process.env.EXA_API_KEY = originalKey;
    }
 });

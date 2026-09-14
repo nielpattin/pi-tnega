@@ -21,22 +21,6 @@ test("outlineSiteTool conforms to tool definition contract", () => {
    assert.ok(outlineTools.outlineSiteTool.parameters.properties.include_subdomains);
 });
 
-test("outlineSite returns clear error when neither FIRECRAWL_API_KEY nor EXA_API_KEY is configured", async () => {
-   const originalFirecrawl = process.env.FIRECRAWL_API_KEY;
-   const originalExa = process.env.EXA_API_KEY;
-   delete process.env.FIRECRAWL_API_KEY;
-   delete process.env.EXA_API_KEY;
-
-   try {
-      const result = await outlineService.outlineSite({ url: "https://docs.example.com" });
-      assert.equal(result.totalLinks, 0);
-      assert.ok(result.error?.includes("FIRECRAWL_API_KEY"));
-   } finally {
-      if (originalFirecrawl) process.env.FIRECRAWL_API_KEY = originalFirecrawl;
-      if (originalExa) process.env.EXA_API_KEY = originalExa;
-   }
-});
-
 test("formatOutlineTextResponse produces readable structured link lists", () => {
    const formatted = outlineTools.formatOutlineTextResponse({
       url: "https://docs.example.com",

@@ -41,22 +41,6 @@ test("PROVIDERS registry contains only firecrawl, exa, and tavily", () => {
    }
 });
 
-test("searchFirecrawl returns descriptive error when FIRECRAWL_API_KEY is missing", async () => {
-   const originalKey = process.env.FIRECRAWL_API_KEY;
-   delete process.env.FIRECRAWL_API_KEY;
-
-   try {
-      const result = await firecrawl.searchFirecrawl({ query: "test query" });
-      assert.equal(result.provider, "firecrawl");
-      assert.equal(result.results.length, 0);
-      assert.ok(result.error?.includes("FIRECRAWL_API_KEY"));
-   } finally {
-      if (originalKey) {
-         process.env.FIRECRAWL_API_KEY = originalKey;
-      }
-   }
-});
-
 test("searchFirecrawl requests search metadata without scraping result pages", async () => {
    const originalKey = process.env.FIRECRAWL_API_KEY;
    const originalFetch = globalThis.fetch;

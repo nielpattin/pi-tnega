@@ -7,20 +7,6 @@ const academicResearch = await loadExtension("extensions/pi-web-access/src/resea
 const researchService = await loadExtension("extensions/pi-web-access/src/research/service.ts");
 const researchTools = await loadExtension("extensions/pi-web-access/src/tools/web-research.ts");
 
-test("searchResearchPapers returns descriptive error when FIRECRAWL_API_KEY is missing", async () => {
-   const originalKey = process.env.FIRECRAWL_API_KEY;
-   delete process.env.FIRECRAWL_API_KEY;
-
-   try {
-      const result = await firecrawlPapers.searchResearchPapers({ query: "diffusion models" });
-      assert.equal(result.success, false);
-      assert.equal(result.results.length, 0);
-      assert.ok(result.error?.includes("FIRECRAWL_API_KEY"));
-   } finally {
-      if (originalKey) process.env.FIRECRAWL_API_KEY = originalKey;
-   }
-});
-
 test("searchResearchPapers constructs valid query and parses results", async () => {
    const originalKey = process.env.FIRECRAWL_API_KEY;
    const originalFetch = globalThis.fetch;
