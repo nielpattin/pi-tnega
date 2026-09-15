@@ -31,8 +31,18 @@ From the usage screen, press **S** to jump straight to the settings screen, **R*
 
 ## ⚙️ Fast Mode
 
-Fast mode adds `service_tier: "priority"` to each OpenAI Codex request payload, the same mechanism used by `pi-codex-conversion`. Priority tier typically responds faster but can cost more per request. Toggle it in the settings screen, or with `/codex-usage fast on|off`.
+Fast mode uses a provider-owned Codex transport so Pi cannot overwrite the routing identity while building the request. It:
 
+- sends `service_tier: "priority"` and the configured `text.verbosity` in the request body;
+- sends `originator: "codex_cli_rs"` plus `x-codex-routing-hint` on SSE (the WebSocket handshake carries the same identity minus `OpenAI-Beta`, matching stock Pi);
+- prefers WebSocket in Pi's normal `auto` mode and falls back to SSE when the WebSocket cannot connect.
+
+- reuses an account-isolated WebSocket session for continuation deltas, with lifecycle cleanup and a sticky per-session SSE fallback;
+- compresses SSE request bodies with zstd when the runtime supports it and retries transient responses using server backoff hints.
+
+When fast mode is off, requests continue through Pi's stock Codex provider unchanged. Priority routing may cost more per request.
+
+If fast requests fail, check the redacted telemetry at `<tmp>/pi-codex-fast-debug.log` (transports, statuses, error messages — never tokens or bodies). `/codex-usage` also prints the loaded transport revision.
 ---
 
 ## 📦 Installation

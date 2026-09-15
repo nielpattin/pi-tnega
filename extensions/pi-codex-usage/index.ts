@@ -11,6 +11,13 @@ import {
   type CodexUsageConfig,
   type CodexVerbosity,
 } from "./config";
+import { FAST_TRANSPORT_REV, formatLastFastResult } from "./fast-transport";
+import {
+  ensureFastProvider,
+  formatCodexHookStats,
+  getFastProviderState,
+  recordCodexHookCall,
+} from "./provider-registration";
 
 const CODEX_USAGE_COMMAND_USAGE =
   "Usage: /codex-usage [settings|fast [on|off]|low|medium|high|verbosity [low|medium|high]]";
@@ -19,8 +26,13 @@ const CODEX_USAGE_COMMAND_USAGE =
 export default async function codexUsageExtension(pi: ExtensionAPI): Promise<void> {
   let config = await loadCodexUsageConfig();
 
+  pi.on("session_start", (_event, ctx) => ensureFastProvider(pi, ctx.modelRegistry, () => config));
   pi.on("before_provider_request", (event, ctx) => {
     if (ctx.model?.provider !== "openai-codex") return undefined;
+    // Self-heal a missed session_start so the fast transport always exists
+    // before the first Codex request it would serve.
+    ensureFastProvider(pi, ctx.modelRegistry, () => config);
+    recordCodexHookCall();
     return applyCodexRequestOptions(event.payload, config);
   });
 
@@ -154,7 +166,7 @@ export default async function codexUsageExtension(pi: ExtensionAPI): Promise<voi
 
       try {
         ctx.ui.notify(
-          `${formatCodexUsage(await fetchCodexUsage(ctx))}\nFast mode: ${config.fast ? "on" : "off"}\nVerbosity: ${config.verbosity}`,
+          `${formatCodexUsage(await fetchCodexUsage(ctx))}\nFast mode: ${config.fast ? "on" : "off"}\nVerbosity: ${config.verbosity}\nTransport: ${FAST_TRANSPORT_REV}\nProvider: ${getFastProviderState()}\nLast fast request: ${formatLastFastResult()}\nCodex hook calls: ${formatCodexHookStats()}`,
           "info",
         );
       } catch (error) {

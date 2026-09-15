@@ -11,6 +11,8 @@ import {
   type CodexUsageSnapshot,
 } from "./usage.js";
 
+import { formatLastFastResult } from "./fast-transport";
+import { formatCodexHookStats, getFastProviderState } from "./provider-registration";
 interface UsageView {
   ensureLoaded(): void;
   handleInput(data: string): boolean;
@@ -135,6 +137,15 @@ function createUsageView(ctx: ExtensionContext, requestRender: () => void): Usag
     },
   };
 }
+function fastStatusLine(theme: Theme, safeWidth: number): string {
+  return truncateToWidth(
+    theme.fg(
+      "dim",
+      `  Fast: ${getFastProviderState()} · last request: ${formatLastFastResult()} · hook: ${formatCodexHookStats()}`,
+    ),
+    safeWidth,
+  );
+}
 
 export function formatUsageLines(
   theme: Theme,
@@ -164,6 +175,7 @@ export function formatUsageLines(
         theme.fg("dim", "  Press R to retry · S for settings · Esc to close"),
         safeWidth,
       ),
+      fastStatusLine(theme, safeWidth),
     ];
   }
 
@@ -212,6 +224,7 @@ export function formatUsageLines(
         ]
       : []),
     theme.fg("dim", "  Press R to refresh · Ctrl+R to use reset · S for settings · Esc to close"),
+    fastStatusLine(theme, safeWidth),
     "",
     formatUsageRow(
       headers.map((header) => theme.fg("dim", header)),

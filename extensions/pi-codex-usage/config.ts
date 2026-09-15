@@ -93,19 +93,17 @@ export async function saveCodexUsageConfig(
 /**
  * Apply the configured Codex request options to a Responses request payload.
  *
- * Fast mode maps to OpenAI's `priority` service tier, mirroring the option
- * pi-codex-conversion exposes. Verbosity is sent inside the `text` block.
+ * Only verbosity is applied here: the fast-mode `priority` service tier is
+ * owned solely by the fast transport wrapper, so an unregistered first
+ * request degrades to a normal stock request instead of a half-fast one.
+ * Verbosity is sent inside the `text` block.
  *
  * @param payload - The provider request payload.
  * @param config - The configured request options.
- * @returns The payload with fast mode and verbosity applied.
+ * @returns The payload with verbosity applied.
  */
 export function applyCodexRequestOptions(payload: unknown, config: CodexUsageConfig): unknown {
   if (!isRecord(payload)) return payload;
   const text = isRecord(payload.text) ? payload.text : {};
-  return {
-    ...payload,
-    ...(config.fast ? { service_tier: "priority" } : {}),
-    text: { ...text, verbosity: config.verbosity },
-  };
+  return { ...payload, text: { ...text, verbosity: config.verbosity } };
 }

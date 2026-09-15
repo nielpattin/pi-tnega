@@ -31,6 +31,7 @@ allowBuilds:
   onnxruntime-node: true
   sharp: true
   usearch: true
+  node-pty: true
 
 # Supply chain security
 minimumReleaseAge: 0
