@@ -231,3 +231,35 @@ test("reports local prompt and loop end times", () => {
       assert.ok(notifications[0].text.includes(`end ${new Date(2000).toLocaleTimeString()}`));
    });
 });
+
+test("includes the pre-message provider delay in the last message duration", () => {
+   withClock((setNow) => {
+      const harness = createHarness();
+      const { handlers, notifications, ctx } = harness;
+      const message = assistant(4);
+
+      setNow(1000);
+      handlers.get("agent_start")({ type: "agent_start" });
+      setNow(1100);
+      handlers.get("turn_start")({});
+      setNow(1900);
+      handlers.get("message_start")({ message });
+      setNow(2000);
+      handlers.get("message_update")({
+         message,
+         assistantMessageEvent: { type: "text_start", contentIndex: 0, partial: message }
+      }, ctx);
+      setNow(2100);
+      handlers.get("message_update")({
+         message,
+         assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "token", partial: message }
+      }, ctx);
+      setNow(2300);
+      handlers.get("message_end")({ message }, ctx);
+      setNow(2400);
+      handlers.get("agent_end")({ messages: [message] }, ctx);
+
+      assert.equal(notifications.length, 1);
+      assert.match(notifications[0].text, /last message 1\.2s/);
+   });
+});

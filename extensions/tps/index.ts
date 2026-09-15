@@ -52,9 +52,9 @@ export interface TurnTiming {
   updateCount: number;
   firstStreamUpdateMs: number | null;
   lastStreamUpdateMs: number;
-  /** Sum of assistant message_start to message_end spans across the loop. */
+  /** Sum of turn_start to message_end spans across the loop. */
   totalGenerationMs: number;
-  /** Duration of the most recently completed assistant message. */
+  /** Duration of the most recently completed assistant turn. */
   lastMessageMs: number | null;
   /** Accumulated gaps at or above STALL_THRESHOLD_MS between updates. */
   stallMs: number;
@@ -419,7 +419,7 @@ interface LoopState {
   timing: TurnTiming;
   promptTimeMs: number | null;
   tracker: LiveTokenTracker;
-  currentMessageStartMs: number | null;
+  currentMessageTimingStartMs: number | null;
   lastUpdateMs: number;
   inStall: boolean;
   isToolCall: boolean;
@@ -445,7 +445,7 @@ function createLoopState(startMs: number, ttftStartMs?: number): LoopState {
     },
     promptTimeMs: null,
     tracker: new LiveTokenTracker(),
-    currentMessageStartMs: null,
+    currentMessageTimingStartMs: null,
     lastUpdateMs: 0,
     inStall: false,
     isToolCall: false,
@@ -533,6 +533,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("turn_start", () => {
     if (!current) return;
+    if (current.currentMessageTimingStartMs === null) current.currentMessageTimingStartMs = nowMs();
     current.hasToolExecutionInTurn = false;
     current.toolBatchTerminates = true;
   });
@@ -560,7 +561,7 @@ export default function (pi: ExtensionAPI) {
     if (!current || !isAssistantRole(message)) return;
     current.tracker.resetMessageUsage();
     const time = nowMs();
-    current.currentMessageStartMs = time;
+    if (current.currentMessageTimingStartMs === null) current.currentMessageTimingStartMs = time;
     current.lastUpdateMs = time;
     current.inStall = false;
   });
@@ -621,11 +622,11 @@ export default function (pi: ExtensionAPI) {
     if (!current || !isAssistantMessage(event.message)) return;
 
     const time = nowMs();
-    if (current.currentMessageStartMs !== null) {
-      const messageMs = time - current.currentMessageStartMs;
+    if (current.currentMessageTimingStartMs !== null) {
+      const messageMs = time - current.currentMessageTimingStartMs;
       current.timing.totalGenerationMs += messageMs;
       current.timing.lastMessageMs = messageMs;
-      current.currentMessageStartMs = null;
+      current.currentMessageTimingStartMs = null;
     }
 
     current.timing.assistantMessages.push(event.message);
