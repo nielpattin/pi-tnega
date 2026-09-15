@@ -5,8 +5,7 @@
     "extensions/*.ts",
     "extensions/notification/**/*.ts",
     "extensions/tool-selector/**/*.ts",
-    "extensions/treepluss/**/*.ts",
-    "extensions/pi-subagent/**/*.ts"
+    "extensions/treepluss/**/*.ts"
   ],
   "exclude": ["node_modules"]
 }

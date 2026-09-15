@@ -11,7 +11,6 @@ export default defineConfig({
     "*yml",
     ".pi/**",
     "**/.pi/**",
-    "repos/**",
     "workflows/**",
     "**/rust-embedder/models/**",
     "**/rust-embedder/target/**",

@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-A private pnpm workspace of extensions for the [Pi coding agent](https://github.com/earendil-works/pi-coding-agent). The repository contains workspace packages, private extensions, and standalone TypeScript extensions. Selected packages are published independently to npm. The current publish workflow supports only `pi-reference`.
+A private pnpm workspace of extensions for the [Pi coding agent](https://github.com/earendil-works/pi-coding-agent). The repository contains workspace packages, private extensions, and standalone TypeScript extensions. Selected packages are published independently to npm.
 
 Most Pi extension entrypoints are raw TypeScript files loaded directly by Pi. `pi-ide-pro` also includes VS Code and Neovim companions, and `pi-cortex` can build an optional Rust sidecar.
 
@@ -37,7 +37,7 @@ pi -e ./extensions/<extension-name>.ts
 For a published package, follow its package README. For example:
 
 ```bash
-pi install npm:@nielpattin/pi-reference
+pi install npm:@nielpattin/pi-web-access
 ```
 
 ## Extension inventory
@@ -46,23 +46,17 @@ Package status below reflects the manifests in this checkout. A workspace packag
 
 | Extension                                                           | Purpose                                                                                 | Package status                                                                                                                                  |
 | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| [ask-user](./extensions/ask-user/README.md)                         | Structured multiple-choice questions for the user.                                      | Private package, no version                                                                                                                     |
-| [btw](./extensions/btw/README.md)                                   | Independent side chat with explicit handoff to the parent session.                      | `@nielpattin/btw` `0.1.0`                                                                                                                       |
 | [pi-handoff](./extensions/pi-handoff/README.md)                     | Extract useful context from the active session branch to a private handoff file.        | Private package, no version                                                                                                                     |
 | [notification](./extensions/notification/README.md)                 | Audio alerts when an agent turn completes.                                              | Local extension, no `package.json`                                                                                                              |
 | [tps](./extensions/tps/README.md)                                   | Live token speed, TTFT, and agent-loop usage metrics.                                   | Local extension, no `package.json`                                                                                                              |
 | [pi-acks](./extensions/pi-acks/README.md)                           | Named OpenAI Codex subscription OAuth account management.                               | Private package, `0.1.0`                                                                                                                        |
 | [pi-code-block-picker](./extensions/pi-code-block-picker/README.md) | Search and copy code blocks from session history.                                       | Local extension, no `package.json`                                                                                                              |
 | [pi-codex-usage](./extensions/pi-codex-usage/README.md)             | OpenAI Codex usage monitoring and response settings.                                    | Local extension, no `package.json`                                                                                                              |
-| [pi-compact-pro](./extensions/pi-compact-pro/README.md)             | Configurable compaction thresholds, summary models, and structured summaries.           | Local extension, no `package.json`                                                                                                              |
-| [pi-constellation](./extensions/pi-constellation/README.md)         | Deterministic compaction and incremental session inspection.                            | Private package, no version                                                                                                                     |
 | [pi-cortex](./extensions/pi-cortex/README.md)                       | Code search, AST analysis, call graphs, and agent memory.                               | Workspace package, `0.1.0`; optional Rust sidecar                                                                                               |
 | pi-ide-pro                                                          | VS Code and Neovim context, file autocomplete, and diagnostics for Pi.                  | Workspace package, `0.1.0`; [VS Code](./extensions/pi-ide-pro/vscode/README.md) and [Neovim](./extensions/pi-ide-pro/nvim/README.md) companions |
 | [pi-processes](./extensions/pi-processes/README.md)                 | Retained background process supervision and a process dashboard.                        | `@nielpattin/pi-processes` `0.1.0`                                                                                                              |
-| [pi-reference](./extensions/pi-reference/README.md)                 | Local and Git project references with `@alias` autocomplete.                            | `@nielpattin/pi-reference` `0.2.1`; publish workflow target                                                                                     |
 | [pi-skill-toggle](./extensions/pi-skill-toggle/README.md)           | Toggle automatic skill invocation between enabled and manual-only modes.                | Private package, `0.1.0`                                                                                                                        |
 | [pi-web-access](./extensions/pi-web-access/README.md)               | Multi-engine web search, deep research, site outline discovery, and content extraction. | `@nielpattin/pi-web-access` `0.1.0`                                                                                                             |
-| [pi-subagent](./extensions/pi-subagent/README.md)                   | Direct subagent delegation with profile-selected child Pi sessions in Herdr panes.      | `@nielpattin/pi-subagent` `0.1.0`                                                                                                               |
 | [tool-selector](./extensions/tool-selector/README.md)               | Inspect active and inactive tools in the current session.                               | Local extension, no `package.json`                                                                                                              |
 | [treepluss](./extensions/treepluss/README.md)                       | Enhanced conversation tree and TUI turn rendering.                                      | Local extension, no `package.json`                                                                                                              |
 
@@ -83,34 +77,29 @@ These files live directly under `extensions/` and do not have package manifests:
 
 Read each extension's documentation for complete commands and configuration. The main entrypoints include:
 
-- `pi-subagent`: `/wr`, `/wr.profile`, `agent_spawn`, `agent_list`, `agent_recover`, and `agent_cancel`
-- `pi-compact-pro`: `/compaction`
 - `pi-processes`: `/processes`
-- `pi-reference`: `/references`
 - `pi-acks`: `/accounts`
 - `pi-cortex`: `/cc-index`, `/cc-status`, `/cc-clean`, `/cc-ast`, `/cc-remember`, `/cc-recall`, and `/cc-forget`
 - `pi-web-access`: `/websearch`, `web_search`, `web_research`, `fetch_content`, and `outline_site`
-- `btw`: `/btw` and `/btw:inject`
 - Local utilities: `/handoff`, `/codeblocks`, `/codex-usage`, `/toggle-skills`, `/tools`, `/files`, `/stats`, and `/startup-time`
 
 ## Development
 
 Run commands from the repository root:
 
-| Command           | Purpose                                                                              |
-| ----------------- | ------------------------------------------------------------------------------------ |
-| `pnpm test`       | Run Node's test runner across all extension tests (`tests/*/**/*.mjs`).              |
-| `pnpm lint`       | Check files with `oxlint`.                                                           |
-| `pnpm lint:fix`   | Apply available `oxlint` fixes.                                                      |
-| `pnpm typecheck`  | Run TypeScript with the root config and every existing `extensions/*/tsconfig.json`. |
-| `pnpm fmt`        | Format files with `oxfmt`.                                                           |
-| `pnpm package`    | Build the `pi-ide-pro` VS Code VSIX at `extensions/pi-ide-pro/dist/pi-ide-pro.vsix`. |
-| `pnpm sync:repos` | Synchronize configured reference repositories.                                       |
+| Command          | Purpose                                                                              |
+| ---------------- | ------------------------------------------------------------------------------------ |
+| `pnpm test`      | Run Node's test runner across all extension tests (`tests/*/**/*.mjs`).              |
+| `pnpm lint`      | Check files with `oxlint`.                                                           |
+| `pnpm lint:fix`  | Apply available `oxlint` fixes.                                                      |
+| `pnpm typecheck` | Run TypeScript with the root config and every existing `extensions/*/tsconfig.json`. |
+| `pnpm fmt`       | Format files with `oxfmt`.                                                           |
+| `pnpm package`   | Build the `pi-ide-pro` VS Code VSIX at `extensions/pi-ide-pro/dist/pi-ide-pro.vsix`. |
 
 For a package-specific check:
 
 ```bash
-pnpm --dir extensions/pi-subagent check
+pnpm --dir extensions/pi-web-access check
 ```
 
 Build the optional `pi-cortex` sidecar with:
@@ -125,7 +114,7 @@ pnpm --dir extensions/pi-cortex build:rust
 agent-root/
 ├── extensions/                  # Pi extension directories and standalone .ts files
 │   └── pi-ide-pro/              # Pi extension plus VS Code and Neovim companions
-├── tests/                       # Node test files for extensions (pi-web-access, pi-subagent)
+├── tests/                       # Node test files for extensions
 ├── scripts/                     # release, repository sync, and typecheck scripts
 ├── .github/workflows/           # manual npm publishing workflow
 ├── .githooks/                   # versioned Git hooks
@@ -138,7 +127,7 @@ The workspace configuration also includes `packages/*`, although the current ext
 
 ## Publishing
 
-Publishing is manual, tag based, and limited by `.github/workflows/publish.yml` to `pi-reference`. The workflow:
+Publishing is manual, tag based, and driven by `.github/workflows/publish.yml`. The workflow:
 
 1. Checks out the requested tag.
 2. Verifies that the tag matches the package name and version.
@@ -150,8 +139,8 @@ Trigger the workflow directly with GitHub CLI:
 
 ```bash
 gh workflow run publish.yml \
-  -f package=pi-reference \
-  -f tag='@nielpattin/pi-reference@0.2.1'
+  -f package=pi-web-access \
+  -f tag='@nielpattin/pi-web-access@0.1.0'
 ```
 
 The `publish.sh` helper searches extension manifests under `extensions/`, matching the workflow.

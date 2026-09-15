@@ -1,9 +1,5 @@
 # Repository Instructions
 
-## Context and Architecture
-
-- **Read `CONTEXT.md` first:** Before working on non-trivial features, refactors, or architectural changes, read [`CONTEXT.md`](./CONTEXT.md) for domain models, system architecture, and key design constraints.
-
 ## Repository layout and commands
 
 - This repository is a single pnpm monorepo.
@@ -19,7 +15,7 @@
     Examples:
 
     ```text
-    pnpm --dir extensions/pi-subagent check
+    pnpm --dir extensions/pi-web-access check
     ```
 
 - Run lint for a single extension from the repository root with:
@@ -34,21 +30,6 @@
     pnpm lint extensions/pi-acks
     ```
 
-## Effect code
-
-When writing Effect code:
-
-1. Read [`repos/effect/LLMS.md`](./repos/effect/LLMS.md). Treat it as the source of truth for idiomatic Effect usage, tests, module structure, and API design.
-2. Read [`docs/effect-v4-cheatsheet.md`](./docs/effect-v4-cheatsheet.md) for a quick reference to this project's Effect v4 patterns and idioms.
-
-## Vendored repositories
-
-External repositories are vendored under `repos/` as read-only reference material.
-
-- Prefer examples and patterns from vendored source code over generated guesses or web search results.
-- Do not edit files under `repos/` unless the user explicitly asks.
-- Do not import application code from `repos/`. Continue importing from normal package dependencies.
-
 ## Contributor workflow
 
 The contributor monorepo workflow for creating and publishing packages lives in [`DEVELOPMENT.md`](./DEVELOPMENT.md).
@@ -60,7 +41,7 @@ The contributor monorepo workflow for creating and publishing packages lives in 
 
 - Multi-file extensions live in `extensions/<extension-name>/` with their entry point at `extensions/<extension-name>/index.ts`.
 - Single-file extensions live directly at `extensions/<extension-name>.ts`.
-- Each extension owns its tests in an independent directory under `tests/<extension-name>/` (for example, `tests/pi-subagent/agent-tools-behavior.mjs`). Never place loose test files directly in the root of `tests/`.
+- Each extension owns its tests in an independent directory under `tests/<extension-name>/` (for example, `tests/pi-web-access/ssrf-protection.mjs`). Never place loose test files directly in the root of `tests/`.
 
 ## Testing conventions
 

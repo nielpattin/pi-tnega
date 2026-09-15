@@ -10,7 +10,7 @@ Usage:
   ./publish.sh <package> --tag <tag>
 
 Example:
-  ./publish.sh pi-reference --tag '@nielpattin/pi-reference@0.2.1'
+  ./publish.sh <extension-dir> --tag '@scope/pkg@0.1.0'
 USAGE
 }
 

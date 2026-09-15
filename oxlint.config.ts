@@ -41,7 +41,6 @@ export default defineConfig({
   env: { builtin: true },
   ignorePatterns: [
     "**/node_modules/**",
-    "repos/**",
     "tests/**",
     "examples/**",
     "scripts/**",
