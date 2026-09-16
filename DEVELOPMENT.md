@@ -27,10 +27,9 @@ agent-root/
 ├── .githooks/
 │   └── pre-commit                # pnpm lint-staged
 ├── .nvmrc                        # Node 24
-├── openspec/                     # change proposals and specs
 ├── extensions/
-│   ├── pi-processes              # standalone process supervision
-│   └── shared                    # shared extension helpers
+│   ├── pi-raft                  # bundled extension (build produces dist/)
+│   └── pi-processes              # standalone process supervision
 ├── scripts/
 │   ├── release.mjs               # legacy per-package release orchestrator
 │   └── typecheck.mjs             # project-wide type check
@@ -63,13 +62,13 @@ The pre-commit hook lives in versioned `.githooks/pre-commit` and runs `pnpm lin
 
 Run checks from root:
 
-| Command          | Purpose                                            |
-| ---------------- | -------------------------------------------------- |
-| `pnpm test`      | Run native test runner across all extension tests  |
-| `pnpm typecheck` | Run TypeScript 7 type check across project configs |
-| `pnpm lint`      | Run `oxlint` across all files                      |
-| `pnpm lint:fix`  | Auto-fix linting issues                            |
-| `pnpm fmt`       | Format files using `oxfmt`                         |
+| Command           | Purpose                                            |
+| ----------------- | -------------------------------------------------- |
+| `pnpm test`       | Run native test runner across all extension tests  |
+| `pnpm typecheck`  | Run TypeScript 7 type check across project configs |
+| `pnpm lint`       | Run `oxlint` across all files                      |
+| `pnpm lint --fix` | Auto-fix linting issues                            |
+| `pnpm fmt`        | Format files using `oxfmt`                         |
 
 ### Package-Specific Commands
 
@@ -84,7 +83,7 @@ pnpm --dir extensions/pi-processes check
 
 ## 4. Creating a New Package
 
-1. **Create Directory**: `packages/pi-<name>/`
+1. **Create Directory**: `extensions/pi-<name>/`
 2. **Add `package.json`**:
     ```json
     {
@@ -111,6 +110,7 @@ pnpm --dir extensions/pi-processes check
 - **Raw TypeScript Extensions** (`pi-processes`, `pi-acks`, `pi-web-access`, and others):
     - Published directly as raw TypeScript source files (`.ts`).
     - Loaded by Pi harness at runtime via `jiti`. No `dist/` build step is required.
+- **Built extensions** (`pi-raft`): run `pnpm --dir extensions/pi-raft build` before loading it locally; Pi loads the compiled `dist/index.js`.
 - Ensure changes pass the applicable root checks (`pnpm lint`, `pnpm typecheck`, and `pnpm fmt`).
 
 ---

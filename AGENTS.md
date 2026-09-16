@@ -39,20 +39,28 @@ The contributor monorepo workflow for creating and publishing packages lives in 
 
 ## Extension conventions
 
-- Multi-file extensions live in `extensions/<extension-name>/` with their entry point at `extensions/<extension-name>/index.ts`.
+- Multi-file extensions live in `extensions/<extension-name>/` with their entry point at `extensions/<extension-name>/index.ts`. `pi-raft` builds to `dist/index.js`, so run its build before loading that package locally.
 - Single-file extensions live directly at `extensions/<extension-name>.ts`.
-- Each extension owns its tests in an independent directory under `tests/<extension-name>/` (for example, `tests/pi-web-access/ssrf-protection.mjs`). Never place loose test files directly in the root of `tests/`.
+- Node-runner tests live under `tests/<extension-name>/` (for example, `tests/pi-web-access/research.mjs`). Never place loose test files directly in the root of `tests/`. `pi-raft` and `pi-fast-resume` keep their vitest suites beside their code in `extensions/<extension-name>/tests/`.
+
+## Nested package instructions
+
+When working on files inside one extension (`extensions/<extension-name>/`) or
+package (`packages/<package-name>/`), first read that directory's own `AGENTS.md`
+when it exists (for example, `extensions/pi-raft/AGENTS.md`) and follow it
+alongside this instruction. The inner instruction file wins on package-specific commands, test
+setup, and verification order.
 
 ## Testing conventions
 
-- Tests are tracked in version control and run with Node's built-in test runner. Run all tests with `pnpm test`, or scope to an extension with `node --test tests/<extension-name>/**/*.mjs`.
+- Tests are tracked in version control. `pnpm test` runs the suites under `tests/` with Node's built-in test runner, and a single extension can be scoped with `node --test tests/<extension-name>/**/*.mjs`. `pi-raft` and `pi-fast-resume` run their vitest suites with `pnpm --dir extensions/<extension-name> test`.
 - Import extension modules in test files using `loadExtension` from `tests/_bootstrap.mjs`.
 
 ## Verification workflow
 
 Follow this order for code changes:
 
-1. Run tests: `pnpm test` (or scoped extension tests: `node --test tests/<extension-name>/**/*.mjs`).
+1. Run tests: `pnpm test` (or scoped extension tests: `node --test tests/<extension-name>/**/*.mjs`; `pi-raft`: `pnpm --dir extensions/pi-raft test`).
 2. Run `pnpm lint`.
 3. Run `pnpm typecheck`.
 4. Run `pnpm fmt`.
