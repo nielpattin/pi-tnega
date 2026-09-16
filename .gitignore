@@ -185,7 +185,7 @@ models-store.json
 agents.json
 *.workspace
 
-agents/
+/agents/
 .pi
 **/target/
 
@@ -197,5 +197,5 @@ agents/
 !package.json
 
 pnpm-lock.yaml
-*fabric/
+/raft/
 fff/

@@ -5,8 +5,8 @@
       "test": "node --test \"tests/*/**/*.mjs\"",
       "typecheck": "node scripts/typecheck.mjs",
       "package": "pnpm --dir extensions/pi-ide-pro/vscode package",
-      "lint": "oxlint -c oxlint.config.ts --no-error-on-unmatched-pattern . extensions/pi-fabric/src",
-      "fmt": "oxfmt -c oxfmt.config.ts --no-error-on-unmatched-pattern . extensions/pi-fabric/src",
+      "lint": "oxlint -c oxlint.config.ts .",
+      "fmt": "oxfmt -c oxfmt.config.ts .",
       "prepare": "git config core.hooksPath .githooks"
    },
    "dependencies": {
