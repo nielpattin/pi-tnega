@@ -1,0 +1,691 @@
+import { randomUUID } from "node:crypto";
+import { headlineArg } from "../core/call-preview.js";
+import { stringifyUnknown } from "../util.js";
+import type { RaftInvocationActivityUpdate } from "../protocol.js";
+import type {
+  RaftActivityCall,
+  RaftActivityEventInput,
+  RaftActivityItem,
+  RaftActivityItemInput,
+  RaftActivityKind,
+  RaftActivityMetrics,
+  RaftActivityPhase,
+  RaftActivityRun,
+  RaftActivityStatus,
+  RaftPhaseInput,
+  RaftRunDisplay,
+} from "./types.js";
+
+const MAX_RUNS = 24;
+const MAX_CALLS = 1_000;
+const MAX_ITEMS = 1_000;
+const MAX_EVENTS = 200;
+const MAX_NAME_CHARS = 120;
+const MAX_DESCRIPTION_CHARS = 500;
+const MAX_DETAIL_CHARS = 1_000;
+const MAX_DATA_CHARS = 8_000;
+const MAX_CALL_PAYLOAD_CHARS = 64_000;
+const MAX_CALL_SUMMARY_CHARS = 120;
+
+const terminalStatuses = new Set<RaftActivityStatus>(["completed", "failed", "stopped"]);
+
+const cleanText = (value: unknown, maxChars: number): string | undefined => {
+  if (typeof value !== "string") return undefined;
+  const text = value.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, " ").trim();
+  if (!text) return undefined;
+  return text.slice(0, maxChars);
+};
+
+const cleanId = (value: unknown, fallback: string): string => {
+  const text = cleanText(value, 160);
+  if (!text) return fallback;
+  const safe = text.replace(/[^a-zA-Z0-9._:-]+/g, "-").replace(/^-+|-+$/g, "");
+  return safe || fallback;
+};
+
+const boundedData = (value: unknown, maxChars = MAX_DATA_CHARS): unknown => {
+  if (value === undefined) return undefined;
+  try {
+    const serialized = JSON.stringify(value, (_key, nested) =>
+      typeof nested === "bigint" ? String(nested) : nested,
+    );
+    if (serialized === undefined) return undefined;
+    if (serialized.length <= maxChars) return JSON.parse(serialized) as unknown;
+    return {
+      raftTruncated: true,
+      originalChars: serialized.length,
+      preview: serialized.slice(0, Math.max(1, maxChars - 100)),
+    };
+  } catch {
+    return cleanText(stringifyUnknown(value), maxChars);
+  }
+};
+
+const kindForRef = (ref: string): RaftActivityKind => {
+  if (ref.startsWith("agents.")) return "agent";
+  if (ref.startsWith("mcp.")) return "mcp";
+  if (ref.startsWith("extensions.")) return "extension";
+  return "tool";
+};
+
+const summarizeCallResult = (result: unknown): string | undefined => {
+  let text: string | undefined;
+  if (typeof result === "string") text = result;
+  else if (result !== null && typeof result === "object" && !Array.isArray(result)) {
+    const record = result as Record<string, unknown>;
+    if (typeof record.output === "string") text = record.output;
+    else if (typeof record.content === "string") text = record.content;
+    else if (typeof record.text === "string") text = record.text;
+  }
+  if (!text) return undefined;
+  return cleanText(text.replace(/\s+/g, " "), MAX_CALL_SUMMARY_CHARS);
+};
+
+const labelForCall = (ref: string, args: Record<string, unknown>): string => {
+  const explicit =
+    cleanText(args.label, MAX_NAME_CHARS) ??
+    cleanText(args.name, MAX_NAME_CHARS) ??
+    cleanText(args.title, MAX_NAME_CHARS);
+  if (explicit) return explicit;
+
+  const target = headlineArg(args, MAX_NAME_CHARS);
+  return target ? `${ref} · ${target}` : ref;
+};
+
+const metricsFrom = (value: unknown): RaftActivityMetrics | undefined => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const usage =
+    typeof record.usage === "object" && record.usage !== null && !Array.isArray(record.usage)
+      ? (record.usage as Record<string, unknown>)
+      : undefined;
+  const input = typeof usage?.input === "number" ? usage.input : 0;
+  const output = typeof usage?.output === "number" ? usage.output : 0;
+  const tokens = input + output;
+  const toolCalls = typeof record.toolCalls === "number" ? record.toolCalls : undefined;
+  const cost = typeof usage?.cost === "number" ? usage.cost : undefined;
+  if (tokens <= 0 && toolCalls === undefined && cost === undefined) return undefined;
+  return {
+    ...(tokens > 0 ? { tokens } : {}),
+    ...(toolCalls !== undefined ? { toolCalls } : {}),
+    ...(cost !== undefined ? { cost } : {}),
+  };
+};
+
+const isFailedResult = (value: unknown): boolean => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const status = (value as Record<string, unknown>).status;
+  return status === "failed" || status === "stopped" || status === "timed_out";
+};
+
+// Store payloads are bounded JSON values. Freeze copies, never provider objects.
+const freezeProjection = (value: unknown): void => {
+  const pending = [value];
+  while (pending.length) {
+    const current = pending.pop();
+    if (current === null || typeof current !== "object" || Object.isFrozen(current)) continue;
+    Object.freeze(current);
+    for (const child of Object.values(current)) pending.push(child);
+  }
+};
+
+const createRowProjection = (detailed: boolean, revisions: WeakMap<object, number>) => {
+  const cache = new WeakMap<
+    object,
+    { source: Record<string, unknown>; value: Record<string, unknown>; revision: number }
+  >();
+  return <T extends object>(row: T): T => {
+    const revision = revisions.get(row) ?? 0;
+    const previous = cache.get(row);
+    if (previous?.revision === revision) return previous.value as T;
+    const source = { ...row } as Record<string, unknown>;
+    if (!detailed) {
+      delete source.args;
+      delete source.result;
+      delete source.preview;
+      delete source.data;
+    }
+    const keys = Object.keys(source);
+    if (
+      previous &&
+      keys.length === Object.keys(previous.source).length &&
+      keys.every(
+        (key) =>
+          Object.hasOwn(previous.source, key) && Object.is(source[key], previous.source[key]),
+      )
+    ) {
+      previous.revision = revision;
+      return previous.value as T;
+    }
+    const value: Record<string, unknown> = {};
+    for (const key of keys) {
+      value[key] =
+        previous &&
+        Object.hasOwn(previous.source, key) &&
+        Object.is(source[key], previous.source[key])
+          ? previous.value[key]
+          : structuredClone(source[key]);
+      freezeProjection(value[key]);
+    }
+    Object.freeze(value);
+    cache.set(row, { source, value, revision });
+    return value as T;
+  };
+};
+
+export class RaftActivityStore {
+  readonly #runs = new Map<string, RaftActivityRun>();
+  readonly #callIndex = new Map<string, Map<string, RaftActivityCall>>();
+  readonly #listeners = new Set<() => void>();
+  #revision = 0;
+  readonly #runRevisions = new WeakMap<RaftActivityRun, number>();
+  readonly #rowRevisions = new WeakMap<object, number>();
+
+  revision(): number {
+    return this.#revision;
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
+  reset(): void {
+    if (this.#runs.size === 0) return;
+    this.#runs.clear();
+    this.#callIndex.clear();
+    this.#emit();
+  }
+
+  start(id: string, display: RaftRunDisplay = {}, nameHint?: string): RaftActivityRun {
+    const now = Date.now();
+    const name =
+      cleanText(display.name, MAX_NAME_CHARS) ??
+      cleanText(nameHint, MAX_NAME_CHARS) ??
+      "Raft program";
+    const description = cleanText(display.description, MAX_DESCRIPTION_CHARS);
+    const run: RaftActivityRun = {
+      id,
+      name,
+      status: "running",
+      phases: [],
+      calls: [],
+      items: [],
+      events: [],
+      startedAt: now,
+      updatedAt: now,
+      ...(description ? { description } : {}),
+    };
+    this.#runs.delete(id);
+    this.#runs.set(id, run);
+    this.#callIndex.set(id, new Map());
+    this.#prune();
+    this.#emit(run);
+    return structuredClone(run);
+  }
+
+  resume(runId: string): void {
+    const run = this.#require(runId);
+    run.status = "running";
+    run.updatedAt = Date.now();
+    delete run.finishedAt;
+    delete run.error;
+    this.#emit(run);
+  }
+
+  configure(runId: string, display: RaftRunDisplay): RaftActivityRun {
+    const run = this.#require(runId);
+    const name = cleanText(display.name, MAX_NAME_CHARS);
+    const description = cleanText(display.description, MAX_DESCRIPTION_CHARS);
+    if (name) run.name = name;
+    if (description) run.description = description;
+    run.updatedAt = Date.now();
+    this.#emit(run);
+    return structuredClone(run);
+  }
+
+  phase(runId: string, input: RaftPhaseInput): RaftActivityPhase {
+    const run = this.#require(runId);
+    const name = cleanText(input.name, MAX_NAME_CHARS);
+    if (!name) throw new Error("Workflow phase name must not be empty");
+    const requestedId = cleanId(
+      input.id,
+      cleanId(name.toLowerCase(), `phase-${run.phases.length + 1}`),
+    );
+    let phase = run.phases.find(
+      (candidate) => candidate.id === requestedId || (!input.id && candidate.name === name),
+    );
+    const now = Date.now();
+
+    if (run.currentPhaseId && run.currentPhaseId !== phase?.id) {
+      const previous = run.phases.find((candidate) => candidate.id === run.currentPhaseId);
+      if (previous?.status === "running") {
+        previous.status = "completed";
+        previous.updatedAt = now;
+        previous.finishedAt = now;
+      }
+    }
+
+    if (!phase) {
+      let id = requestedId;
+      let suffix = 2;
+      while (run.phases.some((candidate) => candidate.id === id)) id = `${requestedId}-${suffix++}`;
+      const description = cleanText(input.description, MAX_DESCRIPTION_CHARS);
+      const total =
+        typeof input.total === "number" && Number.isFinite(input.total)
+          ? Math.max(0, Math.floor(input.total))
+          : undefined;
+      phase = {
+        id,
+        name,
+        status: "running",
+        startedAt: now,
+        updatedAt: now,
+        ...(description ? { description } : {}),
+        ...(total !== undefined ? { total } : {}),
+      };
+      run.phases.push(phase);
+    } else {
+      phase.name = name;
+      phase.status = "running";
+      phase.updatedAt = now;
+      delete phase.finishedAt;
+      const description = cleanText(input.description, MAX_DESCRIPTION_CHARS);
+      if (description) phase.description = description;
+      if (typeof input.total === "number" && Number.isFinite(input.total)) {
+        phase.total = Math.max(0, Math.floor(input.total));
+      }
+    }
+
+    run.currentPhaseId = phase.id;
+    run.updatedAt = now;
+    if (run.name === "Raft program" && run.phases.length === 1) run.name = name;
+    this.#emit(run, run.phases);
+    return structuredClone(phase);
+  }
+
+  upsertItem(runId: string, input: RaftActivityItemInput): RaftActivityItem {
+    const run = this.#require(runId);
+    const id = cleanId(input.id, `item-${run.items.length + 1}`);
+    const label = cleanText(input.label, MAX_NAME_CHARS);
+    if (!label) throw new Error("Workflow activity item label must not be empty");
+    const now = Date.now();
+    const status = input.status ?? "running";
+    let item = run.items.find((candidate) => candidate.id === id);
+    const phaseId =
+      input.phase !== undefined
+        ? this.#resolvePhaseId(run, input.phase)
+        : (item?.phaseId ?? run.currentPhaseId);
+    const detail = cleanText(input.detail, MAX_DETAIL_CHARS);
+    const current = cleanText(input.current, MAX_DETAIL_CHARS);
+    const total =
+      typeof input.total === "number" && Number.isFinite(input.total)
+        ? Math.max(0, Math.floor(input.total))
+        : undefined;
+    const completed =
+      typeof input.completed === "number" && Number.isFinite(input.completed)
+        ? Math.max(0, Math.floor(input.completed))
+        : undefined;
+    const data = boundedData(input.data);
+
+    if (!item) {
+      if (run.items.length >= MAX_ITEMS) run.items.splice(0, run.items.length - MAX_ITEMS + 1);
+      item = {
+        id,
+        label,
+        status,
+        kind: input.kind ?? "custom",
+        createdAt: now,
+        updatedAt: now,
+        ...(phaseId ? { phaseId } : {}),
+        ...(detail ? { detail } : {}),
+        ...(current ? { current } : {}),
+        ...(total !== undefined ? { total } : {}),
+        ...(completed !== undefined ? { completed } : {}),
+        ...(data !== undefined ? { data } : {}),
+        ...(terminalStatuses.has(status) ? { finishedAt: now } : {}),
+      };
+      run.items.push(item);
+    } else {
+      item.label = label;
+      item.status = status;
+      item.kind = input.kind ?? item.kind;
+      item.updatedAt = now;
+      if (phaseId) item.phaseId = phaseId;
+      if (detail) item.detail = detail;
+      if (current) item.current = current;
+      if (total !== undefined) item.total = total;
+      if (completed !== undefined) item.completed = completed;
+      if (data !== undefined) item.data = data;
+      if (terminalStatuses.has(status)) item.finishedAt = now;
+      else delete item.finishedAt;
+    }
+
+    run.updatedAt = now;
+    this.#emit(run, item);
+    return structuredClone(item);
+  }
+
+  event(runId: string, input: RaftActivityEventInput): void {
+    const run = this.#require(runId);
+    const message = cleanText(input.message, MAX_DETAIL_CHARS);
+    if (!message) throw new Error("Workflow activity event message must not be empty");
+    const data = boundedData(input.data);
+    run.events.push({
+      id: randomUUID(),
+      message,
+      level: input.level ?? "info",
+      createdAt: Date.now(),
+      ...(data !== undefined ? { data } : {}),
+    });
+    if (run.events.length > MAX_EVENTS) run.events.splice(0, run.events.length - MAX_EVENTS);
+    run.updatedAt = Date.now();
+    this.#emit(run, run.events.at(-1));
+  }
+
+  // Streaming providers may report lifecycle events after session teardown resets
+  // the store. Call tracking is best-effort, so stale events must be ignored.
+  beginCall(
+    runId: string,
+    input: { callId: string; ref: string; args: Record<string, unknown> },
+  ): void {
+    const run = this.#runs.get(runId);
+    if (!run) return;
+    const now = Date.now();
+    const index = this.#callIndex.get(runId) ?? new Map<string, RaftActivityCall>();
+    this.#callIndex.set(runId, index);
+    const existing = index.get(input.callId);
+    if (existing) {
+      existing.ref = input.ref;
+      existing.label = labelForCall(input.ref, input.args);
+      existing.kind = kindForRef(input.ref);
+      existing.status = "running";
+      existing.args = boundedData(input.args, MAX_CALL_PAYLOAD_CHARS) as Record<string, unknown>;
+      existing.updatedAt = now;
+      delete existing.finishedAt;
+      delete existing.result;
+      delete existing.error;
+      delete existing.detail;
+      delete existing.progress;
+      run.updatedAt = now;
+      this.#emit(run, existing);
+      return;
+    }
+    if (run.calls.length >= MAX_CALLS) {
+      const removed = run.calls.splice(0, run.calls.length - MAX_CALLS + 1);
+      for (const call of removed) index.delete(call.id);
+    }
+    const call: RaftActivityCall = {
+      id: input.callId,
+      ref: input.ref,
+      label: labelForCall(input.ref, input.args),
+      kind: kindForRef(input.ref),
+      status: "running",
+      args: boundedData(input.args, MAX_CALL_PAYLOAD_CHARS) as Record<string, unknown>,
+      ...(run.currentPhaseId ? { phaseId: run.currentPhaseId } : {}),
+      startedAt: now,
+      updatedAt: now,
+    };
+    run.calls.push(call);
+    index.set(call.id, call);
+    run.updatedAt = now;
+    this.#emit(run, call);
+  }
+
+  updateCallArgs(runId: string, callId: string, args: Record<string, unknown>): void {
+    const run = this.#runs.get(runId);
+    if (!run) return;
+    const call = this.#callIndex.get(runId)?.get(callId);
+    if (!call) return;
+    call.args = boundedData(args, MAX_CALL_PAYLOAD_CHARS) as Record<string, unknown>;
+    call.label = labelForCall(call.ref, args);
+    call.updatedAt = Date.now();
+    run.updatedAt = call.updatedAt;
+    this.#emit(run, call);
+  }
+
+  updateCall(runId: string, callId: string, update: RaftInvocationActivityUpdate): void {
+    const run = this.#runs.get(runId);
+    if (!run) return;
+    const call = this.#callIndex.get(runId)?.get(callId);
+    if (!call) return;
+    const before = {
+      progress: call.progress,
+      entityId: call.entityId,
+      entityKind: call.entityKind,
+      label: call.label,
+      metrics: call.metrics,
+    };
+    const now = Date.now();
+    if (update.type === "progress") {
+      const message = cleanText(update.message, MAX_DETAIL_CHARS);
+      if (message) call.progress = message;
+    } else if (update.type === "entity") {
+      call.entityId = cleanId(update.id, update.id);
+      call.entityKind = update.kind;
+      const name = cleanText(update.name, MAX_NAME_CHARS);
+      if (name) call.label = name;
+    } else if (update.type === "metrics") {
+      call.metrics = {
+        ...call.metrics,
+        ...(typeof update.tokens === "number" ? { tokens: Math.max(0, update.tokens) } : {}),
+        ...(typeof update.toolCalls === "number"
+          ? { toolCalls: Math.max(0, update.toolCalls) }
+          : {}),
+        ...(typeof update.cost === "number" ? { cost: Math.max(0, update.cost) } : {}),
+      };
+    }
+    if (
+      before.progress === call.progress &&
+      before.entityId === call.entityId &&
+      before.entityKind === call.entityKind &&
+      before.label === call.label &&
+      Object.is(before.metrics?.tokens, call.metrics?.tokens) &&
+      Object.is(before.metrics?.toolCalls, call.metrics?.toolCalls) &&
+      Object.is(before.metrics?.cost, call.metrics?.cost)
+    ) {
+      if (before.metrics) call.metrics = before.metrics;
+      else delete call.metrics;
+      return;
+    }
+    call.updatedAt = now;
+    run.updatedAt = now;
+    this.#emit(run, call);
+  }
+
+  finishCall(
+    runId: string,
+    callId: string,
+    input: { success: boolean; result?: unknown; preview?: unknown; error?: string },
+  ): void {
+    const run = this.#runs.get(runId);
+    if (!run) return;
+    const call = this.#callIndex.get(runId)?.get(callId);
+    if (!call) return;
+    const now = Date.now();
+    const resultFailed = isFailedResult(input.result);
+    call.status = input.success && !resultFailed ? "completed" : "failed";
+    call.updatedAt = now;
+    call.finishedAt = now;
+    const error = cleanText(input.error, MAX_DETAIL_CHARS);
+    if (error) call.error = error;
+    if (input.result !== undefined) {
+      call.result = boundedData(input.result, MAX_CALL_PAYLOAD_CHARS);
+    }
+    if (input.preview !== undefined) {
+      call.preview = boundedData(input.preview, MAX_CALL_PAYLOAD_CHARS);
+    }
+    const metrics = metricsFrom(input.result);
+    if (metrics) call.metrics = { ...call.metrics, ...metrics };
+    if (call.status === "completed") {
+      const detail = summarizeCallResult(input.result);
+      if (detail) call.detail = detail;
+    }
+    if (typeof input.result === "object" && input.result !== null && !Array.isArray(input.result)) {
+      const record = input.result as Record<string, unknown>;
+      if (typeof record.id === "string") call.entityId = cleanId(record.id, record.id);
+      if (call.kind === "agent") call.entityKind = "agent";
+      if (!error && typeof record.error === "string") {
+        const resultError = cleanText(record.error, MAX_DETAIL_CHARS);
+        if (resultError) call.error = resultError;
+      }
+    }
+    run.updatedAt = now;
+    this.#emit(run, call);
+  }
+
+  finish(runId: string, success: boolean, error?: string): void {
+    const run = this.#runs.get(runId);
+    if (!run || run.status !== "running") return;
+    const now = Date.now();
+    const cancelled = Boolean(error && /cancel(?:led|ed)/i.test(error));
+    run.status = success ? "completed" : cancelled ? "cancelled" : "failed";
+    run.updatedAt = now;
+    run.finishedAt = now;
+    const cleanError = cleanText(error, MAX_DETAIL_CHARS);
+    if (cleanError) run.error = cleanError;
+
+    for (const phase of run.phases) {
+      if (phase.status !== "running") continue;
+      phase.status = success ? "completed" : "failed";
+      phase.updatedAt = now;
+      phase.finishedAt = now;
+    }
+    for (const call of run.calls) {
+      if (call.status !== "running") continue;
+      call.status = success ? "completed" : "failed";
+      call.updatedAt = now;
+      call.finishedAt = now;
+    }
+    for (const item of run.items) {
+      if (item.status !== "running") continue;
+      item.status = success ? "completed" : "failed";
+      item.updatedAt = now;
+      item.finishedAt = now;
+    }
+    this.#emit(run, [...run.phases, ...run.calls, ...run.items]);
+  }
+
+  // Reader-local, weakly keyed projections never own execution state. Switching
+  // detail mode drops the previous cache rather than retaining both payload tiers.
+  createRunView(): (detailed?: boolean) => RaftActivityRun[] {
+    let detailed = false;
+    let revision = -1;
+    let ordered: RaftActivityRun[] = [];
+    let runs = new WeakMap<RaftActivityRun, { revision: number; value: RaftActivityRun }>();
+    let rows = createRowProjection(false, this.#rowRevisions);
+    return (nextDetailed = false) => {
+      if (detailed !== nextDetailed) {
+        detailed = nextDetailed;
+        runs = new WeakMap();
+        rows = createRowProjection(detailed, this.#rowRevisions);
+        revision = -1;
+      }
+      if (revision !== this.#revision) {
+        ordered = this.#orderedRuns().map((run) => {
+          const runRevision = this.#runRevisions.get(run) ?? 0;
+          const cached = runs.get(run);
+          if (cached?.revision === runRevision) return cached.value;
+          const value: RaftActivityRun = {
+            ...run,
+            phases: Object.freeze(run.phases.map(rows)) as RaftActivityPhase[],
+            calls: Object.freeze(run.calls.map(rows)) as RaftActivityCall[],
+            items: Object.freeze(run.items.map(rows)) as RaftActivityItem[],
+            events: Object.freeze(run.events.map(rows)) as RaftActivityRun["events"],
+          };
+          Object.freeze(value);
+          runs.set(run, { revision: runRevision, value });
+          return value;
+        });
+        revision = this.#revision;
+      }
+      // The outer list remains independently sortable; its contents are read-only.
+      return ordered.slice();
+    };
+  }
+
+  runs(): RaftActivityRun[] {
+    return this.#orderedRuns().map((run) => structuredClone(run));
+  }
+
+  // Ordered, isolated copies with per-call payloads (args/result/preview, item
+  // and event data) stripped. The UI refreshes at up to 10 Hz while a run
+  // streams; copying 1,000 calls with bounded-but-large payloads every tick
+  // stalls input. The dashboard's detail views still use runs().
+  runSummaries(): RaftActivityRun[] {
+    return this.#orderedRuns().map(leanRun);
+  }
+
+  get(id: string): RaftActivityRun | undefined {
+    const run = this.#runs.get(id);
+    return run ? structuredClone(run) : undefined;
+  }
+
+  #resolvePhaseId(run: RaftActivityRun, phase: string | undefined): string | undefined {
+    if (!phase) return run.currentPhaseId;
+    return run.phases.find((candidate) => candidate.id === phase || candidate.name === phase)?.id;
+  }
+
+  #require(id: string): RaftActivityRun {
+    const run = this.#runs.get(id);
+    if (!run) throw new Error(`Unknown Raft activity run: ${id}`);
+    return run;
+  }
+
+  #orderedRuns(): RaftActivityRun[] {
+    return [...this.#runs.values()].sort((left, right) => {
+      if (left.status === "running" && right.status !== "running") return -1;
+      if (right.status === "running" && left.status !== "running") return 1;
+      return right.updatedAt - left.updatedAt;
+    });
+  }
+
+  #prune(): void {
+    if (this.#runs.size <= MAX_RUNS) return;
+    const removable = [...this.#runs.values()]
+      .filter((run) => run.status !== "running")
+      .sort((left, right) => left.updatedAt - right.updatedAt);
+    while (this.#runs.size > MAX_RUNS && removable.length > 0) {
+      const run = removable.shift();
+      if (!run) break;
+      this.#runs.delete(run.id);
+      this.#callIndex.delete(run.id);
+    }
+  }
+
+  #emit(run?: RaftActivityRun, changed?: object): void {
+    this.#revision++;
+    if (run) this.#runRevisions.set(run, this.#revision);
+    if (Array.isArray(changed)) {
+      for (const row of changed) this.#rowRevisions.set(row, this.#revision);
+    } else if (changed) this.#rowRevisions.set(changed, this.#revision);
+    for (const listener of this.#listeners) {
+      try {
+        listener();
+      } catch {
+        /* a listener throwing must not break the others */
+      }
+    }
+  }
+}
+
+// Payload-free copy: every remaining field is a scalar except metrics, which
+// is shallow-copied so callers can never mutate store state through it.
+const leanRun = (run: RaftActivityRun): RaftActivityRun => ({
+  id: run.id,
+  name: run.name,
+  ...(run.description ? { description: run.description } : {}),
+  status: run.status,
+  phases: run.phases.map((phase) => ({ ...phase })),
+  calls: run.calls.map(({ args: _args, result: _result, preview: _preview, ...call }) => ({
+    ...call,
+    ...(call.metrics ? { metrics: { ...call.metrics } } : {}),
+  })),
+  items: run.items.map(({ data: _data, ...item }) => item),
+  events: run.events.map(({ data: _data, ...event }) => event),
+  ...(run.currentPhaseId ? { currentPhaseId: run.currentPhaseId } : {}),
+  startedAt: run.startedAt,
+  updatedAt: run.updatedAt,
+  ...(run.finishedAt !== undefined ? { finishedAt: run.finishedAt } : {}),
+  ...(run.error ? { error: run.error } : {}),
+});

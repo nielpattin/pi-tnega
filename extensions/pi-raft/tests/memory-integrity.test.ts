@@ -1,0 +1,446 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import type { RaftMemoryConfig } from "../src/config.js";
+import { encodeCwdDir } from "../src/memory/discovery.js";
+import { loadShard } from "../src/memory/index.js";
+import { normalizeSession } from "../src/memory/normalize.js";
+import { searchShards } from "../src/memory/search.js";
+import { MemoryProvider } from "../src/providers/memory-provider.js";
+import type { RaftInvocationContext } from "../src/protocol.js";
+import {
+  assistantText,
+  messageEntry,
+  sessionHeader,
+  userMessage,
+  toolResult,
+  writeSessionFile,
+  type FixtureEntry,
+} from "./fixtures/memory.js";
+import { recordedIntegrationTrace } from "./fixtures/raft-execution-trace.js";
+
+const temporary: string[] = [];
+const temp = (name: string): string => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), `pi-raft-memory-integrity-${name}-`));
+  temporary.push(directory);
+  return directory;
+};
+
+afterEach(() => {
+  for (const directory of temporary.splice(0))
+    fs.rmSync(directory, { recursive: true, force: true });
+});
+
+const timestamp = (offset: number): string =>
+  new Date(1_700_000_000_000 + offset * 1_000).toISOString();
+
+const invocation = (cwd: string): RaftInvocationContext => ({
+  cwd,
+  signal: undefined,
+  parentToolCallId: "memory-integrity",
+  nestedToolCallId: "memory-integrity-nested",
+  extensionContext: {} as RaftInvocationContext["extensionContext"],
+  update() {},
+});
+
+const config = (indexDir: string, overrides: Partial<RaftMemoryConfig> = {}): RaftMemoryConfig => ({
+  enabled: true,
+  indexDir,
+  maxSessions: 500,
+  maxEntryChars: 2_000,
+  indexThinking: false,
+  indexToolOutput: true,
+  hotSessions: 50,
+  ...overrides,
+});
+
+const message = (id: string, text: string, offset = 0): FixtureEntry =>
+  messageEntry(id, null, timestamp(offset), userMessage(text));
+
+const branchDetails = (facts: Array<Record<string, unknown>>, version: 1 | 2 = 1) => ({
+  kind: "pi-raft.branch-summary",
+  version,
+  source: { firstEntryId: "source-first", lastEntryId: "source-last", entryCount: 2 },
+  facts,
+  omittedFacts: 0,
+  sections: ["[Raft Activity]"],
+  request: { text: "", sourceBytes: 0, truncated: false },
+});
+
+describe("memory final integrity guarantees", () => {
+  it("truncates only at Unicode scalar boundaries and marks hot-tail lexical coverage incomplete", async () => {
+    const agentDir = temp("unicode-agent");
+    const indexDir = temp("unicode-index");
+    const cwd = "/work/unicode";
+    const unicodeFile = writeSessionFile(
+      path.join(agentDir, "sessions", encodeCwdDir(cwd)),
+      "unicode.jsonl",
+      [sessionHeader("unicode", cwd), message("unicode-entry", "a😀b")],
+    );
+    const normalized = normalizeSession(unicodeFile, 2);
+    expect(normalized.entries[0]!.text).toBe("a😀");
+    expect(Buffer.from(normalized.entries[0]!.text, "utf8").toString("utf8")).toBe("a😀");
+    expect(normalized.indexCoverage).toEqual({ complete: false, reasons: ["max_entry_chars"] });
+
+    const tailFile = writeSessionFile(
+      path.join(agentDir, "sessions", encodeCwdDir(cwd)),
+      "tail.jsonl",
+      [sessionHeader("tail", cwd), message("tail-entry", "prefix payload rare_tail_token")],
+    );
+    fs.utimesSync(tailFile, Date.now() / 1_000 + 1, Date.now() / 1_000 + 1);
+    const provider = new MemoryProvider({
+      agentDir,
+      cwd,
+      config: config(indexDir, { maxEntryChars: 8, hotSessions: 50 }),
+    });
+    const result = (await provider.invoke(
+      "recall",
+      { scope: `session:${tailFile}`, query: "rare_tail_token" },
+      invocation(cwd),
+    )) as { coverage: { complete: boolean; reasons: string[] }; total: number };
+    expect(result.total).toBe(0);
+    expect(result.coverage.complete).toBe(false);
+    expect(result.coverage.reasons).toContain("max_entry_chars");
+    expect(result).not.toHaveProperty("text");
+  });
+
+  it("marks duplicate identities and refuses missing or ambiguous expansion addresses", async () => {
+    const agentDir = temp("duplicate-agent");
+    const indexDir = temp("duplicate-index");
+    const cwd = "/work/duplicates";
+    const file = writeSessionFile(
+      path.join(agentDir, "sessions", encodeCwdDir(cwd)),
+      "duplicates.jsonl",
+      [
+        sessionHeader("duplicates", cwd),
+        message("same-entry", "first"),
+        message("same-entry", "second", 1),
+      ],
+    );
+    const ref = { id: "duplicates", file, cwd, mtime: fs.statSync(file).mtimeMs };
+    expect(
+      loadShard(ref, { indexDir, maxEntryChars: 2_000, branches: "all" }).indexCoverage,
+    ).toEqual({ complete: false, reasons: ["duplicate_entry_id"] });
+
+    const provider = new MemoryProvider({ agentDir, cwd, config: config(indexDir) });
+    const ambiguous = (await provider.invoke(
+      "expand",
+      { session: file, branches: "all", entryIds: ["same-entry"] },
+      invocation(cwd),
+    )) as { error: { code: string; matches: number }; entries: unknown[] };
+    expect(ambiguous.error).toEqual(
+      expect.objectContaining({ code: "ambiguous_address", matches: 2 }),
+    );
+    expect(ambiguous.entries).toEqual([]);
+
+    const missing = (await provider.invoke(
+      "expand",
+      { session: file, branches: "all", entryIds: ["absent-entry"] },
+      invocation(cwd),
+    )) as { error: { code: string; matches: number }; entries: unknown[] };
+    expect(missing.error).toEqual(
+      expect.objectContaining({ code: "address_not_found", matches: 0 }),
+    );
+    expect(missing.entries).toEqual([]);
+  });
+
+  it("detects duplicate direct operation addresses and refuses ambiguous operation expansion", async () => {
+    const agentDir = temp("duplicate-operation-agent");
+    const indexDir = temp("duplicate-operation-index");
+    const cwd = "/work/duplicate-operation";
+    const duplicateResult = (offset: number): FixtureEntry =>
+      messageEntry("same-carrier", null, timestamp(offset), {
+        ...toolResult("raft-call", "raft_exec", "ignored"),
+        details: { trace: recordedIntegrationTrace() },
+      });
+    const file = writeSessionFile(
+      path.join(agentDir, "sessions", encodeCwdDir(cwd)),
+      "operations.jsonl",
+      [sessionHeader("operations", cwd), duplicateResult(0), duplicateResult(1)],
+    );
+    const normalized = normalizeSession(file, 200_000);
+    expect(normalized.indexCoverage.reasons).toEqual([
+      "duplicate_entry_id",
+      "duplicate_operation_address",
+    ]);
+
+    const provider = new MemoryProvider({
+      agentDir,
+      cwd,
+      config: config(indexDir, { maxEntryChars: 200_000 }),
+    });
+    const expanded = (await provider.invoke(
+      "expand",
+      { session: file, branches: "all", operationAddresses: ["same-carrier/0"] },
+      invocation(cwd),
+    )) as { error: { code: string; matches: number }; entries: unknown[] };
+    expect(expanded.error).toEqual(
+      expect.objectContaining({ code: "ambiguous_address", matches: 2 }),
+    );
+    expect(expanded.entries).toEqual([]);
+  });
+
+  it("normalizes typed branch facts, preserves carrier identity and paths, and deduplicates nested carriers", async () => {
+    const agentDir = temp("branch-agent");
+    const indexDir = temp("branch-index");
+    const cwd = "/work/branch";
+    const operation = {
+      kind: "operation",
+      entryId: "abandoned-result",
+      subordinal: "call:write-1",
+      address: "abandoned-result/call:write-1",
+      ref: "pi.write",
+      provider: "pi",
+      action: "write",
+      tool: "write",
+      args: { path: "src/abandoned.ts", content: "typed" },
+      outcome: "succeeded",
+      result: { bytes: 5 },
+    };
+    const run = {
+      kind: "raftRun",
+      entryId: "abandoned-call",
+      subordinal: "call:raft-1",
+      address: "abandoned-call/call:raft-1",
+      name: "Verify abandoned implementation",
+      description: "Run tests before returning to the active branch",
+      outcome: "succeeded",
+    };
+    const customMessage = {
+      kind: "customMessage",
+      entryId: "abandoned-custom",
+      subordinal: "custom-message",
+      address: "abandoned-custom/custom-message",
+      customType: "pi-raft-agent-complete",
+      text: "Agent completed CUSTOM_MEMORY_BRANCH_51",
+      display: false,
+      details: { status: "completed" },
+    };
+    const direct = {
+      type: "branch_summary",
+      id: "carrier-original",
+      parentId: null,
+      timestamp: timestamp(1),
+      fromId: "abandoned-result",
+      summary: "prose must not be parsed",
+      details: branchDetails([operation, run, customMessage], 2),
+    } as FixtureEntry;
+    const nested = {
+      ...direct,
+      id: "carrier-fork",
+      parentId: "carrier-original",
+      timestamp: timestamp(2),
+      fromId: "nested-source",
+      summary: "nested prose must not be parsed",
+    } as FixtureEntry;
+    const file = writeSessionFile(
+      path.join(agentDir, "sessions", encodeCwdDir(cwd)),
+      "branch.jsonl",
+      [sessionHeader("branch", cwd), direct, nested],
+    );
+    const normalized = normalizeSession(file, 20_000);
+    const facts = normalized.entries.filter((entry) => entry.type === "raft_branch_fact");
+    expect(facts).toHaveLength(3);
+    expect(facts[0]).toMatchObject({
+      entryId: operation.address,
+      operationAddress: operation.address,
+      factAddress: operation.address,
+      carrierEntryId: "carrier-original",
+      carrierFromId: "abandoned-result",
+      ref: "pi.write",
+      provider: "pi",
+      toolName: "write",
+      outcome: "succeeded",
+      filesTouched: ["src/abandoned.ts"],
+    });
+    expect(facts[1]).toMatchObject({
+      entryId: run.address,
+      operationAddress: run.address,
+      factAddress: run.address,
+      carrierEntryId: "carrier-original",
+      role: "raftRun",
+      toolName: "raft_exec",
+      outcome: "succeeded",
+      text: "Raft run Verify abandoned implementation — Run tests before returning to the active branch → succeeded",
+      branchFact: expect.objectContaining({
+        kind: "raftRun",
+        name: "Verify abandoned implementation",
+        description: "Run tests before returning to the active branch",
+      }),
+    });
+    expect(facts[2]).toMatchObject({
+      entryId: customMessage.address,
+      factAddress: customMessage.address,
+      carrierEntryId: "carrier-original",
+      role: "branchCustomMessage",
+      text: "[pi-raft-agent-complete] Agent completed CUSTOM_MEMORY_BRANCH_51",
+      branchFact: expect.objectContaining({
+        kind: "customMessage",
+        customType: "pi-raft-agent-complete",
+        display: false,
+      }),
+    });
+
+    const provider = new MemoryProvider({ agentDir, cwd, config: config(indexDir) });
+    const expanded = (await provider.invoke(
+      "expand",
+      { session: file, operationAddresses: [operation.address, run.address] },
+      invocation(cwd),
+    )) as { entries: Array<Record<string, unknown>> };
+    expect(expanded.entries).toHaveLength(2);
+    expect(expanded.entries[0]).toEqual(
+      expect.objectContaining({
+        operationAddress: operation.address,
+        carrierEntryId: "carrier-original",
+        filesTouched: ["src/abandoned.ts"],
+        branchFact: expect.objectContaining({ address: operation.address, tool: "write" }),
+      }),
+    );
+    expect(expanded.entries[1]).toEqual(
+      expect.objectContaining({
+        operationAddress: run.address,
+        carrierEntryId: "carrier-original",
+        outcome: "succeeded",
+        branchFact: expect.objectContaining({
+          address: run.address,
+          name: "Verify abandoned implementation",
+        }),
+      }),
+    );
+  });
+
+  it("requires unique addresses inside branch details and reports duplicate operations", () => {
+    const agentDir = temp("branch-duplicate-agent");
+    const cwd = "/work/branch-duplicate";
+    const operation = {
+      kind: "operation",
+      entryId: "source",
+      subordinal: "0",
+      address: "source/0",
+      ref: "pi.read",
+      provider: "pi",
+      action: "read",
+      tool: "read",
+      args: { path: "src/file.ts" },
+      outcome: "succeeded",
+    };
+    const file = writeSessionFile(
+      path.join(agentDir, "sessions", encodeCwdDir(cwd)),
+      "duplicate-facts.jsonl",
+      [
+        sessionHeader("duplicate-facts", cwd),
+        {
+          type: "branch_summary",
+          id: "carrier",
+          parentId: null,
+          timestamp: timestamp(1),
+          fromId: "source",
+          summary: "ignored",
+          details: branchDetails([operation, operation]),
+        } as FixtureEntry,
+      ],
+    );
+    const normalized = normalizeSession(file, 20_000);
+    expect(normalized.entries.filter((entry) => entry.type === "raft_branch_fact")).toEqual([]);
+    expect(normalized.indexCoverage.reasons).toEqual([
+      "duplicate_branch_fact_address",
+      "duplicate_operation_address",
+    ]);
+  });
+
+  it("paginates the globally ranked exact-hit stream and browses beyond the first page", async () => {
+    const agentDir = temp("pagination-agent");
+    const indexDir = temp("pagination-index");
+    const cwd = "/work/pagination";
+    const directory = path.join(agentDir, "sessions", encodeCwdDir(cwd));
+    const cold = writeSessionFile(directory, "cold.jsonl", [
+      sessionHeader("cold", cwd),
+      message("cold-entry", "shared pagination token"),
+    ]);
+    const hot = writeSessionFile(directory, "hot.jsonl", [
+      sessionHeader("hot", cwd),
+      messageEntry("hot-user", null, timestamp(0), userMessage("shared pagination token")),
+      messageEntry(
+        "hot-assistant",
+        "hot-user",
+        timestamp(1),
+        assistantText("shared pagination token"),
+      ),
+    ]);
+    const base = Math.floor(Date.now() / 1_000) - 100;
+    fs.utimesSync(cold, base, base);
+    fs.utimesSync(hot, base + 1, base + 1);
+    const provider = new MemoryProvider({
+      agentDir,
+      cwd,
+      config: config(indexDir, { hotSessions: 1 }),
+    });
+
+    const first = (await provider.invoke(
+      "recall",
+      { scope: "project", query: "shared pagination token", pageSize: 1 },
+      invocation(cwd),
+    )) as { hits: Array<{ kind: string }>; total: number; next: { args: Record<string, unknown> } };
+    const second = (await provider.invoke("recall", first.next.args, invocation(cwd))) as {
+      hits: Array<{ kind: string }>;
+      total: number;
+      next: { args: Record<string, unknown> };
+    };
+    const third = (await provider.invoke("recall", second.next.args, invocation(cwd))) as {
+      hits: Array<{ kind: string }>;
+      total: number;
+      next: null;
+    };
+    expect(first.total).toBe(3);
+    expect(second).toEqual(expect.objectContaining({ total: 3, next: expect.any(Object) }));
+    expect(third).toEqual(expect.objectContaining({ total: 3, next: null }));
+    expect([first.hits[0]!.kind, second.hits[0]!.kind, third.hits[0]!.kind].sort()).toEqual([
+      "entry",
+      "entry",
+      "session",
+    ]);
+    expect(first.next).not.toBeNull();
+
+    const browseFile = writeSessionFile(directory, "browse.jsonl", [
+      sessionHeader("browse", cwd),
+      ...Array.from({ length: 5 }, (_, index) =>
+        message(`browse-${index}`, `browse ${index}`, index),
+      ),
+    ]);
+    fs.utimesSync(browseFile, base + 2, base + 2);
+    const browse = (await provider.invoke(
+      "recall",
+      { scope: `session:${browseFile}`, branches: "all", offset: 2, pageSize: 2 },
+      invocation(cwd),
+    )) as { hits: unknown[]; total: number; next: unknown };
+    expect(browse).toEqual(expect.objectContaining({ total: 5, next: expect.any(Object) }));
+    expect(browse.hits).toHaveLength(2);
+  });
+
+  it("marks explicit candidate budget exhaustion incomplete", async () => {
+    const agentDir = temp("budget-agent");
+    const indexDir = temp("budget-index");
+    const cwd = "/work/candidate-budget";
+    const file = writeSessionFile(
+      path.join(agentDir, "sessions", encodeCwdDir(cwd)),
+      "budget.jsonl",
+      [
+        sessionHeader("budget", cwd),
+        message("one", "token one"),
+        message("two", "token two", 1),
+        message("three", "token three", 2),
+      ],
+    );
+    const shard = loadShard(
+      { id: "budget", file, cwd, mtime: fs.statSync(file).mtimeMs },
+      { indexDir, maxEntryChars: 2_000, branches: "all" },
+    );
+    const result = await searchShards([shard], {
+      query: "token",
+      candidateLimits: { maxEntries: 2, maxDigests: 2, maxItems: 2 },
+    });
+    expect(result.queryCoverage.complete).toBe(false);
+    expect(result.queryCoverage.reasons).toContain("candidate_entry_budget");
+  });
+});

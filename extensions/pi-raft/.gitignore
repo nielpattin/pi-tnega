@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.dist-staging-*/
+coverage/
+.pi/raft-runs/
+.pi/raft/mesh/
+.pi/raft/worktrees/
+*.log
+.DS_Store

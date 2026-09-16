@@ -1,0 +1,158 @@
+import fs from "node:fs";
+import type { RaftLogLine } from "../agents/types.js";
+import { parsedEvents, parseRaw, TranscriptAccumulator } from "./transcript-parser.js";
+import type { RaftAgentTranscript, RaftTranscriptSource } from "./transcript.js";
+
+const PAGE_LINES = 40;
+const MAX_PAGE_BYTES = 512 * 1024;
+const MAX_CACHE_ENTRIES = 32;
+const FORWARD_READ_CHUNK_BYTES = 64 * 1024;
+
+interface CachedTranscript {
+  device: number;
+  inode: number;
+  modifiedAt: number;
+  offset: number;
+  transcript: RaftAgentTranscript;
+}
+
+interface ForwardTranscriptPage {
+  lines: RaftLogLine[];
+  end: number;
+}
+
+const completeLogEnd = (descriptor: number, size: number, fallback = 0): number => {
+  if (size <= 0) return 0;
+  const scanFloor = Math.max(0, size - MAX_PAGE_BYTES);
+  let scanEnd = size;
+  while (scanEnd > scanFloor) {
+    const scanStart = Math.max(scanFloor, scanEnd - FORWARD_READ_CHUNK_BYTES);
+    const chunk = Buffer.allocUnsafe(scanEnd - scanStart);
+    const bytesRead = fs.readSync(descriptor, chunk, 0, chunk.length, scanStart);
+    if (bytesRead <= 0) return 0;
+    for (let index = bytesRead - 1; index >= 0; index--) {
+      if (chunk[index] === 0x0a) return scanStart + index + 1;
+    }
+    scanEnd = scanStart;
+  }
+  return Math.min(fallback, size);
+};
+
+const readForwardPage = (descriptor: number, start: number, end: number): ForwardTranscriptPage => {
+  const lines: RaftLogLine[] = [];
+  const readLimit = Math.min(end, Math.max(0, start) + MAX_PAGE_BYTES);
+  let readOffset = Math.max(0, start);
+  let pending = Buffer.alloc(0);
+  let pendingOffset = readOffset;
+  let pageEnd = readOffset;
+
+  while (readOffset < readLimit && lines.length < PAGE_LINES) {
+    const chunkSize = Math.min(FORWARD_READ_CHUNK_BYTES, readLimit - readOffset);
+    const chunk = Buffer.allocUnsafe(chunkSize);
+    const bytesRead = fs.readSync(descriptor, chunk, 0, chunkSize, readOffset);
+    if (bytesRead <= 0) break;
+    const data =
+      pending.length > 0
+        ? Buffer.concat([pending, chunk.subarray(0, bytesRead)])
+        : chunk.subarray(0, bytesRead);
+    const dataOffset = pending.length > 0 ? pendingOffset : readOffset;
+    let lineStart = 0;
+    for (let index = 0; index < data.length; index++) {
+      if (data[index] !== 0x0a) continue;
+      const raw = data.subarray(lineStart, index).toString("utf8").replace(/\r$/, "");
+      pageEnd = dataOffset + index + 1;
+      if (raw) {
+        const offset = dataOffset + lineStart;
+        const parsed = parseRaw(raw);
+        lines.push({ offset, raw, ...(parsed ? { parsed } : {}) });
+        if (lines.length >= PAGE_LINES) return { lines, end: pageEnd };
+      }
+      lineStart = index + 1;
+    }
+    pending = Buffer.from(data.subarray(lineStart));
+    pendingOffset = dataOffset + lineStart;
+    readOffset += bytesRead;
+  }
+
+  return { lines, end: readOffset >= end ? end : pageEnd };
+};
+
+export class AgentTranscriptReader {
+  readonly #cache = new Map<string, CachedTranscript>();
+
+  // The transcript window is always the complete log; _followLatest is accepted
+  // for API compatibility (callers still track tail-following for scroll state).
+  read(source: RaftTranscriptSource, _followLatest = true): RaftAgentTranscript {
+    const filePath = source.logFile;
+    if (!filePath) {
+      return { entries: [], truncated: false, hasMore: false, hasNewer: false };
+    }
+    const cached = this.#cache.get(filePath);
+    let descriptor: number | undefined;
+    try {
+      const noFollow = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
+      descriptor = fs.openSync(filePath, fs.constants.O_RDONLY | noFollow);
+      const stat = fs.fstatSync(descriptor);
+      if (!stat.isFile()) {
+        return (
+          cached?.transcript ?? { entries: [], truncated: false, hasMore: false, hasNewer: false }
+        );
+      }
+      const sameFile = cached?.device === stat.dev && cached.inode === stat.ino;
+      const changed =
+        !cached || !sameFile || stat.size !== cached.offset || stat.mtimeMs !== cached.modifiedAt;
+      const state = changed ? this.#fullState(descriptor, stat) : cached;
+      this.#remember(filePath, state);
+      return state.transcript;
+    } catch {
+      return (
+        cached?.transcript ?? { entries: [], truncated: false, hasMore: false, hasNewer: false }
+      );
+    } finally {
+      if (descriptor !== undefined) {
+        try {
+          fs.closeSync(descriptor);
+        } catch {}
+      }
+    }
+  }
+
+  clear(): void {
+    this.#cache.clear();
+  }
+
+  #fullState(descriptor: number, stat: fs.Stats): CachedTranscript {
+    const completeEnd = completeLogEnd(descriptor, stat.size);
+    const lines: RaftLogLine[] = [];
+    let offset = 0;
+    while (offset < completeEnd) {
+      const page = readForwardPage(descriptor, offset, completeEnd);
+      lines.push(...page.lines);
+      if (page.lines.length === 0 || page.end <= offset) break;
+      offset = page.end;
+    }
+    const accumulator = new TranscriptAccumulator();
+    accumulator.append(parsedEvents(lines));
+    const transcript = {
+      ...accumulator.snapshot(false, stat.mtimeMs, Number.MAX_SAFE_INTEGER),
+      hasNewer: false,
+    };
+    return {
+      device: stat.dev,
+      inode: stat.ino,
+      modifiedAt: stat.mtimeMs,
+      offset: stat.size,
+      transcript,
+    };
+  }
+
+  #remember(filePath: string, state: CachedTranscript): void {
+    this.#cache.delete(filePath);
+    this.#cache.set(filePath, state);
+    while (this.#cache.size > MAX_CACHE_ENTRIES) {
+      const oldest = this.#cache.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.#cache.delete(oldest);
+    }
+  }
+}

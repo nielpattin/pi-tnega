@@ -1,0 +1,130 @@
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { RaftConfig } from "./config.js";
+import type { ActionRegistry, ResolvedRaftAction } from "./core/action-registry.js";
+import type { RaftInvocationContext } from "./protocol.js";
+import {
+  isSpeculationEligible,
+  mcpAllowlistMatch,
+  TIER_A_SPECULATION_REFS,
+} from "./speculation/eligibility.js";
+import { createFreshnessChecker } from "./speculation/freshness.js";
+import { RaftSpeculationStore } from "./speculation/store.js";
+import { RaftSpeculationStreamTap } from "./speculation/stream-tap.js";
+import type { RaftSpeculationCandidate, RaftSpeculationReplay } from "./speculation/types.js";
+
+/** Session-local speculative execution; runtime state owns reset ordering. */
+export class RuntimeStateSpeculation {
+  #store: RaftSpeculationStore | undefined;
+  readonly tap: RaftSpeculationStreamTap | undefined;
+
+  // Speculative PTC: the store is the epoch-checked promise cache consumed by
+  // ActionRegistry.invoke; the tap watches raft_exec argument streaming and
+  // launches literal-args Tier-A calls early (docs/speculation.md).
+  constructor(
+    readonly registry: ActionRegistry,
+    readonly readConfig: () => RaftConfig["speculation"] | undefined,
+    readonly readCapabilityView: () => RaftInvocationContext["capabilityView"],
+    readonly allowRef: (ref: string) => boolean = () => true,
+    kernel: "typescript" | "python" = "typescript",
+  ) {
+    const speculation = readConfig();
+    if (!speculation?.enabled) return;
+    const store = new RaftSpeculationStore(speculation);
+    registry.setSpeculation(
+      store,
+      (action: ResolvedRaftAction) =>
+        this.readConfig()?.enabled === true &&
+        this.allowRef(action.ref) &&
+        isSpeculationEligible(
+          {
+            ref: action.ref,
+            provider: action.provider,
+            risk: action.risk,
+            effectKind: action.effect?.kind,
+            ...(action.annotations ? { annotations: action.annotations } : {}),
+          },
+          this.readConfig()?.mcpAllowlist ?? [],
+        ),
+    );
+    this.#store = store;
+    this.tap = new RaftSpeculationStreamTap({
+      enabled: () => this.readConfig()?.enabled === true,
+      maxBufferBytes: () => this.readConfig()?.maxBufferBytes ?? 2 * 1024 * 1024,
+      isEligible: (ref) =>
+        this.allowRef(ref) &&
+        (TIER_A_SPECULATION_REFS.has(ref) ||
+          (ref.startsWith("mcp.") &&
+            mcpAllowlistMatch(ref.slice("mcp.".length), this.readConfig()?.mcpAllowlist ?? []))),
+      launch: (toolCallId, candidate, extensionContext) => {
+        void this.#launchSpeculation(toolCallId, candidate, extensionContext).catch(
+          () => undefined,
+        );
+      },
+    });
+    // Load only the selected language parser in the background
+    // so session startup never pays. Streams that open first are re-scanned in
+    // full once the factory lands (their extractors buffered the prefix).
+    const factory =
+      kernel === "python"
+        ? import("./speculation/python-scanner.js").then(
+            (module) => () => new module.PythonLiteralCallScanner(),
+          )
+        : import("./speculation/scanner.js").then(
+            (module) => () => new module.LiteralCallScanner(),
+          );
+    void factory.then(
+      (create) => this.tap?.setScannerFactory(create),
+      () => undefined,
+    );
+  }
+
+  async #launchSpeculation(
+    toolCallId: string,
+    candidate: RaftSpeculationCandidate,
+    context: ExtensionContext,
+  ): Promise<void> {
+    const registry = this.registry;
+    const store = this.#store;
+    if (!registry || !store || this.readConfig()?.enabled !== true || !this.allowRef(candidate.ref))
+      return;
+    const isCurrent = store.captureLaunch(toolCallId);
+    const replay: RaftSpeculationReplay = {};
+    const capabilityView = this.readCapabilityView();
+    const lightContext: RaftInvocationContext = {
+      cwd: context.cwd,
+      signal: undefined,
+      parentToolCallId: toolCallId,
+      nestedToolCallId: "raft-speculation",
+      extensionContext: context,
+      update() {},
+      ...(capabilityView ? { capabilityView } : {}),
+    };
+    const speculation = await registry.speculate(
+      candidate.ref,
+      candidate.args,
+      lightContext,
+      replay,
+    );
+    if (
+      !speculation ||
+      !isCurrent() ||
+      this.readConfig()?.enabled !== true ||
+      !this.allowRef(candidate.ref)
+    )
+      return;
+    store.launch(
+      toolCallId,
+      candidate.ref,
+      speculation.preparedArgs,
+      speculation.execute.bind(speculation),
+      createFreshnessChecker(candidate.ref, speculation.preparedArgs, context.cwd),
+      replay,
+      speculation.bindingToken,
+    );
+  }
+
+  reset(): void {
+    this.tap?.reset();
+    this.#store?.reset();
+  }
+}
