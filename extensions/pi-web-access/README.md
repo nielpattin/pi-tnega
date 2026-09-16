@@ -70,6 +70,18 @@ Parameters:
 - `format` (string, optional): Output format (`markdown`, `text`, `html`, default: `markdown`).
 - `include_links` (boolean, optional): Appends external page links to the result.
 
+### `outline_site`
+
+Maps the pages, sitemap entries, and documentation links of a domain in one pass, with optional keyword filtering.
+
+Parameters:
+
+- `url` (string, required): Root or documentation URL to map (e.g. `https://docs.firecrawl.dev`).
+- `search` (string, optional): Keyword or path filter that ranks and restricts discovered URLs.
+- `limit` (number, optional): Maximum URLs to discover and return (1 to 5000, default: 100).
+- `sitemap` (string, optional): Sitemap discovery mode (`include` for sitemap plus crawl, `only` for strict sitemap entries, `skip`). Defaults to `include`.
+- `include_subdomains` (boolean, optional): Discover URLs on subdomains. Defaults to `true`.
+
 ## Commands
 
 - `/websearch <query>`: Executes a web search directly from the interactive session.
