@@ -1,6 +1,6 @@
 ## 1. Tool Invariants
 
-- Always use `rg` and `fd` for searching: use `rg` (ripgrep) for content search and `fd` for file/directory discovery. Do not use `grep`, `find`, or `ls` for these tasks. Never use `git grep` or `git ls-files` for file or content discovery. Never invoke `sed` or `awk` for repository inspection, file reading, content searching, or editing, including `sed -n`, `sed -i`, and `awk` one-liners. Use `pi.read` to read files and the edit tools to modify them.
+- Always use `rg` and `fd` for searching: use `rg` (ripgrep) for content search and `fd` for file/directory discovery. Never invoke `sed` or `awk` for repo inspection, file reading, content searching, or editing, including `sed -n`, `sed -i`, and `awk` one-liners.
 
 ## 2. Communication & Persona
 
