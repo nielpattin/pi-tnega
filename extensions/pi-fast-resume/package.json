@@ -1,0 +1,44 @@
+{
+  "name": "pi-fast-resume",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fast session picker for pi — reads headers + first messages from 16KB partial reads instead of full-file parsing",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "extension",
+    "resume",
+    "session",
+    "fast",
+    "picker",
+    "performance"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "bench": "vitest bench",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint:dead": "knip --no-gitignore"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.3",
+    "@earendil-works/pi-tui": "^0.84.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@vitest/coverage-v8": "^4.1.10",
+    "knip": "^6.29.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

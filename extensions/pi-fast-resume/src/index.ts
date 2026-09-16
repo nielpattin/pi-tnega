@@ -1,0 +1,46 @@
+export {
+  parseSessionFromBuffer,
+  scanTailForSessionInfo,
+  loadSessionHeader,
+  loadSessionHeaderForward,
+  loadSessionHeaders,
+  loadSessionHeadersForward,
+  countSessionMessages,
+  resolveSessionName,
+  resolveSessionNamesDeferred,
+  scanAllSessionDirs,
+  scanSessionDir,
+  sortByModified,
+  sortByModifiedDesc,
+  filterByCwd,
+  matchQuery,
+  canonicalizePath,
+  clearCanonicalPathCache,
+} from "./scanner.js";
+export type {
+  SessionHeader,
+  SessionFileMeta,
+  TailSessionInfo,
+  MessageCountPass,
+} from "./scanner.js";
+export {
+  parseSearchQuery,
+  matchSession,
+  invalidateSessionSearchText,
+  hasSessionName,
+  filterAndSortSessions,
+  buildSessionTree,
+  flattenSessionTree,
+  buildTreePrefix,
+} from "./search.js";
+export type {
+  SearchToken,
+  SearchTokenKind,
+  ParsedSearch,
+  MatchResult,
+  SortMode,
+  NameFilter,
+  PickerScope,
+  SessionTreeNode,
+  FlatSessionNode,
+} from "./search.js";
