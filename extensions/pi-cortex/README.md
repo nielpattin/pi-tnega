@@ -129,7 +129,7 @@ cd extensions/pi-cortex/rust-embedder
 cargo build --release
 ```
 
-The binary is expected at `rust-embedder/target/release/pi-embedder.exe` (Windows).
+The binary is expected at `rust-embedder/target/release/pi-embedder` (`pi-embedder.exe` on Windows); the extension resolves the platform-specific name.
 
 ---
 

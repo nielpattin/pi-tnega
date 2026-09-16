@@ -1,8 +1,8 @@
 {
    "repos": [
       {
-         "name": "pi-code-embedding",
-         "path": "extensions/pi-code-embedding",
+         "name": "pi-cortex",
+         "path": "extensions/pi-cortex",
          "desc": "Own extension source (small, quick iteration)"
       },
       {

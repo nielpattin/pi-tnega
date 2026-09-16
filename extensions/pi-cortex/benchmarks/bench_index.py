@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 """
-Persistent benchmark suite for pi-code-embedding.
+Persistent benchmark suite for pi-cortex.
 
 Measures indexing throughput (files, chunks, elapsed, ch/s) across
 multiple repositories, saves results to results/ for trend tracking.
 
 Usage:
     # Benchmark all enabled repos
-    python extensions/pi-code-embedding/benchmarks/bench_index.py
+    python extensions/pi-cortex/benchmarks/bench_index.py
 
     # Benchmark specific repos by name
-    python extensions/pi-code-embedding/benchmarks/bench_index.py --repo pi-code-embedding --repo nest
+    python extensions/pi-cortex/benchmarks/bench_index.py --repo pi-cortex --repo nest
 
     # Benchmark a local path directly
-    python extensions/pi-code-embedding/benchmarks/bench_index.py --path /some/repo
+    python extensions/pi-cortex/benchmarks/bench_index.py --path /some/repo
 
     # Compare two saved results
-    python extensions/pi-code-embedding/benchmarks/bench_index.py --compare results/2026-07-30T12-00-00.json results/2026-07-31T12-00-00.json
+    python extensions/pi-cortex/benchmarks/bench_index.py --compare results/2026-07-30T12-00-00.json results/2026-07-31T12-00-00.json
 
     # List saved results
-    python extensions/pi-code-embedding/benchmarks/bench_index.py --list
+    python extensions/pi-cortex/benchmarks/bench_index.py --list
 """
 
 from __future__ import annotations
@@ -46,10 +46,10 @@ RESULTS_DIR = SCRIPT_DIR / "results"
 FIXTURES_DIR = SCRIPT_DIR / "fixtures"
 
 # Relative to repo root
-EXTENSION_DIR = Path("extensions/pi-code-embedding")
+EXTENSION_DIR = Path("extensions/pi-cortex")
 
 # Auto-detect repo root (two levels up from script dir since we're at
-# extensions/pi-code-embedding/benchmarks/)
+# extensions/pi-cortex/benchmarks/)
 REPO_ROOT = SCRIPT_DIR.parents[2]
 
 # Sidecar binary path (release build)
@@ -59,7 +59,7 @@ SIDECAR_BIN = (
     / "rust-embedder"
     / "target"
     / "release"
-    / "pi-embedder.exe"
+    / ("pi-embedder.exe" if sys.platform == "win32" else "pi-embedder")
 )
 
 
@@ -481,7 +481,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="pi-code-embedding indexing benchmark",
+        description="pi-cortex indexing benchmark",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
